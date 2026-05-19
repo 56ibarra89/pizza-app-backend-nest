@@ -1,0 +1,382 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ProductSize {
+  FAMILIAR
+  MEDIANA
+  PERSONAL
+  UNICO
+}
+
+enum UserRole {
+  ADMIN
+  CAJERO
+  MESERO
+  COCINERO
+}
+
+enum MesaEstado {
+  DISPONIBLE
+  RESERVADO
+  OCUPADO
+}
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum OrderStatus {
+  PENDING
+  PREPARING
+  READY
+  DELIVERED
+  PAID
+  CANCELLED
+}
+
+enum KitchenStatus {
+  PENDING
+  PREPARING
+  READY
+  DELIVERED
+}
+
+enum PaymentMethod {
+  EFECTIVO
+  TARJETA
+  APP
+  MIXTO
+}
+
+enum OrderType {
+  LOCAL
+  LLEVAR
+  DELIVERY
+}
+
+enum CorrelativoStatus {
+  ACTIVO
+  AGOTADO
+  VENCIDO
+}
+
+enum DocumentType {
+  FACTURA
+}
+
+enum LogLevel {
+  INFO
+  WARN
+  ERROR
+}
+
+model User {
+  id           String    @id @default(uuid())
+  username     String    @unique
+  email        String?   @unique
+  firstName    String
+  lastName     String
+  pin          String    @unique
+  passwordHash String?
+  role         UserRole
+  isActive     Boolean   @default(true)
+  lastVisit    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  cashierOrders Order[]     @relation("OrderCashier")
+  cashierShifts Shift[]     @relation("ShiftCashier")
+  systemLogs    SystemLog[] @relation("SystemLogUser")
+
+  createdProducts  Product[]   @relation("ProductCreatedBy")
+  updatedProducts  Product[]   @relation("ProductUpdatedBy")
+  createdCategories Category[] @relation("CategoryCreatedBy")
+  updatedCategories Category[] @relation("CategoryUpdatedBy")
+  createdAppConfigs AppConfig[] @relation("AppConfigCreatedBy")
+  updatedAppConfigs AppConfig[] @relation("AppConfigUpdatedBy")
+
+  @@index([role])
+  @@index([isActive])
+}
+
+model Customer {
+  id        String            @id @default(uuid())
+  nameLower String            @unique
+  name      String
+  phone     String?
+  addresses CustomerAddress[]
+  orders    Order[]
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@index([name])
+}
+
+model CustomerAddress {
+  id         String   @id @default(uuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  address    String
+  lastUsed   DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([customerId, address])
+  @@index([customerId])
+  @@index([lastUsed])
+}
+
+model Mesa {
+  id              String     @id @default(uuid())
+  floor           Int
+  number          Int        @unique @default(autoincrement())
+  estado          MesaEstado
+  reservationName String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  orders          Order[]
+  linkedOrders    OrderTable[]
+
+  @@index([floor])
+  @@index([estado])
+}
+
+model Shift {
+  id            String      @id @default(uuid())
+  cashierId     String?
+  cashier       User?       @relation("ShiftCashier", fields: [cashierId], references: [id], onDelete: SetNull)
+  cashierName   String
+  orders        Order[]
+  startTime     DateTime
+  endTime       DateTime?
+  openingAmount Decimal     @db.Decimal(10, 2)
+  closingAmount Decimal?    @db.Decimal(10, 2)
+  cashSales     Decimal     @default(0) @db.Decimal(12, 2)
+  cardSales     Decimal     @default(0) @db.Decimal(12, 2)
+  appSales      Decimal     @default(0) @db.Decimal(12, 2)
+  totalSales    Decimal     @default(0) @db.Decimal(12, 2)
+  status        ShiftStatus
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([cashierName])
+  @@index([cashierId])
+  @@index([startTime])
+  @@index([status])
+}
+
+model Order {
+  id        String      @id @default(uuid())
+  items     OrderItem[]
+  subTotal  Decimal?    @db.Decimal(12, 2)
+  taxAmount Decimal?    @db.Decimal(12, 2)
+  total     Decimal     @db.Decimal(12, 2)
+  status    OrderStatus
+  timestamp DateTime    @default(now())
+
+  shiftId String?
+  shift   Shift?      @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName    String?
+  customerAddress String?
+  orderType       OrderType?
+  tableId         String?
+  mesa            Mesa?          @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  paymentMethod   PaymentMethod?
+  splitEfectivo   Decimal?       @db.Decimal(12, 2)
+  splitTarjeta    Decimal?       @db.Decimal(12, 2)
+  cashierId       String?
+  cashier         User?          @relation("OrderCashier", fields: [cashierId], references: [id], onDelete: SetNull)
+  cashierName     String?
+  isSentToKitchen Boolean        @default(false)
+  linkedTables    OrderTable[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([timestamp])
+  @@index([shiftId])
+  @@index([customerName])
+  @@index([customerId])
+  @@index([status])
+  @@index([cashierId])
+}
+
+model OrderTable {
+  orderId String
+  tableId String
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  mesa  Mesa  @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([orderId, tableId])
+  @@index([tableId])
+}
+
+model OrderItem {
+  id             Int           @id @default(autoincrement())
+  orderId        String
+  order          Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId      String?
+  product        Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  name           String
+  price          Decimal       @db.Decimal(12, 2)
+  size           ProductSize
+  quantity       Int
+  note           String?
+  giftQuantity   Int?
+  isSentToKitchen Boolean      @default(false)
+  sentAt         DateTime?
+  kitchenStatus  KitchenStatus?
+  extras         OrderItemExtra[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([isSentToKitchen])
+  @@index([kitchenStatus])
+  @@index([sentAt])
+}
+
+model OrderItemExtra {
+  id          Int       @id @default(autoincrement())
+  orderItemId Int
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  name        String
+  price       Decimal   @db.Decimal(12, 2)
+
+  @@index([orderItemId])
+}
+
+model Correlativo {
+  id               String            @id @default(uuid())
+  documentType     DocumentType
+  resolutionNumber String
+  prefix           String
+  startNumber      Int
+  endNumber        Int
+  currentNumber    Int
+  issueDate        DateTime
+  expirationDate   DateTime
+  status           CorrelativoStatus
+  createdAt        DateTime          @default(now())
+
+  @@index([documentType])
+  @@index([status])
+}
+
+model SystemLog {
+  id        Int      @id @default(autoincrement())
+  timestamp DateTime @default(now())
+  userId    String?
+  userRef   User?    @relation("SystemLogUser", fields: [userId], references: [id], onDelete: SetNull)
+  user      String
+  role      String?
+  action    String
+  details   String?
+  level     LogLevel @default(INFO)
+
+  @@index([timestamp])
+  @@index([userId])
+  @@index([user])
+  @@index([level])
+}
+
+model AppConfig {
+  id        String   @id
+  data      Json
+  createdById String?
+  createdBy   User?  @relation("AppConfigCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String?
+  updatedBy   User?  @relation("AppConfigUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt DateTime @updatedAt
+
+  @@index([createdById])
+  @@index([updatedById])
+}
+
+model Category {
+  id        String    @id @default(uuid())
+  label     String    @unique
+  icon      String?
+  products  Product[]
+  deletedAt DateTime?
+  createdById String?
+  createdBy   User?   @relation("CategoryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String?
+  updatedBy   User?   @relation("CategoryUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([deletedAt])
+  @@index([createdById])
+  @@index([updatedById])
+}
+
+model Product {
+  id               String            @id @default(uuid())
+  categoryId       String
+  category         Category          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name             String
+  description      String?
+  hasMultipleSizes Boolean           @default(false)
+  prices           ProductPrice[]
+  extras           ExtraIngredient[]
+  orderItems       OrderItem[]
+  deletedAt        DateTime?
+  createdById      String?
+  createdBy        User?             @relation("ProductCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById      String?
+  updatedBy        User?             @relation("ProductUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@unique([categoryId, name])
+  @@index([deletedAt])
+  @@index([createdById])
+  @@index([updatedById])
+}
+
+model ProductPrice {
+  id        String      @id @default(uuid())
+  productId String
+  product   Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  size      ProductSize
+  price     Decimal     @db.Decimal(10, 2)
+
+  @@unique([productId, size])
+}
+
+model ExtraIngredient {
+  id        String       @id @default(uuid())
+  productId String
+  product   Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name      String
+  prices    ExtraPrice[]
+
+  @@unique([productId, name])
+}
+
+model ExtraPrice {
+  id      String          @id @default(uuid())
+  extraId String
+  extra   ExtraIngredient @relation(fields: [extraId], references: [id], onDelete: Cascade)
+  size    ProductSize
+  price   Decimal         @db.Decimal(10, 2)
+
+  @@unique([extraId, size])
+}
