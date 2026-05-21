@@ -71,6 +71,33 @@ enum DocumentType {
   FACTURA
 }
 
+enum PromoActiveStatus {
+  ACTIVO
+  INACTIVO
+}
+
+enum HappyHourPromotionType {
+  DOSXUNO
+  PORCENTAJE
+  MONTO_FIJO
+}
+
+enum CuponDiscountType {
+  PORCENTAJE
+  MONTO_FIJO
+}
+
+enum CuponManualStatus {
+  ACTIVO
+  INACTIVO
+}
+
+enum CertificadoStatus {
+  DISPONIBLE
+  ENTREGADO
+  ANULADO
+}
+
 enum LogLevel {
   INFO
   WARN
@@ -307,6 +334,64 @@ model AppConfig {
 
   @@index([createdById])
   @@index([updatedById])
+}
+
+model HappyHourPromotion {
+  id             Int                  @id @default(autoincrement())
+  name           String
+  daysOfWeek     String[]
+  startTime      String
+  endTime        String
+  promotionType  HappyHourPromotionType
+  promotionValue String               @default("")
+  status         PromoActiveStatus    @default(ACTIVO)
+  appliesTo      String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([status])
+}
+
+model DiscountPromotion {
+  id            Int               @id @default(autoincrement())
+  name          String
+  discountType  CuponDiscountType
+  discountValue String
+  status        PromoActiveStatus @default(ACTIVO)
+  appliesTo     String
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([status])
+}
+
+model Cupon {
+  id            Int               @id @default(autoincrement())
+  code          String            @unique
+  discountType  CuponDiscountType
+  discountValue String
+  maxUses       Int               @default(0)
+  currentUses   Int               @default(0)
+  expiresDate   String            @default("")
+  manualStatus  CuponManualStatus @default(ACTIVO)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([manualStatus])
+}
+
+model Certificado {
+  id        Int               @id @default(autoincrement())
+  serial    String            @unique
+  origin    String
+  product   String
+  issueDate String
+  notes     String?
+  status    CertificadoStatus @default(DISPONIBLE)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@index([status])
 }
 
 model Category {
