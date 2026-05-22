@@ -290,6 +290,13 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     total: Prisma.Decimal;
     status: import('@prisma/client').OrderStatus;
     timestamp: Date;
+    invoiceCorrelativoId: string | null;
+    invoiceDocumentType: import('@prisma/client').DocumentType | null;
+    invoiceResolutionNumber: string | null;
+    invoicePrefix: string | null;
+    invoiceIssuedNumber: number | null;
+    invoiceNumber: string | null;
+    invoiceIssuedAt: Date | null;
     customerName: string | null;
     customerAddress: string | null;
     orderType: import('@prisma/client').OrderType | null;
@@ -347,6 +354,24 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       cashierName: o.cashierName ?? undefined,
       isSentToKitchen: o.isSentToKitchen,
       linkedTables: o.linkedTables.map((t) => t.tableId),
+      invoice:
+        o.invoiceCorrelativoId &&
+        o.invoiceDocumentType &&
+        o.invoiceResolutionNumber &&
+        o.invoicePrefix !== null &&
+        o.invoiceIssuedNumber !== null &&
+        o.invoiceNumber &&
+        o.invoiceIssuedAt
+          ? {
+              correlativoId: o.invoiceCorrelativoId,
+              documentType: o.invoiceDocumentType,
+              resolutionNumber: o.invoiceResolutionNumber,
+              prefix: o.invoicePrefix,
+              issuedNumber: o.invoiceIssuedNumber,
+              invoiceNumber: o.invoiceNumber,
+              issuedAt: o.invoiceIssuedAt,
+            }
+          : undefined,
     };
   }
 }

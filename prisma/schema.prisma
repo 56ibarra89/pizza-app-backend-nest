@@ -180,6 +180,7 @@ model Shift {
   cashierId     String?
   cashier       User?       @relation("ShiftCashier", fields: [cashierId], references: [id], onDelete: SetNull)
   cashierName   String
+  cashRegisterName String?
   orders        Order[]
   startTime     DateTime
   endTime       DateTime?
@@ -195,6 +196,7 @@ model Shift {
   updatedAt     DateTime    @updatedAt
 
   @@index([cashierName])
+  @@index([cashRegisterName])
   @@index([cashierId])
   @@index([startTime])
   @@index([status])
@@ -228,6 +230,15 @@ model Order {
   isSentToKitchen Boolean        @default(false)
   linkedTables    OrderTable[]
 
+  invoiceCorrelativoId String?
+  invoiceCorrelativo   Correlativo? @relation("OrderInvoiceCorrelativo", fields: [invoiceCorrelativoId], references: [id], onDelete: SetNull)
+  invoiceDocumentType  DocumentType?
+  invoiceResolutionNumber String?
+  invoicePrefix        String?
+  invoiceIssuedNumber  Int?
+  invoiceNumber        String?   @unique
+  invoiceIssuedAt      DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -237,6 +248,9 @@ model Order {
   @@index([customerId])
   @@index([status])
   @@index([cashierId])
+  @@index([invoiceCorrelativoId])
+  @@index([invoiceIssuedAt])
+  @@index([invoiceIssuedNumber])
 }
 
 model OrderTable {
@@ -301,6 +315,8 @@ model Correlativo {
   expirationDate   DateTime
   status           CorrelativoStatus
   createdAt        DateTime          @default(now())
+
+  invoiceOrders     Order[]           @relation("OrderInvoiceCorrelativo")
 
   @@index([documentType])
   @@index([status])

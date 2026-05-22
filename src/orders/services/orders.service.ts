@@ -11,6 +11,8 @@ import type { FinalizeOrderDto } from '../dto/finalize-order.dto';
 import { OrderStatusDto } from '../dto/order-status.dto';
 import { KitchenStatusDto } from '../dto/kitchen-status.dto';
 import type { CartItemEntity } from '../entities/order-item.entity';
+import { CorrelativoStatus, DocumentType, LogLevel, ShiftStatus } from '@prisma/client';
+import { toDbOrderType, toDbPaymentMethod } from '../mappers/status.mapper';
 
 @Injectable()
 export class OrdersService {
@@ -40,10 +42,11 @@ export class OrdersService {
 
     const customerId = dto.customerId ?? (await this.tryResolveCustomerId(dto.customerName));
     const cashierId = dto.cashierId ?? (await this.tryResolveCashierId(dto.cashierName));
+    const shiftId = dto.shiftId ?? (await this.tryResolveActiveShiftId());
 
     return this.repo.create({
       id: dto.id,
-      shiftId: dto.shiftId,
+      shiftId,
       customerId,
       items: dto.items,
       subTotal: dto.subTotal,
@@ -62,6 +65,15 @@ export class OrdersService {
       isSentToKitchen,
       linkedTables: dto.linkedTables,
     });
+  }
+
+  private async tryResolveActiveShiftId(): Promise<string | undefined> {
+    const active = await this.prisma.shift.findFirst({
+      where: { status: 'OPEN' },
+      select: { id: true },
+      orderBy: { startTime: 'desc' },
+    });
+    return active?.id;
   }
 
   private async tryResolveCustomerId(customerName?: string): Promise<string | undefined> {
@@ -149,19 +161,150 @@ export class OrdersService {
   }
 
   async finalize(id: string, dto: FinalizeOrderDto) {
-    await this.getById(id);
+    const existing = await this.getById(id);
+    if (existing.status === OrderStatusDto.paid) return existing;
 
-    return this.repo.update(id, {
-      status: OrderStatusDto.paid,
-      paymentMethod: dto.paymentMethod,
-      splitAmounts: dto.splitAmounts ?? null,
-      customerName: dto.customerName ?? undefined,
-      customerAddress: dto.customerAddress ?? undefined,
-      orderType: dto.orderType ?? undefined,
-      total: dto.finalTotal,
-      subTotal: dto.subTotal === undefined ? undefined : dto.subTotal,
-      taxAmount: dto.taxAmount === undefined ? undefined : dto.taxAmount,
+    const finalTotal = dto.finalTotal ?? existing.total;
+
+    await this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          status: true,
+          total: true,
+          cashierId: true,
+          cashierName: true,
+          shiftId: true,
+          invoiceNumber: true,
+        },
+      });
+
+      if (!order) throw new NotFoundException('Orden no encontrada');
+      if (order.status === 'PAID') return;
+      if (order.invoiceNumber) {
+        // Ya tiene factura asignada: hacemos finalize idempotente sin consumir otro correlativo
+        await tx.order.update({
+          where: { id },
+          data: {
+            status: 'PAID',
+            paymentMethod: toDbPaymentMethod(dto.paymentMethod),
+            splitEfectivo: dto.splitAmounts?.efectivo ?? null,
+            splitTarjeta: dto.splitAmounts?.tarjeta ?? null,
+            customerName: dto.customerName ?? undefined,
+            customerAddress: dto.customerAddress ?? undefined,
+            orderType: dto.orderType ? toDbOrderType(dto.orderType) : undefined,
+            total: finalTotal,
+            subTotal: dto.subTotal === undefined ? undefined : dto.subTotal,
+            taxAmount: dto.taxAmount === undefined ? undefined : dto.taxAmount,
+          },
+        });
+        return;
+      }
+
+      // Resolver shift activo si no lo trae (como fallback defensivo)
+      const shiftId = order.shiftId
+        ? order.shiftId
+        : (
+            await tx.shift.findFirst({
+              where: { status: ShiftStatus.OPEN },
+              select: { id: true },
+              orderBy: { startTime: 'desc' },
+            })
+          )?.id;
+
+      const correlativo = await tx.correlativo.findFirst({
+        where: { documentType: DocumentType.FACTURA, status: CorrelativoStatus.ACTIVO },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (!correlativo) {
+        throw new BadRequestException('No hay correlativo ACTIVO para FACTURA');
+      }
+
+      const now = new Date();
+      if (correlativo.expirationDate < now) {
+        await tx.correlativo.update({
+          where: { id: correlativo.id },
+          data: { status: CorrelativoStatus.VENCIDO },
+        });
+        throw new BadRequestException('El correlativo está VENCIDO');
+      }
+
+      const issuedNumber = correlativo.currentNumber;
+      if (issuedNumber > correlativo.endNumber) {
+        await tx.correlativo.update({
+          where: { id: correlativo.id },
+          data: { status: CorrelativoStatus.AGOTADO },
+        });
+        throw new BadRequestException('El correlativo está AGOTADO');
+      }
+
+      const width = String(correlativo.endNumber).length;
+      const padded = String(issuedNumber).padStart(width, '0');
+      const prefix = correlativo.prefix ?? '';
+      const invoiceNumber = `${prefix}${padded}`;
+
+      const nextNumber = issuedNumber + 1;
+      const nextStatus = nextNumber > correlativo.endNumber ? CorrelativoStatus.AGOTADO : correlativo.status;
+
+      await tx.correlativo.update({
+        where: { id: correlativo.id },
+        data: {
+          currentNumber: nextNumber,
+          status: nextStatus,
+        },
+      });
+
+      await tx.order.update({
+        where: { id },
+        data: {
+          status: 'PAID',
+          paymentMethod: toDbPaymentMethod(dto.paymentMethod),
+          splitEfectivo: dto.splitAmounts?.efectivo ?? null,
+          splitTarjeta: dto.splitAmounts?.tarjeta ?? null,
+          customerName: dto.customerName ?? undefined,
+          customerAddress: dto.customerAddress ?? undefined,
+          orderType: dto.orderType ? toDbOrderType(dto.orderType) : undefined,
+          total: finalTotal,
+          subTotal: dto.subTotal === undefined ? undefined : dto.subTotal,
+          taxAmount: dto.taxAmount === undefined ? undefined : dto.taxAmount,
+          shiftId: shiftId ?? null,
+
+          invoiceCorrelativoId: correlativo.id,
+          invoiceDocumentType: DocumentType.FACTURA,
+          invoiceResolutionNumber: correlativo.resolutionNumber,
+          invoicePrefix: prefix,
+          invoiceIssuedNumber: issuedNumber,
+          invoiceNumber,
+          invoiceIssuedAt: now,
+        },
+      });
+
+      const user = order.cashierName ?? 'system';
+      const details = JSON.stringify({
+        orderId: order.id,
+        invoiceNumber,
+        issuedNumber,
+        correlativoId: correlativo.id,
+        resolutionNumber: correlativo.resolutionNumber,
+        paymentMethod: dto.paymentMethod,
+        finalTotal,
+      });
+
+      await tx.systemLog.create({
+        data: {
+          userId: order.cashierId,
+          user,
+          role: undefined,
+          action: 'ORDER_FINALIZED',
+          details,
+          level: LogLevel.INFO,
+        },
+      });
     });
+
+    return this.getById(id);
   }
 
   private deriveGlobalStatus(items: CartItemEntity[]): OrderStatusDto {

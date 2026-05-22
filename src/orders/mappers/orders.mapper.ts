@@ -29,5 +29,16 @@ export function toOrderResponseDto(order: OrderEntity) {
     cashierName: order.cashierName,
     isSentToKitchen: order.isSentToKitchen,
     linkedTables: order.linkedTables,
+    invoice: order.invoice
+      ? {
+          correlativoId: order.invoice.correlativoId,
+          documentType: order.invoice.documentType,
+          resolutionNumber: order.invoice.resolutionNumber,
+          prefix: order.invoice.prefix,
+          issuedNumber: order.invoice.issuedNumber,
+          invoiceNumber: order.invoice.invoiceNumber,
+          issuedAt: order.invoice.issuedAt.toISOString(),
+        }
+      : undefined,
   };
 }
