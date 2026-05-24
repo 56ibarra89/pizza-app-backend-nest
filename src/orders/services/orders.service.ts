@@ -50,6 +50,7 @@ export class OrdersService {
       customerId,
       items: dto.items,
       subTotal: dto.subTotal,
+      discountAmount: dto.discountAmount,
       taxAmount: dto.taxAmount,
       total: dto.total,
       status,
@@ -58,6 +59,7 @@ export class OrdersService {
       customerAddress: dto.customerAddress,
       orderType: dto.orderType,
       tableId: dto.tableId,
+      promotionCode: dto.promotionCode,
       paymentMethod: dto.paymentMethod,
       splitAmounts: dto.splitAmounts,
       cashierId,
@@ -155,7 +157,9 @@ export class OrdersService {
       items: dto.items,
       total: dto.total,
       subTotal: dto.subTotal === undefined ? undefined : dto.subTotal,
+      discountAmount: dto.discountAmount === undefined ? undefined : dto.discountAmount,
       taxAmount: dto.taxAmount === undefined ? undefined : dto.taxAmount,
+      promotionCode: dto.promotionCode === undefined ? undefined : dto.promotionCode,
       status: nextStatus,
     });
   }
@@ -196,7 +200,9 @@ export class OrdersService {
             orderType: dto.orderType ? toDbOrderType(dto.orderType) : undefined,
             total: finalTotal,
             subTotal: dto.subTotal === undefined ? undefined : dto.subTotal,
+            discountAmount: dto.discountAmount === undefined ? undefined : dto.discountAmount,
             taxAmount: dto.taxAmount === undefined ? undefined : dto.taxAmount,
+            promotionCode: dto.promotionCode === undefined ? undefined : dto.promotionCode,
           },
         });
         return;
@@ -268,7 +274,9 @@ export class OrdersService {
           orderType: dto.orderType ? toDbOrderType(dto.orderType) : undefined,
           total: finalTotal,
           subTotal: dto.subTotal === undefined ? undefined : dto.subTotal,
+          discountAmount: dto.discountAmount === undefined ? undefined : dto.discountAmount,
           taxAmount: dto.taxAmount === undefined ? undefined : dto.taxAmount,
+          promotionCode: dto.promotionCode === undefined ? undefined : dto.promotionCode,
           shiftId: shiftId ?? null,
 
           invoiceCorrelativoId: correlativo.id,
@@ -290,6 +298,8 @@ export class OrdersService {
         resolutionNumber: correlativo.resolutionNumber,
         paymentMethod: dto.paymentMethod,
         finalTotal,
+        discountAmount: dto.discountAmount,
+        promotionCode: dto.promotionCode,
       });
 
       await tx.systemLog.create({

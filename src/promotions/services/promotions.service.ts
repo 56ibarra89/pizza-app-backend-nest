@@ -1,5 +1,6 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  type Certificado,
   CertificadoStatus,
   CuponDiscountType,
 } from '@prisma/client';
@@ -34,6 +35,18 @@ import {
 @Injectable()
 export class PromotionsService {
   constructor(@Inject(PROMOTIONS_REPOSITORY) private readonly repo: IPromotionsRepository) {}
+
+  private mapCertificadoResponse(c: Certificado) {
+    return {
+      id: c.id,
+      serial: c.serial,
+      origin: c.origin,
+      product: c.product,
+      issueDate: c.issueDate,
+      notes: c.notes ?? undefined,
+      status: fromDbCertificadoStatus(c.status),
+    };
+  }
 
   // ── Happy Hours ───────────────────────────────────────────────────────────
 
@@ -352,20 +365,21 @@ export class PromotionsService {
 
   async listCertificados() {
     const list = await this.repo.listCertificados();
-    return list.map((c) => ({
-      id: c.id,
-      serial: c.serial,
-      origin: c.origin,
-      product: c.product,
-      issueDate: c.issueDate,
-      notes: c.notes ?? undefined,
-      status: fromDbCertificadoStatus(c.status),
-    }));
+    return list.map((c) => this.mapCertificadoResponse(c));
+  }
+
+  async getCertificadoBySerial(serialRaw: string) {
+    const serial = serialRaw.trim().toUpperCase();
+    if (!serial) throw new BadRequestException('Serial inválido');
+
+    const found = await this.repo.findCertificadoBySerial(serial);
+    if (!found) throw new NotFoundException('No se encontró ningún certificado con este número.');
+
+    return this.mapCertificadoResponse(found);
   }
 
   async createCertificado(dto: CreateCertificadoDto) {
-    // Genera serial único de manera simple; si chocara por carrera, Prisma devolverá error de unique.
-    const serial = generateCertificadoSerial('VC');
+    const serial = dto.serial ? dto.serial.trim().toUpperCase() : generateCertificadoSerial('VC');
 
     const created = await this.repo.createCertificado({
       serial,
@@ -376,15 +390,7 @@ export class PromotionsService {
       status: CertificadoStatus.DISPONIBLE,
     });
 
-    return {
-      id: created.id,
-      serial: created.serial,
-      origin: created.origin,
-      product: created.product,
-      issueDate: created.issueDate,
-      notes: created.notes ?? undefined,
-      status: fromDbCertificadoStatus(created.status),
-    };
+    return this.mapCertificadoResponse(created);
   }
 
   private issueDateToday() {
@@ -403,15 +409,7 @@ export class PromotionsService {
     }
 
     const updated = await this.repo.updateCertificado(id, { status: CertificadoStatus.ENTREGADO });
-    return {
-      id: updated.id,
-      serial: updated.serial,
-      origin: updated.origin,
-      product: updated.product,
-      issueDate: updated.issueDate,
-      notes: updated.notes ?? undefined,
-      status: fromDbCertificadoStatus(updated.status),
-    };
+    return this.mapCertificadoResponse(updated);
   }
 
   async cancelCertificado(id: number) {
@@ -422,15 +420,7 @@ export class PromotionsService {
     }
 
     const updated = await this.repo.updateCertificado(id, { status: CertificadoStatus.ANULADO });
-    return {
-      id: updated.id,
-      serial: updated.serial,
-      origin: updated.origin,
-      product: updated.product,
-      issueDate: updated.issueDate,
-      notes: updated.notes ?? undefined,
-      status: fromDbCertificadoStatus(updated.status),
-    };
+    return this.mapCertificadoResponse(updated);
   }
 
   async deleteCertificado(id: number) {
@@ -450,14 +440,6 @@ export class PromotionsService {
 
     const updated = await this.repo.updateCertificado(found.id, { status: CertificadoStatus.ENTREGADO });
 
-    return {
-      id: updated.id,
-      serial: updated.serial,
-      origin: updated.origin,
-      product: updated.product,
-      issueDate: updated.issueDate,
-      notes: updated.notes ?? undefined,
-      status: fromDbCertificadoStatus(updated.status),
-    };
+    return this.mapCertificadoResponse(updated);
   }
 }

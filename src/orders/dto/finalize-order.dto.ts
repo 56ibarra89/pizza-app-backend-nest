@@ -35,5 +35,13 @@ export class FinalizeOrderDto {
 
   @IsOptional()
   @IsNumber()
+  discountAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
   taxAmount?: number;
+
+  @IsOptional()
+  @IsString()
+  promotionCode?: string;
 }

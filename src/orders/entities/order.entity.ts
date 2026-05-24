@@ -8,6 +8,7 @@ export interface OrderEntity {
   id: string;
   items: CartItemEntity[];
   subTotal?: number;
+  discountAmount?: number;
   taxAmount?: number;
   total: number;
   status: OrderStatusDto;
@@ -17,6 +18,7 @@ export interface OrderEntity {
   customerAddress?: string;
   orderType?: OrderTypeDto;
   tableId?: string;
+  promotionCode?: string;
   paymentMethod?: PaymentMethodDto;
   splitAmounts?: { efectivo: number; tarjeta: number };
   cashierName?: string;

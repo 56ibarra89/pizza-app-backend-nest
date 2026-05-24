@@ -71,6 +71,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     customerId?: string;
     items: CartItemEntity[];
     subTotal?: number;
+    discountAmount?: number;
     taxAmount?: number;
     total: number;
     status: import('../dto/order-status.dto').OrderStatusDto;
@@ -79,6 +80,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     customerAddress?: string;
     orderType?: import('../dto/order-type.dto').OrderTypeDto;
     tableId?: string;
+    promotionCode?: string;
     paymentMethod?: import('../dto/payment-method.dto').PaymentMethodDto;
     splitAmounts?: { efectivo: number; tarjeta: number };
     cashierId?: string;
@@ -94,6 +96,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         shiftId: data.shiftId,
         customerId: data.customerId,
         subTotal: data.subTotal,
+        discountAmount: data.discountAmount,
         taxAmount: data.taxAmount,
         total: data.total,
         status: toDbOrderStatus(data.status),
@@ -103,6 +106,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         customerAddress: data.customerAddress,
         orderType: data.orderType ? toDbOrderType(data.orderType) : undefined,
         tableId: data.tableId,
+        promotionCode: data.promotionCode,
         paymentMethod: data.paymentMethod ? toDbPaymentMethod(data.paymentMethod) : undefined,
         splitEfectivo: data.splitAmounts?.efectivo,
         splitTarjeta: data.splitAmounts?.tarjeta,
@@ -149,6 +153,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     data: {
       items?: CartItemEntity[];
       subTotal?: number | null;
+      discountAmount?: number | null;
       taxAmount?: number | null;
       total?: number;
       status?: import('../dto/order-status.dto').OrderStatusDto;
@@ -158,6 +163,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       customerAddress?: string | null;
       orderType?: import('../dto/order-type.dto').OrderTypeDto | null;
       tableId?: string | null;
+      promotionCode?: string | null;
       paymentMethod?: import('../dto/payment-method.dto').PaymentMethodDto | null;
       splitAmounts?: { efectivo: number; tarjeta: number } | null;
       cashierId?: string | null;
@@ -168,6 +174,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
   ): Promise<OrderEntity> {
     const updateData: Prisma.OrderUpdateInput = {
       subTotal: data.subTotal === undefined ? undefined : data.subTotal,
+      discountAmount: data.discountAmount === undefined ? undefined : data.discountAmount,
       taxAmount: data.taxAmount === undefined ? undefined : data.taxAmount,
       total: data.total,
       status: data.status ? toDbOrderStatus(data.status) : undefined,
@@ -197,6 +204,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           : data.tableId
             ? { connect: { id: data.tableId } }
             : { disconnect: true },
+      promotionCode: data.promotionCode === undefined ? undefined : data.promotionCode,
       paymentMethod:
         data.paymentMethod === undefined
           ? undefined
@@ -286,6 +294,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
   private mapOrder(o: {
     id: string;
     subTotal: Prisma.Decimal | null;
+    discountAmount: Prisma.Decimal | null;
     taxAmount: Prisma.Decimal | null;
     total: Prisma.Decimal;
     status: import('@prisma/client').OrderStatus;
@@ -301,6 +310,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     customerAddress: string | null;
     orderType: import('@prisma/client').OrderType | null;
     tableId: string | null;
+    promotionCode: string | null;
     paymentMethod: import('@prisma/client').PaymentMethod | null;
     splitEfectivo: Prisma.Decimal | null;
     splitTarjeta: Prisma.Decimal | null;
@@ -341,6 +351,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         kitchenStatus: i.kitchenStatus ? fromDbKitchenStatus(i.kitchenStatus) : undefined,
       })),
       subTotal: o.subTotal ? o.subTotal.toNumber() : undefined,
+      discountAmount: o.discountAmount ? o.discountAmount.toNumber() : undefined,
       taxAmount: o.taxAmount ? o.taxAmount.toNumber() : undefined,
       total: o.total.toNumber(),
       status: fromDbOrderStatus(o.status),
@@ -349,6 +360,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       customerAddress: o.customerAddress ?? undefined,
       orderType: o.orderType ? fromDbOrderType(o.orderType) : undefined,
       tableId: o.tableId ?? undefined,
+      promotionCode: o.promotionCode ?? undefined,
       paymentMethod: o.paymentMethod ? fromDbPaymentMethod(o.paymentMethod) : undefined,
       splitAmounts,
       cashierName: o.cashierName ?? undefined,

@@ -43,6 +43,10 @@ export class CreateOrderDto {
 
   @IsOptional()
   @IsNumber()
+  discountAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
   taxAmount?: number;
 
   @IsNumber()
@@ -72,6 +76,10 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   tableId?: string;
+
+  @IsOptional()
+  @IsString()
+  promotionCode?: string;
 
   @IsOptional()
   @IsEnum(PaymentMethodDto)

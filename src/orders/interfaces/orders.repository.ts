@@ -18,6 +18,7 @@ export interface IOrdersRepository {
     customerId?: string;
     items: CartItemEntity[];
     subTotal?: number;
+    discountAmount?: number;
     taxAmount?: number;
     total: number;
     status: OrderStatusDto;
@@ -26,6 +27,7 @@ export interface IOrdersRepository {
     customerAddress?: string;
     orderType?: OrderTypeDto;
     tableId?: string;
+    promotionCode?: string;
     paymentMethod?: PaymentMethodDto;
     splitAmounts?: { efectivo: number; tarjeta: number };
     cashierId?: string;
@@ -37,6 +39,7 @@ export interface IOrdersRepository {
   update(id: string, data: {
     items?: CartItemEntity[];
     subTotal?: number | null;
+    discountAmount?: number | null;
     taxAmount?: number | null;
     total?: number;
     status?: OrderStatusDto;
@@ -46,6 +49,7 @@ export interface IOrdersRepository {
     customerAddress?: string | null;
     orderType?: OrderTypeDto | null;
     tableId?: string | null;
+    promotionCode?: string | null;
     paymentMethod?: PaymentMethodDto | null;
     splitAmounts?: { efectivo: number; tarjeta: number } | null;
     cashierId?: string | null;

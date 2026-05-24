@@ -206,6 +206,7 @@ model Order {
   id        String      @id @default(uuid())
   items     OrderItem[]
   subTotal  Decimal?    @db.Decimal(12, 2)
+  discountAmount Decimal? @db.Decimal(12, 2)
   taxAmount Decimal?    @db.Decimal(12, 2)
   total     Decimal     @db.Decimal(12, 2)
   status    OrderStatus
@@ -221,6 +222,7 @@ model Order {
   orderType       OrderType?
   tableId         String?
   mesa            Mesa?          @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  promotionCode   String?
   paymentMethod   PaymentMethod?
   splitEfectivo   Decimal?       @db.Decimal(12, 2)
   splitTarjeta    Decimal?       @db.Decimal(12, 2)
@@ -251,6 +253,7 @@ model Order {
   @@index([invoiceCorrelativoId])
   @@index([invoiceIssuedAt])
   @@index([invoiceIssuedNumber])
+  @@index([promotionCode])
 }
 
 model OrderTable {

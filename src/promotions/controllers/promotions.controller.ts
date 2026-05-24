@@ -106,6 +106,11 @@ export class PromotionsController {
     return this.promotions.listCertificados();
   }
 
+  @Get('certificates/:serial')
+  getCertificadoBySerial(@Param('serial') serial: string) {
+    return this.promotions.getCertificadoBySerial(serial);
+  }
+
   @Post('certificates')
   createCertificado(@Body() dto: CreateCertificadoDto) {
     return this.promotions.createCertificado(dto);

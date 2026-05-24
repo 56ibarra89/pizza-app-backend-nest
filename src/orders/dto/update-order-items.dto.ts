@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsNumber, IsOptional, ValidateNested } from 'class-validator';
+import { IsArray, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { CartItemDto } from './cart-item.dto';
 
 export class UpdateOrderItemsDto {
@@ -17,5 +17,13 @@ export class UpdateOrderItemsDto {
 
   @IsOptional()
   @IsNumber()
+  discountAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
   taxAmount?: number;
+
+  @IsOptional()
+  @IsString()
+  promotionCode?: string;
 }
