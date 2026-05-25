@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsDate,
   IsEnum,
+  IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -14,7 +15,7 @@ import { CartItemDto } from './cart-item.dto';
 import { OrderStatusDto } from './order-status.dto';
 import { PaymentMethodDto } from './payment-method.dto';
 import { OrderTypeDto } from './order-type.dto';
-import { SplitAmountsDto } from './split-amounts.dto';
+import { OrderPaymentDto } from './order-payment.dto';
 
 export class CreateOrderDto {
   @IsOptional()
@@ -63,7 +64,7 @@ export class CreateOrderDto {
 
   @IsOptional()
   @IsString()
-  customerName?: string;
+  customerSnapshotName?: string;
 
   @IsOptional()
   @IsEnum(OrderTypeDto)
@@ -78,21 +79,18 @@ export class CreateOrderDto {
   tableId?: string;
 
   @IsOptional()
-  @IsString()
-  promotionCode?: string;
+  @IsInt()
+  cuponId?: number;
 
   @IsOptional()
-  @IsEnum(PaymentMethodDto)
-  paymentMethod?: PaymentMethodDto;
-
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => SplitAmountsDto)
-  splitAmounts?: SplitAmountsDto;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => OrderPaymentDto)
+  payments?: OrderPaymentDto[];
 
   @IsOptional()
   @IsString()
-  cashierName?: string;
+  cashierSnapshotName?: string;
 
   @IsOptional()
   @IsString()

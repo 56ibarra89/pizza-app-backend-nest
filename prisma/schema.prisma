@@ -52,7 +52,16 @@ enum PaymentMethod {
   EFECTIVO
   TARJETA
   APP
-  MIXTO
+}
+
+enum WeekDay {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
 }
 
 enum OrderType {
@@ -122,12 +131,14 @@ model User {
   cashierShifts Shift[]     @relation("ShiftCashier")
   systemLogs    SystemLog[] @relation("SystemLogUser")
 
-  createdProducts  Product[]   @relation("ProductCreatedBy")
-  updatedProducts  Product[]   @relation("ProductUpdatedBy")
-  createdCategories Category[] @relation("CategoryCreatedBy")
-  updatedCategories Category[] @relation("CategoryUpdatedBy")
+  createdProducts   Product[]   @relation("ProductCreatedBy")
+  updatedProducts   Product[]   @relation("ProductUpdatedBy")
+  createdCategories Category[]  @relation("CategoryCreatedBy")
+  updatedCategories Category[]  @relation("CategoryUpdatedBy")
   createdAppConfigs AppConfig[] @relation("AppConfigCreatedBy")
   updatedAppConfigs AppConfig[] @relation("AppConfigUpdatedBy")
+  payments          Payment[]
+  cancelledOrders   Order[]     @relation("OrderCancelledBy")
 
   @@index([role])
   @@index([isActive])
@@ -144,6 +155,7 @@ model Customer {
   updatedAt DateTime          @updatedAt
 
   @@index([name])
+  @@index([phone])
 }
 
 model CustomerAddress {
@@ -161,99 +173,127 @@ model CustomerAddress {
 }
 
 model Mesa {
-  id              String     @id @default(uuid())
+  id              String       @id @default(uuid())
   floor           Int
-  number          Int        @unique @default(autoincrement())
+  number          Int
   estado          MesaEstado
   reservationName String?
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
   orders          Order[]
   linkedOrders    OrderTable[]
 
+  @@unique([floor, number])
   @@index([floor])
   @@index([estado])
 }
 
 model Shift {
-  id            String      @id @default(uuid())
-  cashierId     String?
-  cashier       User?       @relation("ShiftCashier", fields: [cashierId], references: [id], onDelete: SetNull)
-  cashierName   String
-  cashRegisterName String?
-  orders        Order[]
-  startTime     DateTime
-  endTime       DateTime?
-  openingAmount Decimal     @db.Decimal(10, 2)
-  closingAmount Decimal?    @db.Decimal(10, 2)
-  cashSales     Decimal     @default(0) @db.Decimal(12, 2)
-  cardSales     Decimal     @default(0) @db.Decimal(12, 2)
-  appSales      Decimal     @default(0) @db.Decimal(12, 2)
-  totalSales    Decimal     @default(0) @db.Decimal(12, 2)
-  status        ShiftStatus
-  notes         String?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  id                       String      @id @default(uuid())
+  cashierId                String?
+  cashier                  User?       @relation("ShiftCashier", fields: [cashierId], references: [id], onDelete: SetNull)
+  cashierSnapshotName      String
+  cashRegisterSnapshotName String?
+  orders                   Order[]
+  startTime                DateTime
+  endTime                  DateTime?
+  openingAmount            Decimal     @db.Decimal(10, 2)
+  closingAmount            Decimal?    @db.Decimal(10, 2)
+  cashSales                Decimal     @default(0) @db.Decimal(12, 2)
+  cardSales                Decimal     @default(0) @db.Decimal(12, 2)
+  appSales                 Decimal     @default(0) @db.Decimal(12, 2)
+  totalSales               Decimal     @default(0) @db.Decimal(12, 2)
+  status                   ShiftStatus
+  notes                    String?
+  createdAt                DateTime    @default(now())
+  updatedAt                DateTime    @updatedAt
 
-  @@index([cashierName])
-  @@index([cashRegisterName])
+  @@index([cashierSnapshotName])
+  @@index([cashRegisterSnapshotName])
   @@index([cashierId])
   @@index([startTime])
   @@index([status])
 }
 
 model Order {
-  id        String      @id @default(uuid())
-  items     OrderItem[]
-  subTotal  Decimal?    @db.Decimal(12, 2)
-  discountAmount Decimal? @db.Decimal(12, 2)
-  taxAmount Decimal?    @db.Decimal(12, 2)
-  total     Decimal     @db.Decimal(12, 2)
-  status    OrderStatus
-  timestamp DateTime    @default(now())
+  id             String      @id @default(uuid())
+  items          OrderItem[]
+  payments       Payment[]
+  subTotal       Decimal?    @db.Decimal(12, 2)
+  discountAmount Decimal?    @db.Decimal(12, 2)
+  taxAmount      Decimal?    @db.Decimal(12, 2)
+  total          Decimal     @db.Decimal(12, 2)
+  status         OrderStatus
+  timestamp      DateTime    @default(now())
 
   shiftId String?
-  shift   Shift?      @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  shift   Shift?  @relation(fields: [shiftId], references: [id], onDelete: SetNull)
 
-  customerId String?
-  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  customerName    String?
-  customerAddress String?
-  orderType       OrderType?
-  tableId         String?
-  mesa            Mesa?          @relation(fields: [tableId], references: [id], onDelete: SetNull)
-  promotionCode   String?
-  paymentMethod   PaymentMethod?
-  splitEfectivo   Decimal?       @db.Decimal(12, 2)
-  splitTarjeta    Decimal?       @db.Decimal(12, 2)
-  cashierId       String?
-  cashier         User?          @relation("OrderCashier", fields: [cashierId], references: [id], onDelete: SetNull)
-  cashierName     String?
-  isSentToKitchen Boolean        @default(false)
-  linkedTables    OrderTable[]
+  customerId           String?
+  customer             Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerSnapshotName String?
+  customerAddress      String?
+  orderType            OrderType?
+  tableId              String?
+  mesa                 Mesa?      @relation(fields: [tableId], references: [id], onDelete: SetNull)
 
-  invoiceCorrelativoId String?
-  invoiceCorrelativo   Correlativo? @relation("OrderInvoiceCorrelativo", fields: [invoiceCorrelativoId], references: [id], onDelete: SetNull)
-  invoiceDocumentType  DocumentType?
+  cuponId Int?
+  cupon   Cupon? @relation(fields: [cuponId], references: [id], onDelete: SetNull)
+
+  cashierId           String?
+  cashier             User?        @relation("OrderCashier", fields: [cashierId], references: [id], onDelete: SetNull)
+  cashierSnapshotName String?
+  isSentToKitchen     Boolean      @default(false)
+  linkedTables        OrderTable[]
+
+  cancelReason  String?
+  cancelledById String?
+  cancelledBy   User?     @relation("OrderCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
+  cancelledAt   DateTime?
+
+  invoiceCorrelativoId    String?
+  invoiceCorrelativo      Correlativo?  @relation("OrderInvoiceCorrelativo", fields: [invoiceCorrelativoId], references: [id], onDelete: SetNull)
+  invoiceDocumentType     DocumentType?
   invoiceResolutionNumber String?
-  invoicePrefix        String?
-  invoiceIssuedNumber  Int?
-  invoiceNumber        String?   @unique
-  invoiceIssuedAt      DateTime?
+  invoicePrefix           String?
+  invoiceIssuedNumber     Int?
+  invoiceNumber           String?       @unique
+  invoiceIssuedAt         DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  certificadosRedeemed Certificado[]
+
   @@index([timestamp])
   @@index([shiftId])
-  @@index([customerName])
+  @@index([customerSnapshotName])
   @@index([customerId])
   @@index([status])
   @@index([cashierId])
+  @@index([cuponId])
   @@index([invoiceCorrelativoId])
   @@index([invoiceIssuedAt])
   @@index([invoiceIssuedNumber])
-  @@index([promotionCode])
+}
+
+/// Registro atómico de cada pago recibido en una orden.
+/// Reemplaza los campos planos paymentMethod / splitEfectivo / splitTarjeta.
+model Payment {
+  id                  Int           @id @default(autoincrement())
+  orderId             String
+  order               Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  method              PaymentMethod
+  amount              Decimal       @db.Decimal(12, 2)
+  /// Referencia externa (número de transacción, voucher, etc.)
+  reference           String?
+  cashierId           String?
+  cashier             User?         @relation(fields: [cashierId], references: [id], onDelete: SetNull)
+  cashierSnapshotName String?
+  createdAt           DateTime      @default(now())
+
+  @@index([orderId])
+  @@index([method])
 }
 
 model OrderTable {
@@ -270,21 +310,21 @@ model OrderTable {
 }
 
 model OrderItem {
-  id             Int           @id @default(autoincrement())
-  orderId        String
-  order          Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId      String?
-  product        Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
-  name           String
-  price          Decimal       @db.Decimal(12, 2)
-  size           ProductSize
-  quantity       Int
-  note           String?
-  giftQuantity   Int?
-  isSentToKitchen Boolean      @default(false)
-  sentAt         DateTime?
-  kitchenStatus  KitchenStatus?
-  extras         OrderItemExtra[]
+  id              Int              @id @default(autoincrement())
+  orderId         String
+  order           Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId       String?
+  product         Product?         @relation(fields: [productId], references: [id], onDelete: SetNull)
+  name            String
+  price           Decimal          @db.Decimal(12, 2)
+  size            ProductSize
+  quantity        Int
+  note            String?
+  giftQuantity    Int?
+  isSentToKitchen Boolean          @default(false)
+  sentAt          DateTime?
+  kitchenStatus   KitchenStatus?
+  extras          OrderItemExtra[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -319,7 +359,7 @@ model Correlativo {
   status           CorrelativoStatus
   createdAt        DateTime          @default(now())
 
-  invoiceOrders     Order[]           @relation("OrderInvoiceCorrelativo")
+  invoiceOrders Order[] @relation("OrderInvoiceCorrelativo")
 
   @@index([documentType])
   @@index([status])
@@ -343,88 +383,185 @@ model SystemLog {
 }
 
 model AppConfig {
-  id        String   @id
-  data      Json
+  id          String   @id
+  data        Json
   createdById String?
-  createdBy   User?  @relation("AppConfigCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy   User?    @relation("AppConfigCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   updatedById String?
-  updatedBy   User?  @relation("AppConfigUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-  updatedAt DateTime @updatedAt
+  updatedBy   User?    @relation("AppConfigUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([createdById])
   @@index([updatedById])
 }
 
 model HappyHourPromotion {
-  id             Int                  @id @default(autoincrement())
+  id             Int                    @id @default(autoincrement())
   name           String
-  daysOfWeek     String[]
-  startTime      String
-  endTime        String
+  daysOfWeek     WeekDay[]
+  startMinutes   Int
+  endMinutes     Int
   promotionType  HappyHourPromotionType
-  promotionValue String               @default("")
-  status         PromoActiveStatus    @default(ACTIVO)
+  /// Null cuando promotionType = DOSXUNO
+  promotionValue Decimal?               @db.Decimal(10, 4)
+  status         PromoActiveStatus      @default(ACTIVO)
+  /// Campo libre para tipo 2x1 (texto descriptivo del ítem)
   appliesTo      String?
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  products   HappyHourProduct[]
+  categories HappyHourCategory[]
+
+  deletedAt DateTime?
 
   @@index([status])
+  @@index([deletedAt])
+}
+
+/// Relación N:M entre HappyHour y productos específicos
+model HappyHourProduct {
+  happyHourId Int
+  productId   String
+
+  happyHour HappyHourPromotion @relation(fields: [happyHourId], references: [id], onDelete: Cascade)
+  product   Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([happyHourId, productId])
+  @@index([productId])
+}
+
+/// Relación N:M entre HappyHour y categorías completas
+model HappyHourCategory {
+  happyHourId Int
+  categoryId  String
+
+  happyHour HappyHourPromotion @relation(fields: [happyHourId], references: [id], onDelete: Cascade)
+  category  Category           @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([happyHourId, categoryId])
+  @@index([categoryId])
 }
 
 model DiscountPromotion {
   id            Int               @id @default(autoincrement())
   name          String
   discountType  CuponDiscountType
-  discountValue String
+  discountValue Decimal           @db.Decimal(10, 4)
   status        PromoActiveStatus @default(ACTIVO)
-  appliesTo     String
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 
+  products   DiscountProduct[]
+  categories DiscountCategory[]
+
+  deletedAt DateTime?
+
   @@index([status])
+  @@index([deletedAt])
+}
+
+/// Relación N:M entre DiscountPromotion y productos específicos
+model DiscountProduct {
+  discountId Int
+  productId  String
+
+  discount DiscountPromotion @relation(fields: [discountId], references: [id], onDelete: Cascade)
+  product  Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([discountId, productId])
+  @@index([productId])
+}
+
+/// Relación N:M entre DiscountPromotion y categorías completas
+model DiscountCategory {
+  discountId Int
+  categoryId String
+
+  discount DiscountPromotion @relation(fields: [discountId], references: [id], onDelete: Cascade)
+  category Category          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([discountId, categoryId])
+  @@index([categoryId])
 }
 
 model Cupon {
   id            Int               @id @default(autoincrement())
   code          String            @unique
   discountType  CuponDiscountType
-  discountValue String
+  discountValue Decimal           @db.Decimal(10, 4)
   maxUses       Int               @default(0)
   currentUses   Int               @default(0)
-  expiresDate   String            @default("")
+  expiresDate   DateTime?
   manualStatus  CuponManualStatus @default(ACTIVO)
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 
+  orders Order[]
+
+  deletedAt DateTime?
+
   @@index([manualStatus])
+  @@index([code])
+  @@index([deletedAt])
 }
 
 model Certificado {
-  id        Int               @id @default(autoincrement())
-  serial    String            @unique
-  origin    String
-  product   String
-  issueDate String
-  notes     String?
-  status    CertificadoStatus @default(DISPONIBLE)
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
+  id          Int     @id @default(autoincrement())
+  serial      String  @unique
+  origin      String
+  description String?
+
+  issueDate  DateTime
+  redeemedAt DateTime?
+
+  status CertificadoStatus @default(DISPONIBLE)
+  amount Decimal?          @db.Decimal(10, 2)
+
+  redeemedOrderId String?
+  redeemedOrder   Order?  @relation(fields: [redeemedOrderId], references: [id], onDelete: SetNull)
+
+  items CertificadoItem[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@index([status])
+  @@index([deletedAt])
+}
+
+model CertificadoItem {
+  id Int @id @default(autoincrement())
+
+  certificadoId Int
+  certificado   Certificado @relation(fields: [certificadoId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  quantity Int @default(1)
+
+  @@index([certificadoId])
+  @@index([productId])
 }
 
 model Category {
-  id        String    @id @default(uuid())
-  label     String    @unique
-  icon      String?
-  products  Product[]
-  deletedAt DateTime?
+  id          String    @id @default(uuid())
+  label       String    @unique
+  icon        String?
+  products    Product[]
+  deletedAt   DateTime?
   createdById String?
-  createdBy   User?   @relation("CategoryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy   User?     @relation("CategoryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   updatedById String?
-  updatedBy   User?   @relation("CategoryUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  updatedBy   User?     @relation("CategoryUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  happyHours HappyHourCategory[]
+  discounts  DiscountCategory[]
 
   @@index([deletedAt])
   @@index([createdById])
@@ -437,6 +574,7 @@ model Product {
   category         Category          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   name             String
   description      String?
+  isActive         Boolean           @default(true)
   hasMultipleSizes Boolean           @default(false)
   prices           ProductPrice[]
   extras           ExtraIngredient[]
@@ -448,6 +586,10 @@ model Product {
   updatedBy        User?             @relation("ProductUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
+
+  happyHours   HappyHourProduct[]
+  discounts    DiscountProduct[]
+  certificados CertificadoItem[]
 
   @@unique([categoryId, name])
   @@index([deletedAt])

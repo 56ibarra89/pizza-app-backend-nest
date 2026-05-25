@@ -5,6 +5,7 @@ import {
   HappyHourPromotionType,
   PromoActiveStatus,
 } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
 export type PromoStatusDto = 'Activo' | 'Inactivo';
 export type CuponStatusDto = 'Activo' | 'Inactivo' | 'Agotado' | 'Vencido';
@@ -72,25 +73,41 @@ export function fromDbCertificadoStatus(status: CertificadoStatus): CertificadoS
   }
 }
 
-function pad2(v: number): string {
-  return String(v).padStart(2, '0');
+/**
+ * Convierte un Prisma.Decimal (o null) a number para la capa de presentación.
+ */
+export function decimalToNumber(value: Prisma.Decimal | null | undefined): number {
+  if (value === null || value === undefined) return 0;
+  return value.toNumber();
 }
 
-export function todayLocalISO(now = new Date()): string {
-  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+export function timeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(':').map(Number);
+  return hours * 60 + minutes;
 }
 
+export function minutesToTime(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Calcula el estado efectivo de un cupón.
+ * Usa comparación de objetos Date para mayor precisión.
+ */
 export function computeCuponStatus(
   maxUses: number,
   currentUses: number,
-  expiresDate: string,
+  expiresDate: Date | null,
   manualStatus: PromoStatusDto,
   now = new Date(),
 ): CuponStatusDto {
   if (manualStatus === 'Inactivo') return 'Inactivo';
 
   const isExhausted = maxUses > 0 && currentUses >= maxUses;
-  const isExpired = expiresDate !== '' && expiresDate < todayLocalISO(now);
+  // Expira al inicio del día de la fecha límite (comparamos sólo la fecha)
+  const isExpired = expiresDate !== null && expiresDate < now;
 
   if (isExhausted) return 'Agotado';
   if (isExpired) return 'Vencido';
@@ -99,10 +116,10 @@ export function computeCuponStatus(
 
 export function hydrateCuponDerivedFields(data: {
   discountType: DiscountTypeDto;
-  discountValue: string;
+  discountValue: number;
   maxUses: number;
   currentUses: number;
-  expiresDate: string;
+  expiresDate: Date | null;
   manualStatus: PromoStatusDto;
   now?: Date;
 }): { discount: string; usage: string; expires: string; status: CuponStatusDto } {
@@ -117,24 +134,28 @@ export function hydrateCuponDerivedFields(data: {
   const discount =
     data.discountType === 'porcentaje'
       ? `${data.discountValue}%`
-      : `C$${Number.parseFloat(data.discountValue).toFixed(2)}`;
+      : `C$${data.discountValue.toFixed(2)}`;
 
   const usage = data.maxUses === 0 ? `${data.currentUses} / ∞` : `${data.currentUses} / ${data.maxUses}`;
-  const expires = data.expiresDate === '' ? 'Sin límite' : data.expiresDate;
+
+  const expires =
+    data.expiresDate === null
+      ? 'Sin límite'
+      : data.expiresDate.toISOString().substring(0, 10);
 
   return { discount, usage, expires, status };
 }
 
 export function buildHappyHourDerivedFields(data: {
   daysOfWeek: string[];
-  startTime: string;
-  endTime: string;
+  startMinutes: number;
+  endMinutes: number;
   promotionType: HappyHourPromotionTypeDto;
-  promotionValue: string;
+  promotionValue: number | null;
   appliesTo?: string | null;
 }): { days: string; time: string; promotion: string } {
   const days = data.daysOfWeek.join(', ');
-  const time = `${data.startTime} - ${data.endTime}`;
+  const time = `${minutesToTime(data.startMinutes)} - ${minutesToTime(data.endMinutes)}`;
 
   let promotion = '';
   if (data.promotionType === '2x1') promotion = data.appliesTo ? `2x1 en ${data.appliesTo}` : '2x1';

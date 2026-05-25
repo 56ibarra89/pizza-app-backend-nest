@@ -3,8 +3,8 @@ import type { ShiftStatus } from '@prisma/client';
 export type ShiftEntity = {
   id: string;
   cashierId?: string;
-  cashierName: string;
-  cashRegisterName?: string;
+  cashierSnapshotName: string;
+  cashRegisterSnapshotName?: string;
   startTime: Date;
   endTime?: Date;
   openingAmount: number;

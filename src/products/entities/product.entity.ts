@@ -15,6 +15,7 @@ export interface ProductEntity {
   categoryId: string;
   name: string;
   description?: string;
+  isActive: boolean;
   hasMultipleSizes: boolean;
   prices: ProductPriceEntity[];
   extras?: ExtraIngredientEntity[];

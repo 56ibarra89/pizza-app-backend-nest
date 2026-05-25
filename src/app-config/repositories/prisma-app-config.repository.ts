@@ -40,6 +40,7 @@ export class PrismaAppConfigRepository implements IAppConfigRepository {
     data: unknown;
     createdById: string | null;
     updatedById: string | null;
+    createdAt: Date;
     updatedAt: Date;
   }): AppConfigEntity {
     return {
@@ -47,6 +48,7 @@ export class PrismaAppConfigRepository implements IAppConfigRepository {
       data: row.data,
       createdById: row.createdById ?? undefined,
       updatedById: row.updatedById ?? undefined,
+      createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
   }

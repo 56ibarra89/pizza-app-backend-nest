@@ -1,4 +1,4 @@
-import { IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsIn, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, Max, ValidateIf } from 'class-validator';
 import type { PromoStatusDto } from '../../mappers/promotions.mapper';
 
 export class CreateDiscountDto {
@@ -6,22 +6,30 @@ export class CreateDiscountDto {
   @IsNotEmpty()
   name!: string;
 
-  // Frontend usa: "Porcentaje" | "Monto Fijo"
   @IsString()
   @IsIn(['Porcentaje', 'Monto Fijo'])
   type!: string;
 
-  // Frontend guarda: "20%" o "C$150.00" (aceptamos cualquier string y parseamos)
-  @IsString()
-  @IsNotEmpty()
-  value!: string;
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @IsPositive()
+  @ValidateIf((o: CreateDiscountDto) => o.type === 'Porcentaje')
+  @Max(100)
+  value!: number;
 
   @IsOptional()
   @IsString()
   @IsIn(['Activo', 'Inactivo'] satisfies PromoStatusDto[])
   status?: PromoStatusDto;
 
-  @IsString()
-  @IsNotEmpty()
-  appliesTo!: string;
+  /** IDs de productos a los que aplica (N:M). */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  productIds?: string[];
+
+  /** IDs de categorías a las que aplica (N:M). */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  categoryIds?: string[];
 }

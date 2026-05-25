@@ -34,6 +34,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         ],
       },
       include: {
+        payments: true,
         items: { include: { extras: true }, orderBy: { id: 'asc' } },
         linkedTables: { select: { tableId: true } },
       },
@@ -46,6 +47,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
   async listAll(): Promise<OrderEntity[]> {
     const orders = await this.prisma.order.findMany({
       include: {
+        payments: true,
         items: { include: { extras: true }, orderBy: { id: 'asc' } },
         linkedTables: { select: { tableId: true } },
       },
@@ -58,6 +60,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     const found = await this.prisma.order.findUnique({
       where: { id },
       include: {
+        payments: true,
         items: { include: { extras: true }, orderBy: { id: 'asc' } },
         linkedTables: { select: { tableId: true } },
       },
@@ -76,15 +79,14 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     total: number;
     status: import('../dto/order-status.dto').OrderStatusDto;
     timestamp: Date;
-    customerName?: string;
+    customerSnapshotName?: string;
     customerAddress?: string;
     orderType?: import('../dto/order-type.dto').OrderTypeDto;
     tableId?: string;
-    promotionCode?: string;
-    paymentMethod?: import('../dto/payment-method.dto').PaymentMethodDto;
-    splitAmounts?: { efectivo: number; tarjeta: number };
+    cuponId?: number;
+    payments?: { method: import('../dto/payment-method.dto').PaymentMethodDto; amount: number; cashierId?: string; cashierSnapshotName?: string }[];
     cashierId?: string;
-    cashierName?: string;
+    cashierSnapshotName?: string;
     isSentToKitchen?: boolean;
     linkedTables?: string[];
   }): Promise<OrderEntity> {
@@ -93,25 +95,29 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     const created = await this.prisma.order.create({
       data: {
         ...(data.id ? { id: data.id } : {}),
-        shiftId: data.shiftId,
-        customerId: data.customerId,
-        subTotal: data.subTotal,
-        discountAmount: data.discountAmount,
-        taxAmount: data.taxAmount,
+        shiftId: data.shiftId ?? null,
+        customerId: data.customerId ?? null,
+        subTotal: data.subTotal ?? null,
+        discountAmount: data.discountAmount ?? null,
+        taxAmount: data.taxAmount ?? null,
         total: data.total,
         status: toDbOrderStatus(data.status),
         timestamp: data.timestamp,
 
-        customerName: data.customerName,
-        customerAddress: data.customerAddress,
+        customerSnapshotName: data.customerSnapshotName ?? null,
+        customerAddress: data.customerAddress ?? null,
         orderType: data.orderType ? toDbOrderType(data.orderType) : undefined,
-        tableId: data.tableId,
-        promotionCode: data.promotionCode,
-        paymentMethod: data.paymentMethod ? toDbPaymentMethod(data.paymentMethod) : undefined,
-        splitEfectivo: data.splitAmounts?.efectivo,
-        splitTarjeta: data.splitAmounts?.tarjeta,
-        cashierId: data.cashierId,
-        cashierName: data.cashierName,
+        tableId: data.tableId ?? null,
+        cuponId: data.cuponId ?? null,
+        ...(data.payments?.length
+          ? {
+            payments: {
+                create: data.payments.map((p) => ({ method: toDbPaymentMethod(p.method), amount: p.amount, cashierId: p.cashierId, cashierSnapshotName: p.cashierSnapshotName })),
+              },
+            }
+          : {}),
+        cashierId: data.cashierId ?? null,
+        cashierSnapshotName: data.cashierSnapshotName ?? null,
         isSentToKitchen: data.isSentToKitchen ?? false,
         ...(uniqueLinkedTables.length
           ? {
@@ -140,6 +146,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         },
       },
       include: {
+        payments: true,
         items: { include: { extras: true }, orderBy: { id: 'asc' } },
         linkedTables: { select: { tableId: true } },
       },
@@ -159,15 +166,17 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       status?: import('../dto/order-status.dto').OrderStatusDto;
       shiftId?: string | null;
       customerId?: string | null;
-      customerName?: string | null;
+      customerSnapshotName?: string | null;
       customerAddress?: string | null;
       orderType?: import('../dto/order-type.dto').OrderTypeDto | null;
       tableId?: string | null;
-      promotionCode?: string | null;
-      paymentMethod?: import('../dto/payment-method.dto').PaymentMethodDto | null;
-      splitAmounts?: { efectivo: number; tarjeta: number } | null;
+      cuponId?: number | null;
+      payments?: { method: import('../dto/payment-method.dto').PaymentMethodDto; amount: number; cashierId?: string; cashierSnapshotName?: string }[] | null;
       cashierId?: string | null;
-      cashierName?: string | null;
+      cashierSnapshotName?: string | null;
+      cancelReason?: string | null;
+      cancelledById?: string | null;
+      cancelledAt?: Date | null;
       isSentToKitchen?: boolean;
       linkedTables?: string[];
     },
@@ -190,7 +199,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           : data.customerId
             ? { connect: { id: data.customerId } }
             : { disconnect: true },
-      customerName: data.customerName === undefined ? undefined : data.customerName,
+      customerSnapshotName: data.customerSnapshotName === undefined ? undefined : data.customerSnapshotName,
       customerAddress: data.customerAddress === undefined ? undefined : data.customerAddress,
       orderType:
         data.orderType === undefined
@@ -204,34 +213,36 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           : data.tableId
             ? { connect: { id: data.tableId } }
             : { disconnect: true },
-      promotionCode: data.promotionCode === undefined ? undefined : data.promotionCode,
-      paymentMethod:
-        data.paymentMethod === undefined
+      cupon:
+        data.cuponId === undefined
           ? undefined
-          : data.paymentMethod
-            ? toDbPaymentMethod(data.paymentMethod)
-            : null,
-      splitEfectivo:
-        data.splitAmounts === undefined
-          ? undefined
-          : data.splitAmounts
-            ? data.splitAmounts.efectivo
-            : null,
-      splitTarjeta:
-        data.splitAmounts === undefined
-          ? undefined
-          : data.splitAmounts
-            ? data.splitAmounts.tarjeta
-            : null,
+          : data.cuponId
+            ? { connect: { id: data.cuponId } }
+            : { disconnect: true },
       cashier:
         data.cashierId === undefined
           ? undefined
           : data.cashierId
             ? { connect: { id: data.cashierId } }
             : { disconnect: true },
-      cashierName: data.cashierName === undefined ? undefined : data.cashierName,
+      cashierSnapshotName: data.cashierSnapshotName === undefined ? undefined : data.cashierSnapshotName,
+      cancelReason: data.cancelReason === undefined ? undefined : data.cancelReason,
+      cancelledBy:
+        data.cancelledById === undefined
+          ? undefined
+          : data.cancelledById
+            ? { connect: { id: data.cancelledById } }
+            : { disconnect: true },
+      cancelledAt: data.cancelledAt === undefined ? undefined : data.cancelledAt,
       isSentToKitchen: data.isSentToKitchen,
     };
+
+    if (data.payments) {
+      updateData.payments = {
+        deleteMany: {},
+        create: data.payments.map((p) => ({ method: toDbPaymentMethod(p.method), amount: p.amount, cashierId: p.cashierId, cashierSnapshotName: p.cashierSnapshotName })),
+      };
+    }
 
     if (data.linkedTables) {
       const uniqueLinkedTables = Array.from(new Set(data.linkedTables.filter(Boolean)));
@@ -266,6 +277,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       where: { id },
       data: updateData,
       include: {
+        payments: true,
         items: { include: { extras: true }, orderBy: { id: 'asc' } },
         linkedTables: { select: { tableId: true } },
       },
@@ -306,17 +318,26 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     invoiceIssuedNumber: number | null;
     invoiceNumber: string | null;
     invoiceIssuedAt: Date | null;
-    customerName: string | null;
+    customerSnapshotName: string | null;
     customerAddress: string | null;
     orderType: import('@prisma/client').OrderType | null;
     tableId: string | null;
-    promotionCode: string | null;
-    paymentMethod: import('@prisma/client').PaymentMethod | null;
-    splitEfectivo: Prisma.Decimal | null;
-    splitTarjeta: Prisma.Decimal | null;
-    cashierName: string | null;
+    cuponId: number | null;
+    cashierSnapshotName: string | null;
+    cancelReason: string | null;
+    cancelledById: string | null;
+    cancelledAt: Date | null;
     isSentToKitchen: boolean;
     linkedTables: Array<{ tableId: string }>;
+    payments: Array<{
+      id: number;
+      method: import('@prisma/client').PaymentMethod;
+      amount: Prisma.Decimal;
+      reference: string | null;
+      cashierId: string | null;
+      cashierSnapshotName: string | null;
+      createdAt: Date;
+    }>;
     items: Array<{
       id: number;
       name: string;
@@ -331,13 +352,17 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       extras: Array<{ id: number; name: string; price: Prisma.Decimal }>;
     }>;
   }): OrderEntity {
-    const splitAmounts =
-      o.splitEfectivo !== null && o.splitTarjeta !== null
-        ? { efectivo: o.splitEfectivo.toNumber(), tarjeta: o.splitTarjeta.toNumber() }
-        : undefined;
-
     return {
       id: o.id,
+      payments: o.payments.map((p) => ({
+        id: p.id,
+        method: fromDbPaymentMethod(p.method),
+        amount: p.amount.toNumber(),
+        reference: p.reference ?? undefined,
+        cashierId: p.cashierId ?? undefined,
+        cashierSnapshotName: p.cashierSnapshotName ?? undefined,
+        createdAt: p.createdAt,
+      })),
       items: o.items.map((i) => ({
         name: i.name,
         price: i.price.toNumber(),
@@ -356,14 +381,15 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       total: o.total.toNumber(),
       status: fromDbOrderStatus(o.status),
       timestamp: o.timestamp,
-      customerName: o.customerName ?? undefined,
+      customerSnapshotName: o.customerSnapshotName ?? undefined,
       customerAddress: o.customerAddress ?? undefined,
       orderType: o.orderType ? fromDbOrderType(o.orderType) : undefined,
       tableId: o.tableId ?? undefined,
-      promotionCode: o.promotionCode ?? undefined,
-      paymentMethod: o.paymentMethod ? fromDbPaymentMethod(o.paymentMethod) : undefined,
-      splitAmounts,
-      cashierName: o.cashierName ?? undefined,
+      cuponId: o.cuponId ?? undefined,
+      cashierSnapshotName: o.cashierSnapshotName ?? undefined,
+      cancelReason: o.cancelReason ?? undefined,
+      cancelledById: o.cancelledById ?? undefined,
+      cancelledAt: o.cancelledAt ?? undefined,
       isSentToKitchen: o.isSentToKitchen,
       linkedTables: o.linkedTables.map((t) => t.tableId),
       invoice:

@@ -9,8 +9,8 @@ export interface IShiftsRepository {
   list(params: { limit: number; status?: ShiftStatus; from?: Date; to?: Date }): Promise<ShiftEntity[]>;
   open(params: {
     cashierId?: string;
-    cashierName: string;
-    cashRegisterName?: string;
+    cashierSnapshotName: string;
+    cashRegisterSnapshotName?: string;
     openingAmount: number;
     notes?: string;
     startTime: Date;

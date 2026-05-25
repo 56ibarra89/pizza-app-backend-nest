@@ -40,8 +40,8 @@ export class ShiftsService {
 
     return this.repo.open({
       cashierId: dto.cashierId,
-      cashierName,
-      cashRegisterName: dto.cashRegisterName?.trim() || undefined,
+      cashierSnapshotName: cashierName,
+      cashRegisterSnapshotName: dto.cashRegisterName?.trim() || undefined,
       openingAmount: dto.openingAmount,
       notes: dto.notes?.trim() || undefined,
       startTime: new Date(),

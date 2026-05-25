@@ -3,5 +3,6 @@ export type AppConfigEntity = {
   data: unknown;
   createdById?: string;
   updatedById?: string;
+  createdAt: Date;
   updatedAt: Date;
 };

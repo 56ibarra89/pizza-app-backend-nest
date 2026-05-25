@@ -4,9 +4,20 @@ import type { PaymentMethodDto } from '../dto/payment-method.dto';
 import type { CartItemEntity } from './order-item.entity';
 import type { DocumentType } from '@prisma/client';
 
+export interface PaymentEntity {
+  id: number;
+  method: PaymentMethodDto;
+  amount: number;
+  reference?: string;
+  cashierId?: string;
+  cashierSnapshotName?: string;
+  createdAt: Date;
+}
+
 export interface OrderEntity {
   id: string;
   items: CartItemEntity[];
+  payments: PaymentEntity[];
   subTotal?: number;
   discountAmount?: number;
   taxAmount?: number;
@@ -14,16 +25,19 @@ export interface OrderEntity {
   status: OrderStatusDto;
   timestamp: Date;
 
-  customerName?: string;
+  customerSnapshotName?: string;
   customerAddress?: string;
   orderType?: OrderTypeDto;
   tableId?: string;
-  promotionCode?: string;
-  paymentMethod?: PaymentMethodDto;
-  splitAmounts?: { efectivo: number; tarjeta: number };
-  cashierName?: string;
+  cuponId?: number;
+
+  cashierSnapshotName?: string;
   isSentToKitchen?: boolean;
   linkedTables?: string[];
+
+  cancelReason?: string;
+  cancelledById?: string;
+  cancelledAt?: Date;
 
   invoice?: {
     correlativoId: string;

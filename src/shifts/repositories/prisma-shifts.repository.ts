@@ -43,8 +43,8 @@ export class PrismaShiftsRepository implements IShiftsRepository {
 
   async open(params: {
     cashierId?: string;
-    cashierName: string;
-    cashRegisterName?: string;
+    cashierSnapshotName: string;
+    cashRegisterSnapshotName?: string;
     openingAmount: number;
     notes?: string;
     startTime: Date;
@@ -52,8 +52,8 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     const created = await this.prisma.shift.create({
       data: {
         cashierId: params.cashierId,
-        cashierName: params.cashierName,
-        cashRegisterName: params.cashRegisterName,
+        cashierSnapshotName: params.cashierSnapshotName,
+        cashRegisterSnapshotName: params.cashRegisterSnapshotName,
         startTime: params.startTime,
         openingAmount: params.openingAmount,
         status: ShiftStatus.OPEN,
@@ -81,17 +81,12 @@ export class PrismaShiftsRepository implements IShiftsRepository {
         throw new BadRequestException('El turno ya está cerrado');
       }
 
-      const paidOrders = await tx.order.findMany({
+      const payments = await tx.payment.findMany({
         where: {
-          shiftId: existing.id,
-          status: 'PAID',
-          paymentMethod: { not: null },
-        },
-        select: {
-          total: true,
-          paymentMethod: true,
-          splitEfectivo: true,
-          splitTarjeta: true,
+          order: {
+            shiftId: existing.id,
+            status: 'PAID',
+          },
         },
       });
 
@@ -100,24 +95,18 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       let app = new Prisma.Decimal(0);
       let total = new Prisma.Decimal(0);
 
-      for (const o of paidOrders) {
-        total = total.add(o.total);
+      for (const p of payments) {
+        total = total.add(p.amount);
 
-        switch (o.paymentMethod) {
+        switch (p.method) {
           case PaymentMethod.EFECTIVO:
-            cash = cash.add(o.total);
+            cash = cash.add(p.amount);
             break;
           case PaymentMethod.TARJETA:
-            card = card.add(o.total);
+            card = card.add(p.amount);
             break;
           case PaymentMethod.APP:
-            app = app.add(o.total);
-            break;
-          case PaymentMethod.MIXTO:
-            cash = cash.add(o.splitEfectivo ?? 0);
-            card = card.add(o.splitTarjeta ?? 0);
-            break;
-          default:
+            app = app.add(p.amount);
             break;
         }
       }
@@ -143,8 +132,8 @@ export class PrismaShiftsRepository implements IShiftsRepository {
   private map(row: {
     id: string;
     cashierId: string | null;
-    cashierName: string;
-    cashRegisterName: string | null;
+    cashierSnapshotName: string;
+    cashRegisterSnapshotName: string | null;
     startTime: Date;
     endTime: Date | null;
     openingAmount: Prisma.Decimal;
@@ -161,8 +150,8 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     return {
       id: row.id,
       cashierId: row.cashierId ?? undefined,
-      cashierName: row.cashierName,
-      cashRegisterName: row.cashRegisterName ?? undefined,
+      cashierSnapshotName: row.cashierSnapshotName,
+      cashRegisterSnapshotName: row.cashRegisterSnapshotName ?? undefined,
       startTime: row.startTime,
       endTime: row.endTime ?? undefined,
       openingAmount: row.openingAmount.toNumber(),

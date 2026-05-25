@@ -1,21 +1,19 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsEnum, IsInt, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { PaymentMethodDto } from './payment-method.dto';
-import { SplitAmountsDto } from './split-amounts.dto';
+import { OrderPaymentDto } from './order-payment.dto';
 import { OrderTypeDto } from './order-type.dto';
 
 export class FinalizeOrderDto {
-  @IsEnum(PaymentMethodDto)
-  paymentMethod!: PaymentMethodDto;
-
   @IsOptional()
-  @ValidateNested()
-  @Type(() => SplitAmountsDto)
-  splitAmounts?: SplitAmountsDto;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => OrderPaymentDto)
+  payments?: OrderPaymentDto[];
 
   @IsOptional()
   @IsString()
-  customerName?: string;
+  customerSnapshotName?: string;
 
   @IsOptional()
   @IsEnum(OrderTypeDto)
@@ -42,6 +40,6 @@ export class FinalizeOrderDto {
   taxAmount?: number;
 
   @IsOptional()
-  @IsString()
-  promotionCode?: string;
+  @IsInt()
+  cuponId?: number;
 }

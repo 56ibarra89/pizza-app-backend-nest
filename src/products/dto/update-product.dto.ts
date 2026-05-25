@@ -26,6 +26,10 @@ export class UpdateProductDto {
 
   @IsOptional()
   @IsBoolean()
+  isActive?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   hasMultipleSizes?: boolean;
 
   @IsOptional()

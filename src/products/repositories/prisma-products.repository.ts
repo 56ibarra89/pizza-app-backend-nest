@@ -112,6 +112,7 @@ export class PrismaProductsRepository implements IProductsRepository {
         categoryId: dto.categoryId,
         name: dto.name,
         description: dto.description,
+        isActive: dto.isActive ?? true,
         hasMultipleSizes: dto.hasMultipleSizes ?? false,
         prices: {
           create: dto.prices.map((p) => ({ size: toDbSize(p.size), price: p.price })),
@@ -149,6 +150,7 @@ export class PrismaProductsRepository implements IProductsRepository {
           categoryId: dto.categoryId,
           name: dto.name,
           description: dto.description,
+          isActive: dto.isActive,
           hasMultipleSizes: dto.hasMultipleSizes,
           prices: dto.prices
             ? {
@@ -185,6 +187,7 @@ export class PrismaProductsRepository implements IProductsRepository {
     categoryId: string;
     name: string;
     description: string | null;
+    isActive: boolean;
     hasMultipleSizes: boolean;
     prices: { size: import('@prisma/client').ProductSize; price: unknown }[];
     extras: {
@@ -209,6 +212,7 @@ export class PrismaProductsRepository implements IProductsRepository {
       categoryId: p.categoryId,
       name: p.name,
       description: p.description ?? undefined,
+      isActive: p.isActive,
       hasMultipleSizes: p.hasMultipleSizes,
       prices,
       extras,

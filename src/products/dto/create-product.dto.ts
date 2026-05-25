@@ -26,6 +26,10 @@ export class CreateProductDto {
 
   @IsOptional()
   @IsBoolean()
+  isActive?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   hasMultipleSizes?: boolean;
 
   @IsArray()

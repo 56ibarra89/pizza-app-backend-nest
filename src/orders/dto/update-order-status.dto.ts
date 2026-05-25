@@ -1,4 +1,4 @@
-import { IsEnum, IsNumber, IsOptional } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
 import { OrderStatusDto } from './order-status.dto';
 
 export class UpdateOrderStatusDto {
@@ -8,4 +8,12 @@ export class UpdateOrderStatusDto {
   @IsOptional()
   @IsNumber()
   sentAt?: number;
+
+  @IsOptional()
+  @IsString()
+  cancelReason?: string;
+
+  @IsOptional()
+  @IsString()
+  cancelledById?: string;
 }

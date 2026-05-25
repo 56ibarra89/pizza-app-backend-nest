@@ -13,6 +13,7 @@ import { KitchenStatusDto } from '../dto/kitchen-status.dto';
 import type { CartItemEntity } from '../entities/order-item.entity';
 import { CorrelativoStatus, DocumentType, LogLevel, ShiftStatus } from '@prisma/client';
 import { toDbOrderType, toDbPaymentMethod } from '../mappers/status.mapper';
+import { PaymentMethodDto } from '../dto/payment-method.dto';
 
 @Injectable()
 export class OrdersService {
@@ -36,12 +37,12 @@ export class OrdersService {
   }
 
   async create(dto: CreateOrderDto) {
-    const status = dto.status ?? (dto.paymentMethod ? OrderStatusDto.paid : OrderStatusDto.pending);
+    const status = dto.status ?? (dto.payments?.length ? OrderStatusDto.paid : OrderStatusDto.pending);
     const timestamp = dto.timestamp ?? new Date();
     const isSentToKitchen = dto.isSentToKitchen ?? !dto.tableId;
 
-    const customerId = dto.customerId ?? (await this.tryResolveCustomerId(dto.customerName));
-    const cashierId = dto.cashierId ?? (await this.tryResolveCashierId(dto.cashierName));
+    const customerId = dto.customerId ?? (await this.tryResolveCustomerId(dto.customerSnapshotName));
+    const cashierId = dto.cashierId ?? (await this.tryResolveCashierId(dto.cashierSnapshotName));
     const shiftId = dto.shiftId ?? (await this.tryResolveActiveShiftId());
 
     return this.repo.create({
@@ -55,18 +56,25 @@ export class OrdersService {
       total: dto.total,
       status,
       timestamp,
-      customerName: dto.customerName,
+      customerSnapshotName: dto.customerSnapshotName,
       customerAddress: dto.customerAddress,
       orderType: dto.orderType,
       tableId: dto.tableId,
-      promotionCode: dto.promotionCode,
-      paymentMethod: dto.paymentMethod,
-      splitAmounts: dto.splitAmounts,
+      cuponId: dto.cuponId,
+      payments: dto.payments,
       cashierId,
-      cashierName: dto.cashierName,
+      cashierSnapshotName: dto.cashierSnapshotName,
       isSentToKitchen,
       linkedTables: dto.linkedTables,
     });
+  }
+
+  private validatePaymentsSum(expectedTotal: number, payments: { amount: number }[]) {
+    const sum = payments.reduce((acc, p) => acc + p.amount, 0);
+    // Usar epsilon pequeño para evitar errores de precisión flotante en JS
+    if (Math.abs(sum - expectedTotal) > 0.01) {
+      throw new BadRequestException(`La suma de los pagos (${sum.toFixed(2)}) no coincide con el total de la orden (${expectedTotal.toFixed(2)}). No se puede marcar como pagada.`);
+    }
   }
 
   private async tryResolveActiveShiftId(): Promise<string | undefined> {
@@ -138,13 +146,25 @@ export class OrdersService {
     if (isFinal) return existing;
 
     const nextStatus = dto.status;
+    if (nextStatus === OrderStatusDto.paid) {
+      this.validatePaymentsSum(existing.total, existing.payments);
+    }
+
     const updateItemsKitchen = this.asKitchenStatusOrUndefined(nextStatus);
 
     const items = updateItemsKitchen
       ? existing.items.map((i) => ({ ...i, kitchenStatus: updateItemsKitchen }))
       : existing.items;
 
-    return this.repo.update(id, { status: nextStatus, items });
+    const updateData: Parameters<IOrdersRepository['update']>[1] = { status: nextStatus, items };
+
+    if (nextStatus === OrderStatusDto.cancelled) {
+      updateData.cancelReason = dto.cancelReason;
+      updateData.cancelledById = dto.cancelledById;
+      updateData.cancelledAt = new Date();
+    }
+
+    return this.repo.update(id, updateData);
   }
 
   async updateItems(id: string, dto: UpdateOrderItemsDto) {
@@ -159,7 +179,7 @@ export class OrdersService {
       subTotal: dto.subTotal === undefined ? undefined : dto.subTotal,
       discountAmount: dto.discountAmount === undefined ? undefined : dto.discountAmount,
       taxAmount: dto.taxAmount === undefined ? undefined : dto.taxAmount,
-      promotionCode: dto.promotionCode === undefined ? undefined : dto.promotionCode,
+      cuponId: dto.cuponId === undefined ? undefined : dto.cuponId,
       status: nextStatus,
     });
   }
@@ -169,6 +189,8 @@ export class OrdersService {
     if (existing.status === OrderStatusDto.paid) return existing;
 
     const finalTotal = dto.finalTotal ?? existing.total;
+    const finalPayments = dto.payments ?? existing.payments;
+    this.validatePaymentsSum(finalTotal, finalPayments);
 
     await this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({
@@ -178,7 +200,7 @@ export class OrdersService {
           status: true,
           total: true,
           cashierId: true,
-          cashierName: true,
+          cashierSnapshotName: true,
           shiftId: true,
           invoiceNumber: true,
         },
@@ -192,17 +214,20 @@ export class OrdersService {
           where: { id },
           data: {
             status: 'PAID',
-            paymentMethod: toDbPaymentMethod(dto.paymentMethod),
-            splitEfectivo: dto.splitAmounts?.efectivo ?? null,
-            splitTarjeta: dto.splitAmounts?.tarjeta ?? null,
-            customerName: dto.customerName ?? undefined,
+            ...(dto.payments !== undefined ? {
+              payments: {
+                deleteMany: {},
+                create: dto.payments.map(p => ({ method: toDbPaymentMethod(p.method), amount: p.amount })),
+              }
+            } : {}),
+            customerSnapshotName: dto.customerSnapshotName ?? undefined,
             customerAddress: dto.customerAddress ?? undefined,
             orderType: dto.orderType ? toDbOrderType(dto.orderType) : undefined,
             total: finalTotal,
             subTotal: dto.subTotal === undefined ? undefined : dto.subTotal,
             discountAmount: dto.discountAmount === undefined ? undefined : dto.discountAmount,
             taxAmount: dto.taxAmount === undefined ? undefined : dto.taxAmount,
-            promotionCode: dto.promotionCode === undefined ? undefined : dto.promotionCode,
+            cuponId: dto.cuponId === undefined ? undefined : dto.cuponId,
           },
         });
         return;
@@ -219,9 +244,21 @@ export class OrdersService {
             })
           )?.id;
 
-      const correlativo = await tx.correlativo.findFirst({
-        where: { documentType: DocumentType.FACTURA, status: CorrelativoStatus.ACTIVO },
-        orderBy: { createdAt: 'desc' },
+      const lockedRows = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "Correlativo"
+        WHERE "documentType" = 'FACTURA' AND "status" = 'ACTIVO'
+        ORDER BY "createdAt" DESC
+        LIMIT 1
+        FOR UPDATE
+      `;
+
+      const correlativoId = lockedRows[0]?.id;
+      if (!correlativoId) {
+        throw new BadRequestException('No hay correlativo ACTIVO para FACTURA');
+      }
+
+      const correlativo = await tx.correlativo.findUnique({
+        where: { id: correlativoId },
       });
 
       if (!correlativo) {
@@ -266,17 +303,20 @@ export class OrdersService {
         where: { id },
         data: {
           status: 'PAID',
-          paymentMethod: toDbPaymentMethod(dto.paymentMethod),
-          splitEfectivo: dto.splitAmounts?.efectivo ?? null,
-          splitTarjeta: dto.splitAmounts?.tarjeta ?? null,
-          customerName: dto.customerName ?? undefined,
+          ...(dto.payments !== undefined ? {
+            payments: {
+              deleteMany: {},
+              create: dto.payments.map(p => ({ method: toDbPaymentMethod(p.method), amount: p.amount })),
+            }
+          } : {}),
+          customerSnapshotName: dto.customerSnapshotName ?? undefined,
           customerAddress: dto.customerAddress ?? undefined,
           orderType: dto.orderType ? toDbOrderType(dto.orderType) : undefined,
           total: finalTotal,
           subTotal: dto.subTotal === undefined ? undefined : dto.subTotal,
           discountAmount: dto.discountAmount === undefined ? undefined : dto.discountAmount,
           taxAmount: dto.taxAmount === undefined ? undefined : dto.taxAmount,
-          promotionCode: dto.promotionCode === undefined ? undefined : dto.promotionCode,
+          cuponId: dto.cuponId === undefined ? undefined : dto.cuponId,
           shiftId: shiftId ?? null,
 
           invoiceCorrelativoId: correlativo.id,
@@ -289,17 +329,17 @@ export class OrdersService {
         },
       });
 
-      const user = order.cashierName ?? 'system';
+      const user = order.cashierSnapshotName ?? 'system';
       const details = JSON.stringify({
         orderId: order.id,
         invoiceNumber,
         issuedNumber,
         correlativoId: correlativo.id,
         resolutionNumber: correlativo.resolutionNumber,
-        paymentMethod: dto.paymentMethod,
+        payments: dto.payments,
         finalTotal,
-        discountAmount: dto.discountAmount,
-        promotionCode: dto.promotionCode,
+        taxAmount: dto.taxAmount,
+        cuponId: dto.cuponId,
       });
 
       await tx.systemLog.create({

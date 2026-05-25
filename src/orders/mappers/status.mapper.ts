@@ -113,8 +113,6 @@ export function toDbPaymentMethod(method: PaymentMethodDto): DbPaymentMethod {
       return DbPaymentMethod.TARJETA;
     case PaymentMethodDto.APP:
       return DbPaymentMethod.APP;
-    case PaymentMethodDto.MIXTO:
-      return DbPaymentMethod.MIXTO;
     default:
       throw new Error(`Unsupported PaymentMethodDto: ${String(method)}`);
   }
@@ -128,8 +126,6 @@ export function fromDbPaymentMethod(method: DbPaymentMethod): PaymentMethodDto {
       return PaymentMethodDto.TARJETA;
     case DbPaymentMethod.APP:
       return PaymentMethodDto.APP;
-    case DbPaymentMethod.MIXTO:
-      return PaymentMethodDto.MIXTO;
     default:
       throw new Error(`Unsupported DbPaymentMethod: ${String(method)}`);
   }
