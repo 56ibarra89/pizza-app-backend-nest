@@ -6,7 +6,6 @@ export interface CustomerAddressEntity {
 
 export interface CustomerEntity {
   id: string;
-  nameLower: string;
   name: string;
   phone?: string;
   addresses: CustomerAddressEntity[];

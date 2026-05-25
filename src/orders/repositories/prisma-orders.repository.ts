@@ -82,7 +82,6 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     customerSnapshotName?: string;
     customerAddress?: string;
     orderType?: import('../dto/order-type.dto').OrderTypeDto;
-    tableId?: string;
     cuponId?: number;
     payments?: { method: import('../dto/payment-method.dto').PaymentMethodDto; amount: number; cashierId?: string; cashierSnapshotName?: string }[];
     cashierId?: string;
@@ -107,7 +106,6 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         customerSnapshotName: data.customerSnapshotName ?? null,
         customerAddress: data.customerAddress ?? null,
         orderType: data.orderType ? toDbOrderType(data.orderType) : undefined,
-        tableId: data.tableId ?? null,
         cuponId: data.cuponId ?? null,
         ...(data.payments?.length
           ? {
@@ -135,7 +133,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
             size: toDbSize(i.size),
             quantity: i.quantity,
             note: i.note,
-            giftQuantity: i.giftQuantity,
+            giftQuantity: i.giftQuantity ?? 0,
             isSentToKitchen: i.isSentToKitchen ?? false,
             sentAt: i.sentAt ? new Date(i.sentAt) : undefined,
             kitchenStatus: i.kitchenStatus ? toDbKitchenStatus(i.kitchenStatus) : undefined,
@@ -169,7 +167,6 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       customerSnapshotName?: string | null;
       customerAddress?: string | null;
       orderType?: import('../dto/order-type.dto').OrderTypeDto | null;
-      tableId?: string | null;
       cuponId?: number | null;
       payments?: { method: import('../dto/payment-method.dto').PaymentMethodDto; amount: number; cashierId?: string; cashierSnapshotName?: string }[] | null;
       cashierId?: string | null;
@@ -207,12 +204,6 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           : data.orderType
             ? toDbOrderType(data.orderType)
             : null,
-      mesa:
-        data.tableId === undefined
-          ? undefined
-          : data.tableId
-            ? { connect: { id: data.tableId } }
-            : { disconnect: true },
       cupon:
         data.cuponId === undefined
           ? undefined
@@ -262,7 +253,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           size: toDbSize(i.size),
           quantity: i.quantity,
           note: i.note,
-          giftQuantity: i.giftQuantity,
+          giftQuantity: i.giftQuantity ?? 0,
           isSentToKitchen: i.isSentToKitchen ?? false,
           sentAt: i.sentAt ? new Date(i.sentAt) : undefined,
           kitchenStatus: i.kitchenStatus ? toDbKitchenStatus(i.kitchenStatus) : undefined,
@@ -321,7 +312,6 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     customerSnapshotName: string | null;
     customerAddress: string | null;
     orderType: import('@prisma/client').OrderType | null;
-    tableId: string | null;
     cuponId: number | null;
     cashierSnapshotName: string | null;
     cancelReason: string | null;
@@ -345,7 +335,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       size: import('@prisma/client').ProductSize;
       quantity: number;
       note: string | null;
-      giftQuantity: number | null;
+      giftQuantity: number;
       isSentToKitchen: boolean;
       sentAt: Date | null;
       kitchenStatus: KitchenStatus | null;
@@ -370,7 +360,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         quantity: i.quantity,
         extras: i.extras.map((e) => ({ name: e.name, price: e.price.toNumber() })),
         note: i.note ?? undefined,
-        giftQuantity: i.giftQuantity ?? undefined,
+        giftQuantity: i.giftQuantity,
         isSentToKitchen: i.isSentToKitchen,
         sentAt: i.sentAt ? i.sentAt.getTime() : undefined,
         kitchenStatus: i.kitchenStatus ? fromDbKitchenStatus(i.kitchenStatus) : undefined,
@@ -384,7 +374,6 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       customerSnapshotName: o.customerSnapshotName ?? undefined,
       customerAddress: o.customerAddress ?? undefined,
       orderType: o.orderType ? fromDbOrderType(o.orderType) : undefined,
-      tableId: o.tableId ?? undefined,
       cuponId: o.cuponId ?? undefined,
       cashierSnapshotName: o.cashierSnapshotName ?? undefined,
       cancelReason: o.cancelReason ?? undefined,

@@ -26,7 +26,6 @@ export interface IOrdersRepository {
     customerSnapshotName?: string;
     customerAddress?: string;
     orderType?: OrderTypeDto;
-    tableId?: string;
     cuponId?: number;
     payments?: { method: PaymentMethodDto; amount: number }[];
     cashierId?: string;
@@ -47,7 +46,6 @@ export interface IOrdersRepository {
     customerSnapshotName?: string | null;
     customerAddress?: string | null;
     orderType?: OrderTypeDto | null;
-    tableId?: string | null;
     cuponId?: number | null;
     payments?: { method: PaymentMethodDto; amount: number }[] | null;
     cashierId?: string | null;

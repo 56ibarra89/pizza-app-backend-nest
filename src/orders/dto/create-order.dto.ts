@@ -74,9 +74,7 @@ export class CreateOrderDto {
   @IsString()
   customerAddress?: string;
 
-  @IsOptional()
-  @IsString()
-  tableId?: string;
+  
 
   @IsOptional()
   @IsInt()

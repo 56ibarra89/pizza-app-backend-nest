@@ -39,7 +39,7 @@ export class OrdersService {
   async create(dto: CreateOrderDto) {
     const status = dto.status ?? (dto.payments?.length ? OrderStatusDto.paid : OrderStatusDto.pending);
     const timestamp = dto.timestamp ?? new Date();
-    const isSentToKitchen = dto.isSentToKitchen ?? !dto.tableId;
+    const isSentToKitchen = dto.isSentToKitchen ?? !(dto.linkedTables && dto.linkedTables.length > 0);
 
     const customerId = dto.customerId ?? (await this.tryResolveCustomerId(dto.customerSnapshotName));
     const cashierId = dto.cashierId ?? (await this.tryResolveCashierId(dto.cashierSnapshotName));
@@ -49,7 +49,7 @@ export class OrdersService {
       id: dto.id,
       shiftId,
       customerId,
-      items: dto.items,
+      items: dto.items.map(item => ({ ...item, giftQuantity: item.giftQuantity ?? 0 })),
       subTotal: dto.subTotal,
       discountAmount: dto.discountAmount,
       taxAmount: dto.taxAmount,
@@ -59,7 +59,6 @@ export class OrdersService {
       customerSnapshotName: dto.customerSnapshotName,
       customerAddress: dto.customerAddress,
       orderType: dto.orderType,
-      tableId: dto.tableId,
       cuponId: dto.cuponId,
       payments: dto.payments,
       cashierId,
@@ -88,11 +87,11 @@ export class OrdersService {
 
   private async tryResolveCustomerId(customerName?: string): Promise<string | undefined> {
     if (!customerName) return undefined;
-    const nameLower = customerName.trim().toLowerCase();
-    if (!nameLower) return undefined;
+    const trimmedName = customerName.trim();
+    if (!trimmedName) return undefined;
 
-    const found = await this.prisma.customer.findUnique({
-      where: { nameLower },
+    const found = await this.prisma.customer.findFirst({
+      where: { name: { equals: customerName.trim(), mode: 'insensitive' } },
       select: { id: true },
     });
     return found?.id;
@@ -171,10 +170,11 @@ export class OrdersService {
     const existing = await this.getById(id);
     const isFinal = existing.status === OrderStatusDto.paid || existing.status === OrderStatusDto.cancelled;
 
-    const nextStatus = isFinal ? existing.status : this.deriveStatusAfterItemsChange(existing, dto.items);
+    const mappedItems = dto.items.map(item => ({ ...item, giftQuantity: item.giftQuantity ?? 0 }));
+    const nextStatus = isFinal ? existing.status : this.deriveGlobalStatus(mappedItems as any);
 
     return this.repo.update(id, {
-      items: dto.items,
+      items: mappedItems as any,
       total: dto.total,
       subTotal: dto.subTotal === undefined ? undefined : dto.subTotal,
       discountAmount: dto.discountAmount === undefined ? undefined : dto.discountAmount,
@@ -358,39 +358,24 @@ export class OrdersService {
   }
 
   private deriveGlobalStatus(items: CartItemEntity[]): OrderStatusDto {
-    const sentItems = items.filter((i) => i.isSentToKitchen);
+    if (items.length === 0) return OrderStatusDto.pending;
 
-    const allDelivered =
-      items.length > 0 &&
-      items.every((i) => i.kitchenStatus === KitchenStatusDto.delivered || !i.isSentToKitchen);
-    const anyPending = sentItems.some((i) => i.kitchenStatus === KitchenStatusDto.pending);
-    const anyPreparing = sentItems.some((i) => i.kitchenStatus === KitchenStatusDto.preparing);
-    const anyReady = sentItems.some((i) => i.kitchenStatus === KitchenStatusDto.ready);
+    const hasUnsent = items.some((i) => !i.isSentToKitchen);
+    if (hasUnsent) return OrderStatusDto.pending;
 
-    if (allDelivered) return OrderStatusDto.delivered;
+    const anyPending = items.some((i) => i.kitchenStatus === KitchenStatusDto.pending);
     if (anyPending) return OrderStatusDto.pending;
+
+    const anyPreparing = items.some((i) => i.kitchenStatus === KitchenStatusDto.preparing);
     if (anyPreparing) return OrderStatusDto.preparing;
+
+    const allDelivered = items.every((i) => i.kitchenStatus === KitchenStatusDto.delivered);
+    if (allDelivered) return OrderStatusDto.delivered;
+
+    const anyReady = items.some((i) => i.kitchenStatus === KitchenStatusDto.ready);
     if (anyReady) return OrderStatusDto.ready;
+
     return OrderStatusDto.pending;
-  }
-
-  private deriveStatusAfterItemsChange(existing: { status: OrderStatusDto }, items: CartItemEntity[]) {
-    const hasNewItems = items.some((i) => !i.isSentToKitchen);
-    const sentItems = items.filter((i) => i.isSentToKitchen);
-
-    const allDelivered =
-      sentItems.length > 0 &&
-      sentItems.every((i) => i.kitchenStatus === KitchenStatusDto.delivered);
-    const anyPreparing = sentItems.some((i) => i.kitchenStatus === KitchenStatusDto.preparing);
-    const anyReady = sentItems.some((i) => i.kitchenStatus === KitchenStatusDto.ready);
-
-    let newStatus = existing.status;
-    if (hasNewItems) newStatus = OrderStatusDto.pending;
-    else if (allDelivered) newStatus = OrderStatusDto.delivered;
-    else if (anyReady) newStatus = OrderStatusDto.ready;
-    else if (anyPreparing) newStatus = OrderStatusDto.preparing;
-
-    return newStatus;
   }
 
   private asKitchenStatusOrUndefined(status: OrderStatusDto): KitchenStatusDto | undefined {

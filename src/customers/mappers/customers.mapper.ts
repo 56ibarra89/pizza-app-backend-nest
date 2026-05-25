@@ -15,7 +15,6 @@ export function toCustomerResponseDto(entity: CustomerEntity): CustomerResponseD
 
   return {
     id: entity.id,
-    nameLower: entity.nameLower,
     name: entity.name,
     phone: entity.phone,
     addresses,

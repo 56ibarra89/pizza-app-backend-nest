@@ -140,13 +140,21 @@ model User {
   payments          Payment[]
   cancelledOrders   Order[]     @relation("OrderCancelledBy")
 
+  createdHappyHours HappyHourPromotion[] @relation("HappyHourCreatedBy")
+  updatedHappyHours HappyHourPromotion[] @relation("HappyHourUpdatedBy")
+  createdDiscounts  DiscountPromotion[]  @relation("DiscountCreatedBy")
+  updatedDiscounts  DiscountPromotion[]  @relation("DiscountUpdatedBy")
+  createdCupones    Cupon[]              @relation("CuponCreatedBy")
+  updatedCupones    Cupon[]              @relation("CuponUpdatedBy")
+  createdCertificados Certificado[]      @relation("CertificadoCreatedBy")
+  updatedCertificados Certificado[]      @relation("CertificadoUpdatedBy")
+
   @@index([role])
   @@index([isActive])
 }
 
 model Customer {
   id        String            @id @default(uuid())
-  nameLower String            @unique
   name      String
   phone     String?
   addresses CustomerAddress[]
@@ -180,7 +188,6 @@ model Mesa {
   reservationName String?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
-  orders          Order[]
   linkedOrders    OrderTable[]
 
   @@unique([floor, number])
@@ -234,8 +241,6 @@ model Order {
   customerSnapshotName String?
   customerAddress      String?
   orderType            OrderType?
-  tableId              String?
-  mesa                 Mesa?      @relation(fields: [tableId], references: [id], onDelete: SetNull)
 
   cuponId Int?
   cupon   Cupon? @relation(fields: [cuponId], references: [id], onDelete: SetNull)
@@ -320,7 +325,8 @@ model OrderItem {
   size            ProductSize
   quantity        Int
   note            String?
-  giftQuantity    Int?
+  giftQuantity    Int       @default(0)
+  giftReason      String?
   isSentToKitchen Boolean          @default(false)
   sentAt          DateTime?
   kitchenStatus   KitchenStatus?
@@ -408,6 +414,10 @@ model HappyHourPromotion {
   status         PromoActiveStatus      @default(ACTIVO)
   /// Campo libre para tipo 2x1 (texto descriptivo del ítem)
   appliesTo      String?
+  createdById    String?
+  createdBy      User?                  @relation("HappyHourCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById    String?
+  updatedBy      User?                  @relation("HappyHourUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   createdAt      DateTime               @default(now())
   updatedAt      DateTime               @updatedAt
 
@@ -418,6 +428,8 @@ model HappyHourPromotion {
 
   @@index([status])
   @@index([deletedAt])
+  @@index([createdById])
+  @@index([updatedById])
 }
 
 /// Relación N:M entre HappyHour y productos específicos
@@ -450,6 +462,10 @@ model DiscountPromotion {
   discountType  CuponDiscountType
   discountValue Decimal           @db.Decimal(10, 4)
   status        PromoActiveStatus @default(ACTIVO)
+  createdById   String?
+  createdBy     User?             @relation("DiscountCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById   String?
+  updatedBy     User?             @relation("DiscountUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 
@@ -460,6 +476,8 @@ model DiscountPromotion {
 
   @@index([status])
   @@index([deletedAt])
+  @@index([createdById])
+  @@index([updatedById])
 }
 
 /// Relación N:M entre DiscountPromotion y productos específicos
@@ -495,6 +513,10 @@ model Cupon {
   currentUses   Int               @default(0)
   expiresDate   DateTime?
   manualStatus  CuponManualStatus @default(ACTIVO)
+  createdById   String?
+  createdBy     User?             @relation("CuponCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById   String?
+  updatedBy     User?             @relation("CuponUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 
@@ -505,6 +527,8 @@ model Cupon {
   @@index([manualStatus])
   @@index([code])
   @@index([deletedAt])
+  @@index([createdById])
+  @@index([updatedById])
 }
 
 model Certificado {
@@ -524,12 +548,18 @@ model Certificado {
 
   items CertificadoItem[]
 
+  createdById String?
+  createdBy   User?     @relation("CertificadoCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String?
+  updatedBy   User?     @relation("CertificadoUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
   @@index([status])
   @@index([deletedAt])
+  @@index([createdById])
+  @@index([updatedById])
 }
 
 model CertificadoItem {

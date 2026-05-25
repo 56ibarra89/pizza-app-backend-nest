@@ -28,7 +28,6 @@ export interface OrderEntity {
   customerSnapshotName?: string;
   customerAddress?: string;
   orderType?: OrderTypeDto;
-  tableId?: string;
   cuponId?: number;
 
   cashierSnapshotName?: string;

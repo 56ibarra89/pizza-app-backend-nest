@@ -24,7 +24,6 @@ export function toOrderResponseDto(order: OrderEntity) {
     customerSnapshotName: order.customerSnapshotName,
     orderType: order.orderType,
     customerAddress: order.customerAddress,
-    tableId: order.tableId,
     cuponId: order.cuponId,
     payments: order.payments,
     cashierSnapshotName: order.cashierSnapshotName,

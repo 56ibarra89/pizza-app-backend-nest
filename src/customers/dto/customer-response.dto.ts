@@ -6,7 +6,6 @@ export interface CustomerAddressResponseDto {
 
 export interface CustomerResponseDto {
   id: string;
-  nameLower: string;
   name: string;
   phone?: string;
   addresses: CustomerAddressResponseDto[];

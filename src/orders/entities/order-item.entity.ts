@@ -14,7 +14,8 @@ export interface CartItemEntity {
   quantity: number;
   extras: SelectedExtraEntity[];
   note?: string;
-  giftQuantity?: number;
+  giftQuantity: number;
+  giftReason?: string;
   isSentToKitchen?: boolean;
   sentAt?: number;
   kitchenStatus?: KitchenStatusDto;

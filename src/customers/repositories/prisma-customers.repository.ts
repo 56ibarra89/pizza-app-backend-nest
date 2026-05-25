@@ -22,7 +22,6 @@ export class PrismaCustomersRepository implements ICustomersRepository {
     const customers = await this.prisma.customer.findMany({
       where: {
         OR: [
-          { nameLower: { contains: q.toLowerCase() } },
           { name: { contains: q, mode: 'insensitive' } },
           { phone: { contains: q } },
         ],
@@ -42,8 +41,8 @@ export class PrismaCustomersRepository implements ICustomersRepository {
   }
 
   async findByNameLower(nameLower: string): Promise<CustomerEntity | null> {
-    const found = await this.prisma.customer.findUnique({
-      where: { nameLower },
+    const found = await this.prisma.customer.findFirst({
+      where: { name: { equals: nameLower, mode: 'insensitive' } },
       include: { addresses: { orderBy: { lastUsed: 'desc' } } },
     });
     return found ? this.mapCustomer(found) : null;
@@ -61,8 +60,8 @@ export class PrismaCustomersRepository implements ICustomersRepository {
     const address = params.address?.trim() || undefined;
 
     return this.prisma.$transaction(async (tx) => {
-      const existing = await tx.customer.findUnique({
-        where: { nameLower },
+      const existing = await tx.customer.findFirst({
+        where: { name: { equals: nameLower, mode: 'insensitive' } },
         include: { addresses: true },
       });
 
@@ -72,7 +71,6 @@ export class PrismaCustomersRepository implements ICustomersRepository {
         const created = await tx.customer.create({
           data: {
             name: cleanName,
-            nameLower,
             phone,
             addresses: address
               ? {
@@ -132,12 +130,11 @@ export class PrismaCustomersRepository implements ICustomersRepository {
     id: string,
     dto: { name?: string; phone?: string },
   ): Promise<CustomerEntity> {
-    const data: { name?: string; nameLower?: string; phone?: string | null } = {};
+    const data: { name?: string; phone?: string | null } = {};
 
     if (dto.name !== undefined) {
       const clean = dto.name.trim();
       data.name = clean;
-      data.nameLower = clean.toLowerCase();
     }
     if (dto.phone !== undefined) {
       data.phone = dto.phone.trim() || null;
@@ -158,7 +155,6 @@ export class PrismaCustomersRepository implements ICustomersRepository {
 
   private mapCustomer(c: {
     id: string;
-    nameLower: string;
     name: string;
     phone: string | null;
     createdAt: Date;
@@ -167,7 +163,6 @@ export class PrismaCustomersRepository implements ICustomersRepository {
   }): CustomerEntity {
     return {
       id: c.id,
-      nameLower: c.nameLower,
       name: c.name,
       phone: c.phone ?? undefined,
       addresses: c.addresses.map((a) => ({
