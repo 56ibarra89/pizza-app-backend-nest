@@ -8,7 +8,6 @@ export function toUserResponseDto(entity: UserEntity): UserResponseDto {
     email: entity.email,
     firstName: entity.firstName,
     lastName: entity.lastName,
-    pin: entity.pin,
     role: entity.role,
     isActive: entity.isActive,
     createdAt: entity.createdAt.toISOString(),
