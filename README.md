@@ -61,6 +61,33 @@ En el proyecto puedes ejecutar los siguientes scripts:
 
 ---
 
+## ☁️ Deploy en Heroku (Node + Postgres + Prisma)
+
+Este proyecto ya incluye lo necesario para Heroku:
+
+- `Procfile`:
+	- `web: npm run start:prod`
+	- `release: npm run prisma:migrate:deploy` (aplica migraciones en cada deploy)
+- `package.json`:
+	- `heroku-postbuild`: genera Prisma Client + compila Nest (`dist/`)
+
+### Variables de entorno requeridas
+
+- `DATABASE_URL`: lo crea automáticamente el addon de Heroku Postgres.
+- `PORT`: lo asigna Heroku automáticamente (el backend ya lo usa).
+
+Nota: si tu instancia de Postgres requiere SSL y tu `DATABASE_URL` no trae `sslmode=require`, agrégalo en la config de Heroku.
+
+### Pasos rápidos (CLI)
+
+1. Crear app y agregar Postgres
+2. Configurar variables (si aplica)
+3. Deploy
+
+Después, abre `https://<tu-app>.herokuapp.com/docs` para ver Swagger.
+
+---
+
 ## 📐 Aspectos Destacados del Diseño y Arquitectura
 
 * **Separación de Usuarios**: El sistema diferencia estrictamente a los usuarios administrativos/personal (`User`) con roles específicos (`ADMIN`, `CAJERO`, `MESERO`, `COCINERO`) de los clientes finales (`Customer`) que realizan los pedidos.
