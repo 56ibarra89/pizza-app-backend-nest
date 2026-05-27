@@ -1,7 +1,9 @@
 import { Body, Controller, Get, Param, Put } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { AppConfigService } from '../services/app-config.service';
 import { UpdateAppConfigDto } from '../dto/update-app-config.dto';
 
+@ApiTags('config')
 @Controller('config')
 export class AppConfigController {
   constructor(private readonly service: AppConfigService) {}

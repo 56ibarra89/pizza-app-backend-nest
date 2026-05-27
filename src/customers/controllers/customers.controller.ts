@@ -9,11 +9,13 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { CustomersService } from '../services/customers.service';
 import { UpsertCustomerDto } from '../dto/upsert-customer.dto';
 import { UpdateCustomerDto } from '../dto/update-customer.dto';
 import { toCustomerResponseDto } from '../mappers/customers.mapper';
 
+@ApiTags('customers')
 @Controller('customers')
 export class CustomersController {
   constructor(private readonly customers: CustomersService) {}

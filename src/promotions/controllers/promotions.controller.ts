@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { PromotionsService } from '../services/promotions.service';
 import { CreateHappyHourDto } from '../dto/happy-hours/create-happy-hour.dto';
 import { UpdateHappyHourDto } from '../dto/happy-hours/update-happy-hour.dto';
@@ -19,6 +20,7 @@ import { RedeemCuponDto } from '../dto/cupones/redeem-cupon.dto';
 import { CreateCertificadoDto } from '../dto/certificados/create-certificado.dto';
 import { RedeemCertificadoDto } from '../dto/certificados/redeem-certificado.dto';
 
+@ApiTags('promotions')
 @Controller('promotions')
 export class PromotionsController {
   constructor(private readonly promotions: PromotionsService) {}

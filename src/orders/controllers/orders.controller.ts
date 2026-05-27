@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { OrdersService } from '../services/orders.service';
 import { CreateOrderDto } from '../dto/create-order.dto';
 import { UpdateOrderStatusDto } from '../dto/update-order-status.dto';
@@ -6,6 +7,7 @@ import { UpdateOrderItemsDto } from '../dto/update-order-items.dto';
 import { FinalizeOrderDto } from '../dto/finalize-order.dto';
 import { toOrderResponseDto } from '../mappers/orders.mapper';
 
+@ApiTags('orders')
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}

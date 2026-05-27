@@ -1,9 +1,11 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { ShiftsService } from '../services/shifts.service';
 import { OpenShiftDto } from '../dto/open-shift.dto';
 import { CloseShiftDto } from '../dto/close-shift.dto';
 import { ListShiftsQueryDto } from '../dto/list-shifts-query.dto';
 
+@ApiTags('shifts')
 @Controller('shifts')
 export class ShiftsController {
   constructor(private readonly service: ShiftsService) {}

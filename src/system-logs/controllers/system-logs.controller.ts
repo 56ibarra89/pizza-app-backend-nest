@@ -1,8 +1,10 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { SystemLogsService } from '../services/system-logs.service';
 import { CreateSystemLogDto } from '../dto/create-system-log.dto';
 import { GetSystemLogsQueryDto } from '../dto/get-system-logs-query.dto';
 
+@ApiTags('system-logs')
 @Controller('system-logs')
 export class SystemLogsController {
   constructor(private readonly service: SystemLogsService) {}

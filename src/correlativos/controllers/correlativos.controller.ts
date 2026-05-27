@@ -1,9 +1,11 @@
 import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { CorrelativosService } from '../services/correlativos.service';
 import { CreateCorrelativoDto } from '../dto/create-correlativo.dto';
 import { ConsumeCorrelativoDto } from '../dto/consume-correlativo.dto';
 import { GetActiveCorrelativoQueryDto } from '../dto/get-active-correlativo-query.dto';
 
+@ApiTags('correlativos')
 @Controller('correlativos')
 export class CorrelativosController {
   constructor(private readonly service: CorrelativosService) {}
