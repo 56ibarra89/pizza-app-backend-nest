@@ -13,5 +13,6 @@ import { PrismaAppConfigRepository } from './repositories/prisma-app-config.repo
       useClass: PrismaAppConfigRepository,
     },
   ],
+  exports: [AppConfigService],
 })
 export class AppConfigModule {}

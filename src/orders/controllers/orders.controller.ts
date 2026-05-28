@@ -42,6 +42,12 @@ export class OrdersController {
     return toOrderResponseDto(updated);
   }
 
+  @Patch(':id/tables')
+  async updateTables(@Param('id') id: string, @Body('tableIds') tableIds: string[]) {
+    const updated = await this.orders.updateTables(id, tableIds);
+    return toOrderResponseDto(updated);
+  }
+
   @Patch(':id/finalize')
   async finalize(@Param('id') id: string, @Body() dto: FinalizeOrderDto) {
     const updated = await this.orders.finalize(id, dto);

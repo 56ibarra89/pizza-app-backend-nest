@@ -166,6 +166,27 @@ export class OrdersService {
     return this.repo.update(id, updateData);
   }
 
+  async updateTables(id: string, tableIds: string[]) {
+    await this.prisma.$transaction(async (tx) => {
+      // Clear existing links
+      await tx.orderTable.deleteMany({
+        where: { orderId: id },
+      });
+
+      // Create new links
+      if (tableIds && tableIds.length > 0) {
+        await tx.orderTable.createMany({
+          data: tableIds.map((tId) => ({
+            orderId: id,
+            tableId: tId,
+          })),
+        });
+      }
+    });
+
+    return this.getById(id);
+  }
+
   async updateItems(id: string, dto: UpdateOrderItemsDto) {
     const existing = await this.getById(id);
     const isFinal = existing.status === OrderStatusDto.paid || existing.status === OrderStatusDto.cancelled;

@@ -15,6 +15,7 @@ import { SystemLogsModule } from './system-logs/system-logs.module';
 import { CorrelativosModule } from './correlativos/correlativos.module';
 import { ShiftsModule } from './shifts/shifts.module';
 import { ApiKeyGuard } from './common/guards/api-key.guard';
+import { MesasModule } from './mesas/mesas.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { ApiKeyGuard } from './common/guards/api-key.guard';
     SystemLogsModule,
     CorrelativosModule,
     ShiftsModule,
+    MesasModule,
   ],
   controllers: [AppController],
   providers: [
