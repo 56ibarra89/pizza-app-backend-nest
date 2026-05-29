@@ -332,7 +332,6 @@ export class OrdersService {
         return; // Ya cubierto arriba
       }
 
-      const now = new Date();
       if (correlativo.expirationDate < now) {
         await tx.correlativo.update({
           where: { id: correlativo.id },
