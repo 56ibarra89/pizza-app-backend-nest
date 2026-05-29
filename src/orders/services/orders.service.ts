@@ -351,8 +351,7 @@ export class OrdersService {
 
       const width = String(correlativo.endNumber).length;
       const padded = String(issuedNumber).padStart(width, '0');
-      const prefix = correlativo.prefix ?? '';
-      const invoiceNumber = `${prefix}${padded}`;
+      const invoiceNumber = `${correlativo.prefix ?? ''}${padded}`;
 
       const nextNumber = issuedNumber + 1;
       const nextStatus = nextNumber > correlativo.endNumber ? CorrelativoStatus.AGOTADO : correlativo.status;
