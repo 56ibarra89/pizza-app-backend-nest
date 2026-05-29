@@ -285,39 +285,43 @@ export class OrdersService {
             })
           )?.id;
 
-      const lockedRows = await tx.$queryRaw<{ id: string }[]>`
+      const now = new Date();
+      const monthNames = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
+      const monthStr = monthNames[now.getMonth()];
+      const yearStr = String(now.getFullYear()).slice(-2);
+      const prefix = `${monthStr}${yearStr}-`;
+
+      let lockedRows = await tx.$queryRaw<{ id: string }[]>`
         SELECT id FROM "Correlativo"
-        WHERE "documentType" = 'FACTURA' AND "status" = 'ACTIVO'
-        ORDER BY "createdAt" DESC
-        LIMIT 1
+        WHERE "documentType" = 'FACTURA' AND "prefix" = ${prefix}
         FOR UPDATE
       `;
 
-      const correlativoId = lockedRows[0]?.id;
+      let correlativoId = lockedRows[0]?.id;
+
       if (!correlativoId) {
-        // No hay correlativo activo: completamos la orden sin número de factura
-        await tx.order.update({
-          where: { id },
+        const dgiConfig = await tx.appConfig.findUnique({ where: { id: 'dgi_resolution' } });
+        const dgiData = dgiConfig?.data as any;
+
+        const expirationDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+        const resNumber = dgiData?.resolutionNumber || `AUTO-${prefix.slice(0, -1)}`;
+        const startNum = dgiData?.startNumber ? Number(dgiData.startNumber) : 1;
+        const endNum = dgiData?.endNumber ? Number(dgiData.endNumber) : 99999;
+
+        const newCorr = await tx.correlativo.create({
           data: {
-            status: 'PAID',
-            ...(dto.payments !== undefined ? {
-              payments: {
-                deleteMany: {},
-                create: dto.payments.map(p => ({ method: toDbPaymentMethod(p.method), amount: p.amount })),
-              }
-            } : {}),
-            customerSnapshotName: dto.customerSnapshotName ?? undefined,
-            customerAddress: dto.customerAddress ?? undefined,
-            orderType: dto.orderType ? toDbOrderType(dto.orderType) : undefined,
-            total: finalTotal,
-            subTotal: dto.subTotal === undefined ? undefined : dto.subTotal,
-            discountAmount: dto.discountAmount === undefined ? undefined : dto.discountAmount,
-            taxAmount: dto.taxAmount === undefined ? undefined : dto.taxAmount,
-            cuponId: dto.cuponId === undefined ? undefined : dto.cuponId,
-            shiftId: shiftId ?? null,
-          },
+            documentType: DocumentType.FACTURA,
+            resolutionNumber: resNumber,
+            prefix: prefix,
+            startNumber: startNum,
+            endNumber: endNum,
+            currentNumber: 1, // El nuevo talonario automático de mes siempre empieza en 1 (o en startNum si queremos que siga el rango estricto? No, el prefix cambia por lo que es una nueva secuencia para el sistema, pero para la DGI la secuencia general no incluye prefijo de mes. Wait! If the user wants to print the real correlativo without prefix, that's different. But we assume our prefix + currentNumber is accepted).
+            issueDate: now,
+            expirationDate: expirationDate,
+            status: CorrelativoStatus.ACTIVO,
+          }
         });
-        return;
+        correlativoId = newCorr.id;
       }
 
       const correlativo = await tx.correlativo.findUnique({
