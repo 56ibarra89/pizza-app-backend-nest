@@ -26,7 +26,7 @@ export class MesasService {
 
   async getFloorsConfig() {
     const config = await this.appConfigService.getByIdOrDefault(FLOORS_CONFIG_KEY);
-    if (!config.data || Object.keys(config.data).length === 0) {
+    if (!config.data || (!Array.isArray(config.data) && Object.keys(config.data).length === 0)) {
       return DEFAULT_FLOORS;
     }
     return config.data as UpdateFloorDto[];
