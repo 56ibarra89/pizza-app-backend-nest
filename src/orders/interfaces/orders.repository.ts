@@ -10,6 +10,7 @@ export const ORDERS_REPOSITORY = Symbol('ORDERS_REPOSITORY');
 export interface IOrdersRepository {
   listTodayOrActive(now: Date): Promise<OrderEntity[]>;
   listAll(): Promise<OrderEntity[]>;
+  listByDateRange(startDate: Date, endDate: Date): Promise<OrderEntity[]>;
   findById(id: string): Promise<OrderEntity | null>;
 
   create(data: {

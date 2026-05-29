@@ -56,6 +56,24 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     return orders.map((o) => this.mapOrder(o));
   }
 
+  async listByDateRange(startDate: Date, endDate: Date): Promise<OrderEntity[]> {
+    const orders = await this.prisma.order.findMany({
+      where: {
+        timestamp: {
+          gte: startDate,
+          lte: endDate,
+        },
+      },
+      include: {
+        payments: true,
+        items: { include: { extras: true }, orderBy: { id: 'asc' } },
+        linkedTables: { select: { tableId: true } },
+      },
+      orderBy: { timestamp: 'desc' },
+    });
+    return orders.map((o) => this.mapOrder(o));
+  }
+
   async findById(id: string): Promise<OrderEntity | null> {
     const found = await this.prisma.order.findUnique({
       where: { id },

@@ -30,6 +30,10 @@ export class OrdersService {
     return this.repo.listAll();
   }
 
+  listByDateRange(startDate: Date, endDate: Date) {
+    return this.repo.listByDateRange(startDate, endDate);
+  }
+
   async getById(id: string) {
     const found = await this.repo.findById(id);
     if (!found) throw new NotFoundException('Orden no encontrada');
@@ -45,7 +49,7 @@ export class OrdersService {
     const cashierId = dto.cashierId ?? (await this.tryResolveCashierId(dto.cashierSnapshotName));
     const shiftId = dto.shiftId ?? (await this.tryResolveActiveShiftId());
 
-    return this.repo.create({
+    const created = await this.repo.create({
       id: dto.id,
       shiftId,
       customerId,
@@ -54,18 +58,34 @@ export class OrdersService {
       discountAmount: dto.discountAmount,
       taxAmount: dto.taxAmount,
       total: dto.total,
-      status,
+      status: status === OrderStatusDto.paid ? OrderStatusDto.pending : status,
       timestamp,
       customerSnapshotName: dto.customerSnapshotName,
       customerAddress: dto.customerAddress,
       orderType: dto.orderType,
       cuponId: dto.cuponId,
-      payments: dto.payments,
+      payments: status === OrderStatusDto.paid ? undefined : dto.payments,
       cashierId,
       cashierSnapshotName: dto.cashierSnapshotName,
       isSentToKitchen,
       linkedTables: dto.linkedTables,
     });
+
+    if (status === OrderStatusDto.paid) {
+      return this.finalize(created.id, {
+        payments: dto.payments,
+        customerSnapshotName: dto.customerSnapshotName,
+        customerAddress: dto.customerAddress,
+        orderType: dto.orderType,
+        subTotal: dto.subTotal,
+        taxAmount: dto.taxAmount,
+        discountAmount: dto.discountAmount,
+        finalTotal: dto.total,
+        cuponId: dto.cuponId,
+      });
+    }
+
+    return created;
   }
 
   private validatePaymentsSum(expectedTotal: number, payments: { amount: number }[]) {
@@ -275,7 +295,29 @@ export class OrdersService {
 
       const correlativoId = lockedRows[0]?.id;
       if (!correlativoId) {
-        throw new BadRequestException('No hay correlativo ACTIVO para FACTURA');
+        // No hay correlativo activo: completamos la orden sin número de factura
+        await tx.order.update({
+          where: { id },
+          data: {
+            status: 'PAID',
+            ...(dto.payments !== undefined ? {
+              payments: {
+                deleteMany: {},
+                create: dto.payments.map(p => ({ method: toDbPaymentMethod(p.method), amount: p.amount })),
+              }
+            } : {}),
+            customerSnapshotName: dto.customerSnapshotName ?? undefined,
+            customerAddress: dto.customerAddress ?? undefined,
+            orderType: dto.orderType ? toDbOrderType(dto.orderType) : undefined,
+            total: finalTotal,
+            subTotal: dto.subTotal === undefined ? undefined : dto.subTotal,
+            discountAmount: dto.discountAmount === undefined ? undefined : dto.discountAmount,
+            taxAmount: dto.taxAmount === undefined ? undefined : dto.taxAmount,
+            cuponId: dto.cuponId === undefined ? undefined : dto.cuponId,
+            shiftId: shiftId ?? null,
+          },
+        });
+        return;
       }
 
       const correlativo = await tx.correlativo.findUnique({
@@ -283,7 +325,7 @@ export class OrdersService {
       });
 
       if (!correlativo) {
-        throw new BadRequestException('No hay correlativo ACTIVO para FACTURA');
+        return; // Ya cubierto arriba
       }
 
       const now = new Date();

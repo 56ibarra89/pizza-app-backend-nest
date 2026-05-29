@@ -13,7 +13,18 @@ export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
   @Get()
-  async list(@Query('scope') scope?: 'all' | 'todayOrActive') {
+  async list(
+    @Query('scope') scope?: 'all' | 'todayOrActive',
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      const list = await this.orders.listByDateRange(start, end);
+      return list.map(toOrderResponseDto);
+    }
+    
     const list = scope === 'all' ? await this.orders.listAll() : await this.orders.listTodayOrActive();
     return list.map(toOrderResponseDto);
   }
