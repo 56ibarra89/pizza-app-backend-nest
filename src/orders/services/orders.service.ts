@@ -222,6 +222,7 @@ export class OrdersService {
       taxAmount: dto.taxAmount === undefined ? undefined : dto.taxAmount,
       cuponId: dto.cuponId === undefined ? undefined : dto.cuponId,
       status: nextStatus,
+      isSentToKitchen: dto.isSentToKitchen,
     });
   }
 

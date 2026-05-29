@@ -71,6 +71,7 @@ export class MesasService {
         const toCreate: Prisma.MesaCreateManyInput[] = [];
         for (let i = currentCount + 1; i <= floor.tableCount; i++) {
           toCreate.push({
+            id: `F${floor.id}-M${i}`,
             floor: floor.id,
             number: i,
             estado: 'DISPONIBLE' as const,
