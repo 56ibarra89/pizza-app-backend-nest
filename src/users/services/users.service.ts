@@ -32,12 +32,18 @@ export class UsersService {
     return found;
   }
 
+  async getByUsername(username: string) {
+    const found = await this.repo.findByUsername(username.toLowerCase());
+    if (!found) throw new NotFoundException('Usuario no encontrado');
+    return found;
+  }
+
   async create(dto: CreateUserDto) {
     const passwordHash = dto.password ? await this.hasher.hash(dto.password) : undefined;
     try {
       return await this.repo.create({
-        username: dto.username,
-        email: dto.email,
+        username: dto.username.toLowerCase(),
+        email: dto.email ? dto.email.toLowerCase() : undefined,
         firstName: dto.firstName,
         lastName: dto.lastName,
         pin: dto.pin,
@@ -59,8 +65,8 @@ export class UsersService {
 
     try {
       return await this.repo.update(id, {
-        username: dto.username,
-        email: dto.email === undefined ? undefined : dto.email || null,
+        username: dto.username ? dto.username.toLowerCase() : undefined,
+        email: dto.email === undefined ? undefined : (dto.email ? dto.email.toLowerCase() : null),
         firstName: dto.firstName,
         lastName: dto.lastName,
         pin: dto.pin,

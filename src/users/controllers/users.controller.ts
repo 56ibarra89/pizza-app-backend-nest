@@ -31,6 +31,12 @@ export class UsersController {
     return toUserResponseDto(user);
   }
 
+  @Get('username/:username')
+  async getByUsername(@Param('username') username: string) {
+    const user = await this.users.getByUsername(username);
+    return toUserResponseDto(user);
+  }
+
   @Post()
   async create(@Body() dto: CreateUserDto) {
     const created = await this.users.create(dto);
