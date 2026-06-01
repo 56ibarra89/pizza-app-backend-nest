@@ -287,25 +287,27 @@ export class OrdersService {
           )?.id;
 
       const now = new Date();
-      const monthNames = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
-      const monthStr = monthNames[now.getMonth()];
-      const yearStr = String(now.getFullYear()).slice(-2);
-      const prefix = `${monthStr}${yearStr}-`;
 
       let lockedRows = await tx.$queryRaw<{ id: string }[]>`
         SELECT id FROM "Correlativo"
-        WHERE "documentType" = 'FACTURA' AND "prefix" = ${prefix}
+        WHERE "documentType" = 'FACTURA' AND "status" = 'ACTIVO'
+        LIMIT 1
         FOR UPDATE
       `;
 
       let correlativoId = lockedRows[0]?.id;
 
       if (!correlativoId) {
+        const monthNames = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
+        const monthStr = monthNames[now.getMonth()];
+        const yearStr = String(now.getFullYear()).slice(-2);
+        const autoPrefix = `${monthStr}${yearStr}-`;
+
         const dgiConfig = await tx.appConfig.findUnique({ where: { id: 'dgi_resolution' } });
         const dgiData = dgiConfig?.data as any;
 
         const expirationDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-        const resNumber = dgiData?.resolutionNumber || `AUTO-${prefix.slice(0, -1)}`;
+        const resNumber = dgiData?.resolutionNumber || `AUTO-${autoPrefix.slice(0, -1)}`;
         const startNum = dgiData?.startNumber ? Number(dgiData.startNumber) : 1;
         const endNum = dgiData?.endNumber ? Number(dgiData.endNumber) : 99999;
 
@@ -313,10 +315,10 @@ export class OrdersService {
           data: {
             documentType: DocumentType.FACTURA,
             resolutionNumber: resNumber,
-            prefix: prefix,
+            prefix: autoPrefix,
             startNumber: startNum,
             endNumber: endNum,
-            currentNumber: 1, // El nuevo talonario automático de mes siempre empieza en 1 (o en startNum si queremos que siga el rango estricto? No, el prefix cambia por lo que es una nueva secuencia para el sistema, pero para la DGI la secuencia general no incluye prefijo de mes. Wait! If the user wants to print the real correlativo without prefix, that's different. But we assume our prefix + currentNumber is accepted).
+            currentNumber: 1,
             issueDate: now,
             expirationDate: expirationDate,
             status: CorrelativoStatus.ACTIVO,
@@ -329,17 +331,8 @@ export class OrdersService {
         where: { id: correlativoId },
       });
 
-      if (!correlativo) {
-        return; // Ya cubierto arriba
-      }
-
-      if (correlativo.expirationDate < now) {
-        await tx.correlativo.update({
-          where: { id: correlativo.id },
-          data: { status: CorrelativoStatus.VENCIDO },
-        });
-        throw new BadRequestException('El correlativo está VENCIDO');
-      }
+      // La DGI no utiliza fecha de vencimiento, por lo que eliminamos la validación
+      // que marcaba el correlativo como VENCIDO.
 
       const issuedNumber = correlativo.currentNumber;
       if (issuedNumber > correlativo.endNumber) {
@@ -388,7 +381,7 @@ export class OrdersService {
           invoiceCorrelativoId: correlativo.id,
           invoiceDocumentType: DocumentType.FACTURA,
           invoiceResolutionNumber: correlativo.resolutionNumber,
-          invoicePrefix: prefix,
+          invoicePrefix: correlativo.prefix ?? '',
           invoiceIssuedNumber: issuedNumber,
           invoiceNumber,
           invoiceIssuedAt: now,
