@@ -17,6 +17,17 @@ export interface ICorrelativosRepository {
     expirationDate: Date;
     status: CorrelativoStatus;
   }): Promise<CorrelativoEntity>;
+  update(id: string, params: {
+    documentType?: DocumentType;
+    resolutionNumber?: string;
+    prefix?: string;
+    startNumber?: number;
+    endNumber?: number;
+    currentNumber?: number;
+    issueDate?: Date;
+    expirationDate?: Date;
+    status?: CorrelativoStatus;
+  }): Promise<CorrelativoEntity>;
   markActiveAsVencido(documentType: DocumentType): Promise<void>;
   consumeNext(documentType: DocumentType): Promise<{
     correlativoId: string;

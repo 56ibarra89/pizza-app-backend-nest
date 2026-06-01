@@ -5,6 +5,7 @@ import {
   type ICorrelativosRepository,
 } from '../interfaces/correlativos.repository';
 import type { CreateCorrelativoDto } from '../dto/create-correlativo.dto';
+import type { UpdateCorrelativoDto } from '../dto/update-correlativo.dto';
 
 @Injectable()
 export class CorrelativosService {
@@ -51,6 +52,24 @@ export class CorrelativosService {
       currentNumber,
       issueDate: new Date(dto.issueDate),
       expirationDate: new Date(dto.expirationDate),
+      status: dto.status,
+    });
+  }
+
+  async update(id: string, dto: UpdateCorrelativoDto) {
+    if (dto.endNumber !== undefined && dto.startNumber !== undefined && dto.endNumber < dto.startNumber) {
+      throw new BadRequestException('endNumber no puede ser menor que startNumber');
+    }
+    
+    return this.repo.update(id, {
+      documentType: dto.documentType,
+      resolutionNumber: dto.resolutionNumber?.trim(),
+      prefix: dto.prefix?.trim(),
+      startNumber: dto.startNumber,
+      endNumber: dto.endNumber,
+      currentNumber: dto.currentNumber,
+      issueDate: dto.issueDate ? new Date(dto.issueDate) : undefined,
+      expirationDate: dto.expirationDate ? new Date(dto.expirationDate) : undefined,
       status: dto.status,
     });
   }

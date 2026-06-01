@@ -49,6 +49,24 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
     return this.map(created);
   }
 
+  async update(id: string, params: {
+    documentType?: DocumentType;
+    resolutionNumber?: string;
+    prefix?: string;
+    startNumber?: number;
+    endNumber?: number;
+    currentNumber?: number;
+    issueDate?: Date;
+    expirationDate?: Date;
+    status?: CorrelativoStatus;
+  }): Promise<CorrelativoEntity> {
+    const updated = await this.prisma.correlativo.update({
+      where: { id },
+      data: params,
+    });
+    return this.map(updated);
+  }
+
   async consumeNext(documentType: DocumentType): Promise<{
     correlativoId: string;
     resolutionNumber: string;
