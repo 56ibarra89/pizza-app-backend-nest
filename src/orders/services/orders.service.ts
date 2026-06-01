@@ -331,6 +331,10 @@ export class OrdersService {
         where: { id: correlativoId },
       });
 
+      if (!correlativo) {
+        return;
+      }
+
       // La DGI no utiliza fecha de vencimiento, por lo que eliminamos la validación
       // que marcaba el correlativo como VENCIDO.
 
@@ -343,9 +347,14 @@ export class OrdersService {
         throw new BadRequestException('El correlativo está AGOTADO');
       }
 
+      const monthNames = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
+      const monthStr = monthNames[now.getMonth()];
+      const yearStr = String(now.getFullYear()).slice(-2);
+      const dynamicPrefix = `${monthStr}${yearStr}-`;
+
       const width = String(correlativo.endNumber).length;
       const padded = String(issuedNumber).padStart(width, '0');
-      const invoiceNumber = `${correlativo.prefix ?? ''}${padded}`;
+      const invoiceNumber = `${dynamicPrefix}${correlativo.prefix ?? ''}${padded}`;
 
       const nextNumber = issuedNumber + 1;
       const nextStatus = nextNumber > correlativo.endNumber ? CorrelativoStatus.AGOTADO : correlativo.status;
