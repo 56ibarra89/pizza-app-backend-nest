@@ -186,6 +186,9 @@ model Mesa {
   number          Int
   estado          MesaEstado
   reservationName String?
+  reservationAmount Decimal?   @db.Decimal(10, 2)
+  reservationTime   DateTime?
+  expirationTime    DateTime?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
   linkedOrders    OrderTable[]

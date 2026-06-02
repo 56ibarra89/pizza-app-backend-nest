@@ -1,8 +1,10 @@
-import { Injectable, BadRequestException, OnModuleInit } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
+import { Injectable, BadRequestException, OnModuleInit, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import type { Prisma, MesaEstado } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../app-config/services/app-config.service';
 import { UpdateFloorDto } from './dto/update-floor.dto';
+import { ReserveMesaDto } from './dto/reserve-mesa.dto';
 
 const FLOORS_CONFIG_KEY = 'floors_config';
 
@@ -19,6 +21,8 @@ const DEFAULT_FLOORS: UpdateFloorDto[] = [
 
 @Injectable()
 export class MesasService implements OnModuleInit {
+  private readonly logger = new Logger(MesasService.name);
+
   constructor(
     private prisma: PrismaService,
     private appConfigService: AppConfigService,
@@ -115,5 +119,72 @@ export class MesasService implements OnModuleInit {
         { number: 'asc' }
       ]
     });
+  }
+
+  async updateStatus(id: string, estado: MesaEstado) {
+    const mesa = await this.prisma.mesa.findUnique({ where: { id } });
+    if (!mesa) throw new BadRequestException(`La mesa ${id} no existe.`);
+    
+    return this.prisma.mesa.update({
+      where: { id },
+      data: { estado },
+    });
+  }
+
+  async reserveMesa(id: string, dto: ReserveMesaDto) {
+    const mesa = await this.prisma.mesa.findUnique({ where: { id } });
+    if (!mesa) throw new BadRequestException(`La mesa ${id} no existe.`);
+    if (mesa.estado !== 'DISPONIBLE') {
+      throw new BadRequestException(`La mesa ${id} no está disponible para reservar.`);
+    }
+
+    return this.prisma.mesa.update({
+      where: { id },
+      data: {
+        estado: 'RESERVADO',
+        reservationName: dto.reservationName,
+        reservationAmount: dto.reservationAmount,
+        reservationTime: dto.reservationTime ? new Date(dto.reservationTime) : null,
+        expirationTime: dto.expirationTime ? new Date(dto.expirationTime) : null,
+      },
+    });
+  }
+
+  async releaseMesa(id: string) {
+    const mesa = await this.prisma.mesa.findUnique({ where: { id } });
+    if (!mesa) throw new BadRequestException(`La mesa ${id} no existe.`);
+
+    return this.prisma.mesa.update({
+      where: { id },
+      data: {
+        estado: 'DISPONIBLE',
+        reservationName: null,
+        reservationAmount: null,
+        reservationTime: null,
+        expirationTime: null,
+      },
+    });
+  }
+
+  @Cron(CronExpression.EVERY_MINUTE)
+  async handleExpiredReservations() {
+    const now = new Date();
+    
+    // Find reservations where the expiration time has passed and they are still reserved
+    const expiredReservations = await this.prisma.mesa.findMany({
+      where: {
+        estado: 'RESERVADO',
+        expirationTime: {
+          lt: now,
+        },
+      },
+    });
+
+    if (expiredReservations.length > 0) {
+      for (const mesa of expiredReservations) {
+        await this.releaseMesa(mesa.id);
+        this.logger.log(`Reserva caducada para mesa ${mesa.number} de planta ${mesa.floor}. Liberando mesa automáticamente.`);
+      }
+    }
   }
 }
