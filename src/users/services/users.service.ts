@@ -89,7 +89,7 @@ export class UsersService {
   async loginWithPassword(params: {
     identifier: string;
     password: string;
-  }): Promise<{ success: boolean; role?: UserRoleDto; email?: string }> {
+  }): Promise<{ success: boolean; role?: UserRoleDto; email?: string; firstName?: string; lastName?: string }> {
     const idLower = params.identifier.toLowerCase();
 
     const user =
@@ -103,14 +103,14 @@ export class UsersService {
     if (!ok) return { success: false };
 
     await this.repo.update(user.id, { lastVisit: new Date() });
-    return { success: true, role: user.role, email: user.email };
+    return { success: true, role: user.role, email: user.email ?? undefined, firstName: user.firstName, lastName: user.lastName };
   }
 
-  async loginWithPin(pin: string): Promise<{ username: string; role: UserRoleDto } | null> {
+  async loginWithPin(pin: string): Promise<{ username: string; role: UserRoleDto; firstName: string; lastName: string } | null> {
     const user = await this.repo.findByPin(pin);
     if (!user || !user.isActive) return null;
     await this.repo.update(user.id, { lastVisit: new Date() });
-    return { username: user.username, role: user.role };
+    return { username: user.username, role: user.role, firstName: user.firstName, lastName: user.lastName };
   }
 
   async requireValidPin(pin: string): Promise<{ username: string; role: UserRoleDto }> {
