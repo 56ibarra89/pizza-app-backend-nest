@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, OnModuleInit } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../app-config/services/app-config.service';
@@ -7,8 +7,8 @@ import { UpdateFloorDto } from './dto/update-floor.dto';
 const FLOORS_CONFIG_KEY = 'floors_config';
 
 const DEFAULT_FLOORS: UpdateFloorDto[] = [
-  { id: 1, name: "Primera Planta", tableCount: 15 },
-  { id: 2, name: "Segunda Planta", tableCount: 10 },
+  { id: 1, name: "Primera Planta", tableCount: 0 },
+  { id: 2, name: "Segunda Planta", tableCount: 0 },
   { id: 3, name: "Tercera Planta", tableCount: 0 },
   { id: 4, name: "Cuarta Planta", tableCount: 0 },
   { id: 5, name: "Quinta Planta", tableCount: 0 },
@@ -18,11 +18,18 @@ const DEFAULT_FLOORS: UpdateFloorDto[] = [
 ];
 
 @Injectable()
-export class MesasService {
+export class MesasService implements OnModuleInit {
   constructor(
     private prisma: PrismaService,
     private appConfigService: AppConfigService,
   ) {}
+
+  async onModuleInit() {
+    const tableCount = await this.prisma.mesa.count();
+    if (tableCount === 0) {
+      await this.updateFloorsConfig(DEFAULT_FLOORS);
+    }
+  }
 
   async getFloorsConfig() {
     const config = await this.appConfigService.getByIdOrDefault(FLOORS_CONFIG_KEY);
