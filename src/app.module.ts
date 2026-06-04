@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { MailerModule } from '@nestjs-modules/mailer';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -28,6 +29,19 @@ import { MesasModule } from './mesas/mesas.module';
         limit: 120,
       },
     ]),
+    MailerModule.forRoot({
+      transport: {
+        host: process.env.SMTP_HOST || 'smtp.ethereal.email',
+        port: parseInt(process.env.SMTP_PORT || '587', 10),
+        auth: {
+          user: process.env.SMTP_USER || 'ethereal.user@ethereal.email',
+          pass: process.env.SMTP_PASS || 'etherealpassword',
+        },
+      },
+      defaults: {
+        from: '"No Reply" <noreply@pizzatogo.com>',
+      },
+    }),
     PrismaModule,
     ProductsModule,
     CustomersModule,
