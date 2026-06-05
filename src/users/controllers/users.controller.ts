@@ -59,4 +59,10 @@ export class UsersController {
   delete(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.users.delete(id);
   }
+
+  @Post(':id/unlock')
+  async unlock(@Param('id', new ParseUUIDPipe()) id: string) {
+    const updated = await this.users.unlockUser(id);
+    return toUserResponseDto(updated);
+  }
 }

@@ -72,6 +72,9 @@ export class PrismaUsersRepository implements IUsersRepository {
       passwordHash?: string | null;
       role?: UserRoleDto;
       isActive?: boolean;
+      failedLoginAttempts?: number;
+      lockoutLevel?: number;
+      lockedUntil?: Date | null;
       lastVisit?: Date | null;
     },
   ): Promise<UserEntity> {
@@ -86,6 +89,9 @@ export class PrismaUsersRepository implements IUsersRepository {
         passwordHash: data.passwordHash,
         role: data.role ? toDbRole(data.role) : undefined,
         isActive: data.isActive,
+        failedLoginAttempts: data.failedLoginAttempts,
+        lockoutLevel: data.lockoutLevel,
+        lockedUntil: data.lockedUntil,
         lastVisit: data.lastVisit,
       },
     });
@@ -107,6 +113,9 @@ export class PrismaUsersRepository implements IUsersRepository {
     passwordHash: string | null;
     role: import('@prisma/client').UserRole;
     isActive: boolean;
+    failedLoginAttempts: number;
+    lockoutLevel: number;
+    lockedUntil: Date | null;
     lastVisit: Date | null;
     createdAt: Date;
     updatedAt: Date;
@@ -121,6 +130,9 @@ export class PrismaUsersRepository implements IUsersRepository {
       passwordHash: u.passwordHash ?? undefined,
       role: fromDbRole(u.role),
       isActive: u.isActive,
+      failedLoginAttempts: u.failedLoginAttempts,
+      lockoutLevel: u.lockoutLevel,
+      lockedUntil: u.lockedUntil ?? undefined,
       lastVisit: u.lastVisit ?? undefined,
       createdAt: u.createdAt,
       updatedAt: u.updatedAt,

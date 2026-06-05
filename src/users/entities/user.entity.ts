@@ -10,6 +10,9 @@ export interface UserEntity {
   passwordHash?: string;
   role: UserRoleDto;
   isActive: boolean;
+  failedLoginAttempts: number;
+  lockoutLevel: number;
+  lockedUntil?: Date;
   createdAt: Date;
   updatedAt: Date;
   lastVisit?: Date;

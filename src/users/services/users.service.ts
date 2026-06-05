@@ -92,6 +92,62 @@ export class UsersService {
     return this.repo.delete(id);
   }
 
+  async unlockUser(id: string) {
+    const user = await this.repo.findById(id);
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    return await this.repo.update(id, {
+      failedLoginAttempts: 0,
+      lockoutLevel: 0,
+      lockedUntil: null,
+    });
+  }
+
+  private async checkLockout(user: import('../entities/user.entity').UserEntity) {
+    if (user.lockedUntil) {
+      if (new Date() < user.lockedUntil) {
+        throw new UnauthorizedException(`Cuenta bloqueada temporalmente hasta ${user.lockedUntil.toLocaleString()}`);
+      } else if (user.lockoutLevel >= 4) {
+        throw new UnauthorizedException('Cuenta suspendida. Contacte a un administrador.');
+      }
+    }
+  }
+
+  private async handleFailedAttempt(user: import('../entities/user.entity').UserEntity) {
+    let newAttempts = user.failedLoginAttempts + 1;
+    let newLevel = user.lockoutLevel;
+    let newLockedUntil = user.lockedUntil;
+
+    if (newAttempts >= 5) {
+      newAttempts = 0;
+      newLevel += 1;
+      const now = new Date();
+      if (newLevel === 1) {
+        newLockedUntil = new Date(now.getTime() + 5 * 60000); // 5 mins
+      } else if (newLevel === 2) {
+        newLockedUntil = new Date(now.getTime() + 15 * 60000); // 15 mins
+      } else if (newLevel === 3) {
+        newLockedUntil = new Date(now.getTime() + 60 * 60000); // 1 hour
+      } else {
+        newLockedUntil = new Date(now.getTime() + 36500 * 24 * 60 * 60000); // Suspension (100 years approx)
+      }
+    }
+
+    await this.repo.update(user.id, {
+      failedLoginAttempts: newAttempts,
+      lockoutLevel: newLevel,
+      lockedUntil: newLockedUntil,
+    });
+  }
+
+  private async handleSuccessfulAttempt(user: import('../entities/user.entity').UserEntity) {
+    await this.repo.update(user.id, {
+      lastVisit: new Date(),
+      failedLoginAttempts: 0,
+      lockoutLevel: 0,
+      lockedUntil: null,
+    });
+  }
+
   async loginWithPassword(params: {
     identifier: string;
     password: string;
@@ -103,12 +159,18 @@ export class UsersService {
       (await this.repo.findByEmail(idLower));
 
     if (!user || !user.isActive) return { success: false };
+    
+    await this.checkLockout(user);
+
     if (!user.passwordHash) return { success: false };
 
     const ok = await this.hasher.verify(params.password, user.passwordHash);
-    if (!ok) return { success: false };
+    if (!ok) {
+      await this.handleFailedAttempt(user);
+      return { success: false };
+    }
 
-    await this.repo.update(user.id, { lastVisit: new Date() });
+    await this.handleSuccessfulAttempt(user);
     const access_token = this.jwtService.sign({ sub: user.id });
     return { success: true, username: user.username, role: user.role, email: user.email ?? undefined, firstName: user.firstName, lastName: user.lastName, access_token };
   }
@@ -116,7 +178,17 @@ export class UsersService {
   async loginWithPin(pin: string): Promise<{ username: string; role: UserRoleDto; firstName: string; lastName: string; access_token: string } | null> {
     const user = await this.repo.findByPin(pin);
     if (!user || !user.isActive) return null;
-    await this.repo.update(user.id, { lastVisit: new Date() });
+    
+    await this.checkLockout(user);
+
+    // Si llegó hasta aquí con findByPin, el PIN es correcto (ya que pin es único y se usó para buscarlo).
+    // NOTA: Si hubiera una manera de buscar el usuario sin el PIN (ej: por usuario) y luego validar el PIN, 
+    // ahí registraríamos el intento fallido. Pero como el POS manda solo el PIN y no sabemos QUIÉN es hasta 
+    // que el PIN coincide, si no coincide no podemos sumar intento a nadie. 
+    // Para resolver esto asumiendo el flujo de "login by pin" del cajero: 
+    // El frontend ya hace lockout temporal.
+    
+    await this.handleSuccessfulAttempt(user);
     const access_token = this.jwtService.sign({ sub: user.id });
     return { username: user.username, role: user.role, firstName: user.firstName, lastName: user.lastName, access_token };
   }

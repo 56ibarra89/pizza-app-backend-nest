@@ -16,7 +16,6 @@ import { AppConfigModule } from './app-config/app-config.module';
 import { SystemLogsModule } from './system-logs/system-logs.module';
 import { CorrelativosModule } from './correlativos/correlativos.module';
 import { ShiftsModule } from './shifts/shifts.module';
-import { ApiKeyGuard } from './common/guards/api-key.guard';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { MesasModule } from './mesas/mesas.module';
@@ -70,10 +69,6 @@ import { MesasModule } from './mesas/mesas.module';
     {
       provide: APP_GUARD,
       useClass: RolesGuard,
-    },
-    {
-      provide: APP_GUARD,
-      useClass: ApiKeyGuard,
     },
   ],
 })

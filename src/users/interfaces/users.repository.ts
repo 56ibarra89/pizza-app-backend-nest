@@ -30,6 +30,9 @@ export interface IUsersRepository {
     passwordHash?: string | null;
     role?: UserRoleDto;
     isActive?: boolean;
+    failedLoginAttempts?: number;
+    lockoutLevel?: number;
+    lockedUntil?: Date | null;
     lastVisit?: Date | null;
   }): Promise<UserEntity>;
 

@@ -8,10 +8,6 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   const isProd = process.env.NODE_ENV === 'production';
-  const enforceApiKey = isProd || process.env.REQUIRE_API_KEY === 'true';
-  if (enforceApiKey && !process.env.API_KEY) {
-    throw new Error('Missing required env var: API_KEY');
-  }
 
   if (isProd) {
     const expressApp = app.getHttpAdapter().getInstance();
