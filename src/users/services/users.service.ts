@@ -95,7 +95,7 @@ export class UsersService {
   async loginWithPassword(params: {
     identifier: string;
     password: string;
-  }): Promise<{ success: boolean; username?: string; role?: UserRoleDto; email?: string; firstName?: string; lastName?: string }> {
+  }): Promise<{ success: boolean; username?: string; role?: UserRoleDto; email?: string; firstName?: string; lastName?: string; access_token?: string }> {
     const idLower = params.identifier.toLowerCase();
 
     const user =
@@ -109,14 +109,16 @@ export class UsersService {
     if (!ok) return { success: false };
 
     await this.repo.update(user.id, { lastVisit: new Date() });
-    return { success: true, username: user.username, role: user.role, email: user.email ?? undefined, firstName: user.firstName, lastName: user.lastName };
+    const access_token = this.jwtService.sign({ sub: user.id });
+    return { success: true, username: user.username, role: user.role, email: user.email ?? undefined, firstName: user.firstName, lastName: user.lastName, access_token };
   }
 
-  async loginWithPin(pin: string): Promise<{ username: string; role: UserRoleDto; firstName: string; lastName: string } | null> {
+  async loginWithPin(pin: string): Promise<{ username: string; role: UserRoleDto; firstName: string; lastName: string; access_token: string } | null> {
     const user = await this.repo.findByPin(pin);
     if (!user || !user.isActive) return null;
     await this.repo.update(user.id, { lastVisit: new Date() });
-    return { username: user.username, role: user.role, firstName: user.firstName, lastName: user.lastName };
+    const access_token = this.jwtService.sign({ sub: user.id });
+    return { username: user.username, role: user.role, firstName: user.firstName, lastName: user.lastName, access_token };
   }
 
   async requireValidPin(pin: string): Promise<{ username: string; role: UserRoleDto }> {
