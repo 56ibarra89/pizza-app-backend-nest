@@ -6,6 +6,8 @@ import { UpdateOrderStatusDto } from '../dto/update-order-status.dto';
 import { UpdateOrderItemsDto } from '../dto/update-order-items.dto';
 import { FinalizeOrderDto } from '../dto/finalize-order.dto';
 import { toOrderResponseDto } from '../mappers/orders.mapper';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRoleDto } from '../../users/dto/user-role.dto';
 
 @ApiTags('orders')
 @Controller('orders')
@@ -36,30 +38,35 @@ export class OrdersController {
   }
 
   @Post()
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero)
   async create(@Body() dto: CreateOrderDto) {
     const created = await this.orders.create(dto);
     return toOrderResponseDto(created);
   }
 
   @Patch(':id/status')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero, UserRoleDto.cocinero)
   async updateStatus(@Param('id') id: string, @Body() dto: UpdateOrderStatusDto) {
     const updated = await this.orders.updateStatus(id, dto);
     return toOrderResponseDto(updated);
   }
 
   @Patch(':id/items')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero)
   async updateItems(@Param('id') id: string, @Body() dto: UpdateOrderItemsDto) {
     const updated = await this.orders.updateItems(id, dto);
     return toOrderResponseDto(updated);
   }
 
   @Patch(':id/tables')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero)
   async updateTables(@Param('id') id: string, @Body('tableIds') tableIds: string[]) {
     const updated = await this.orders.updateTables(id, tableIds);
     return toOrderResponseDto(updated);
   }
 
   @Patch(':id/finalize')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero)
   async finalize(@Param('id') id: string, @Body() dto: FinalizeOrderDto) {
     const updated = await this.orders.finalize(id, dto);
     return toOrderResponseDto(updated);

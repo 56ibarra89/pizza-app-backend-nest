@@ -15,6 +15,8 @@ import { CreateCategoryDto } from '../dto/create-category.dto';
 import { UpdateCategoryDto } from '../dto/update-category.dto';
 import { CreateProductDto } from '../dto/create-product.dto';
 import { UpdateProductDto } from '../dto/update-product.dto';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRoleDto } from '../../users/dto/user-role.dto';
 
 @ApiTags('products')
 @Controller('products')
@@ -27,11 +29,13 @@ export class ProductsController {
   }
 
   @Post('categories')
+  @Roles(UserRoleDto.admin)
   createCategory(@Body() dto: CreateCategoryDto) {
     return this.products.createCategory(dto);
   }
 
   @Patch('categories/:id')
+  @Roles(UserRoleDto.admin)
   updateCategory(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateCategoryDto,
@@ -40,6 +44,7 @@ export class ProductsController {
   }
 
   @Delete('categories/:id')
+  @Roles(UserRoleDto.admin)
   deleteCategory(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.products.deleteCategory(id);
   }
@@ -55,11 +60,13 @@ export class ProductsController {
   }
 
   @Post()
+  @Roles(UserRoleDto.admin)
   createProduct(@Body() dto: CreateProductDto) {
     return this.products.createProduct(dto);
   }
 
   @Patch(':id')
+  @Roles(UserRoleDto.admin)
   updateProduct(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateProductDto,
@@ -68,6 +75,7 @@ export class ProductsController {
   }
 
   @Delete(':id')
+  @Roles(UserRoleDto.admin)
   deleteProduct(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.products.deleteProduct(id);
   }

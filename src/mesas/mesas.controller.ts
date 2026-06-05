@@ -3,6 +3,8 @@ import { MesasService } from './mesas.service';
 import { UpdateFloorDto } from './dto/update-floor.dto';
 import { UpdateMesaStatusDto } from './dto/update-mesa-status.dto';
 import { ReserveMesaDto } from './dto/reserve-mesa.dto';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRoleDto } from '../users/dto/user-role.dto';
 
 @Controller('mesas')
 export class MesasController {
@@ -14,6 +16,7 @@ export class MesasController {
   }
 
   @Post('config')
+  @Roles(UserRoleDto.admin)
   updateFloorsConfig(
     @Body(new ParseArrayPipe({ items: UpdateFloorDto }))
     floors: UpdateFloorDto[],
@@ -27,6 +30,7 @@ export class MesasController {
   }
 
   @Patch(':id/status')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero)
   updateStatus(
     @Param('id') id: string,
     @Body() dto: UpdateMesaStatusDto,
@@ -35,6 +39,7 @@ export class MesasController {
   }
 
   @Patch(':id/reserve')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero)
   reserveMesa(
     @Param('id') id: string,
     @Body() dto: ReserveMesaDto,
@@ -43,6 +48,7 @@ export class MesasController {
   }
 
   @Patch(':id/release')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero)
   releaseMesa(@Param('id') id: string) {
     return this.mesasService.releaseMesa(id);
   }

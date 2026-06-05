@@ -5,8 +5,11 @@ import { CreateCorrelativoDto } from '../dto/create-correlativo.dto';
 import { ConsumeCorrelativoDto } from '../dto/consume-correlativo.dto';
 import { GetActiveCorrelativoQueryDto } from '../dto/get-active-correlativo-query.dto';
 import { UpdateCorrelativoDto } from '../dto/update-correlativo.dto';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRoleDto } from '../../users/dto/user-role.dto';
 
 @ApiTags('correlativos')
+@Roles(UserRoleDto.admin)
 @Controller('correlativos')
 export class CorrelativosController {
   constructor(private readonly service: CorrelativosService) {}

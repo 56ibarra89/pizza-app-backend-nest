@@ -13,8 +13,11 @@ import { UsersService } from '../services/users.service';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { toUserResponseDto } from '../mappers/users.mapper';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRoleDto } from '../dto/user-role.dto';
 
 @ApiTags('users')
+@Roles(UserRoleDto.admin)
 @Controller('users')
 export class UsersController {
   constructor(private readonly users: UsersService) {}

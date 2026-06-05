@@ -19,6 +19,8 @@ import { UpdateCuponDto } from '../dto/cupones/update-cupon.dto';
 import { RedeemCuponDto } from '../dto/cupones/redeem-cupon.dto';
 import { CreateCertificadoDto } from '../dto/certificados/create-certificado.dto';
 import { RedeemCertificadoDto } from '../dto/certificados/redeem-certificado.dto';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRoleDto } from '../../users/dto/user-role.dto';
 
 @ApiTags('promotions')
 @Controller('promotions')
@@ -32,11 +34,13 @@ export class PromotionsController {
   }
 
   @Post('happy-hours')
+  @Roles(UserRoleDto.admin)
   createHappyHour(@Body() dto: CreateHappyHourDto) {
     return this.promotions.createHappyHour(dto);
   }
 
   @Patch('happy-hours/:id')
+  @Roles(UserRoleDto.admin)
   updateHappyHour(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateHappyHourDto,
@@ -45,6 +49,7 @@ export class PromotionsController {
   }
 
   @Delete('happy-hours/:id')
+  @Roles(UserRoleDto.admin)
   deleteHappyHour(@Param('id', ParseIntPipe) id: number) {
     return this.promotions.deleteHappyHour(id);
   }
@@ -56,11 +61,13 @@ export class PromotionsController {
   }
 
   @Post('discounts')
+  @Roles(UserRoleDto.admin)
   createDiscount(@Body() dto: CreateDiscountDto) {
     return this.promotions.createDiscount(dto);
   }
 
   @Patch('discounts/:id')
+  @Roles(UserRoleDto.admin)
   updateDiscount(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateDiscountDto,
@@ -69,6 +76,7 @@ export class PromotionsController {
   }
 
   @Delete('discounts/:id')
+  @Roles(UserRoleDto.admin)
   deleteDiscount(@Param('id', ParseIntPipe) id: number) {
     return this.promotions.deleteDiscount(id);
   }
@@ -80,11 +88,13 @@ export class PromotionsController {
   }
 
   @Post('coupons')
+  @Roles(UserRoleDto.admin)
   createCupon(@Body() dto: CreateCuponDto) {
     return this.promotions.createCupon(dto);
   }
 
   @Patch('coupons/:id')
+  @Roles(UserRoleDto.admin)
   updateCupon(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateCuponDto,
@@ -93,11 +103,13 @@ export class PromotionsController {
   }
 
   @Delete('coupons/:id')
+  @Roles(UserRoleDto.admin)
   deleteCupon(@Param('id', ParseIntPipe) id: number) {
     return this.promotions.deleteCupon(id);
   }
 
   @Post('coupons/redeem')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero)
   redeemCupon(@Body() dto: RedeemCuponDto) {
     return this.promotions.redeemCupon(dto);
   }
@@ -114,26 +126,31 @@ export class PromotionsController {
   }
 
   @Post('certificates')
+  @Roles(UserRoleDto.admin)
   createCertificado(@Body() dto: CreateCertificadoDto) {
     return this.promotions.createCertificado(dto);
   }
 
   @Post('certificates/:id/deliver')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero)
   markDelivered(@Param('id', ParseIntPipe) id: number) {
     return this.promotions.markCertificadoDelivered(id);
   }
 
   @Post('certificates/:id/cancel')
+  @Roles(UserRoleDto.admin)
   cancel(@Param('id', ParseIntPipe) id: number) {
     return this.promotions.cancelCertificado(id);
   }
 
   @Delete('certificates/:id')
+  @Roles(UserRoleDto.admin)
   deleteCertificado(@Param('id', ParseIntPipe) id: number) {
     return this.promotions.deleteCertificado(id);
   }
 
   @Post('certificates/redeem')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero)
   redeemCertificado(@Body() dto: RedeemCertificadoDto) {
     return this.promotions.redeemCertificado(dto);
   }

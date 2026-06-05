@@ -14,6 +14,8 @@ import { CustomersService } from '../services/customers.service';
 import { UpsertCustomerDto } from '../dto/upsert-customer.dto';
 import { UpdateCustomerDto } from '../dto/update-customer.dto';
 import { toCustomerResponseDto } from '../mappers/customers.mapper';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRoleDto } from '../../users/dto/user-role.dto';
 
 @ApiTags('customers')
 @Controller('customers')
@@ -33,6 +35,7 @@ export class CustomersController {
   }
 
   @Post('upsert')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero)
   async upsertCustomer(@Body() dto: UpsertCustomerDto) {
     const result = await this.customers.upsert(dto);
     return {
@@ -42,6 +45,7 @@ export class CustomersController {
   }
 
   @Patch(':id')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero)
   async updateCustomer(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateCustomerDto,
@@ -51,6 +55,7 @@ export class CustomersController {
   }
 
   @Delete(':id')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero)
   deleteCustomer(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.customers.deleteById(id);
   }
