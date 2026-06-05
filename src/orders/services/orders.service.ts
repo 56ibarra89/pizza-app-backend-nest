@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   ORDERS_REPOSITORY,
@@ -140,9 +140,16 @@ export class OrdersService {
     return undefined;
   }
 
-  async updateStatus(id: string, dto: UpdateOrderStatusDto) {
+  async updateStatus(id: string, dto: UpdateOrderStatusDto, user?: any) {
     const existing = await this.getById(id);
     const isFinal = existing.status === OrderStatusDto.paid || existing.status === OrderStatusDto.cancelled;
+
+    // Regla de Negocio: El COCINERO no puede cambiar estados financieros
+    if (user?.role === 'cocinero') {
+      if (dto.status === OrderStatusDto.paid || dto.status === OrderStatusDto.cancelled) {
+        throw new ForbiddenException('Los cocineros no tienen permiso para cobrar o cancelar órdenes.');
+      }
+    }
 
     if (dto.sentAt) {
       if (dto.status === OrderStatusDto.paid || dto.status === OrderStatusDto.cancelled) {
@@ -207,7 +214,7 @@ export class OrdersService {
     return this.getById(id);
   }
 
-  async updateItems(id: string, dto: UpdateOrderItemsDto) {
+  async updateItems(id: string, dto: UpdateOrderItemsDto, user?: any) {
     const existing = await this.getById(id);
     const isFinal = existing.status === OrderStatusDto.paid || existing.status === OrderStatusDto.cancelled;
 
@@ -226,7 +233,10 @@ export class OrdersService {
     });
   }
 
-  async finalize(id: string, dto: FinalizeOrderDto) {
+  async finalize(id: string, dto: FinalizeOrderDto, user?: any) {
+    if (user?.role === 'cocinero') {
+      throw new ForbiddenException('Los cocineros no pueden facturar órdenes.');
+    }
     const existing = await this.getById(id);
     if (existing.status === OrderStatusDto.paid) return existing;
 

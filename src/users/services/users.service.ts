@@ -88,8 +88,10 @@ export class UsersService {
     }
   }
 
-  delete(id: string) {
-    return this.repo.delete(id);
+  async delete(id: string) {
+    const user = await this.repo.findById(id);
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    return await this.repo.update(id, { isActive: false });
   }
 
   async unlockUser(id: string) {
