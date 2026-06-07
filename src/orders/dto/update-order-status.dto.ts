@@ -16,4 +16,8 @@ export class UpdateOrderStatusDto {
   @IsOptional()
   @IsString()
   cancelledById?: string;
+
+  @IsOptional()
+  @IsString()
+  adminPin?: string;
 }

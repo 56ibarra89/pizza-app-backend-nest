@@ -151,6 +151,20 @@ export class OrdersService {
       }
     }
 
+    if (dto.status === OrderStatusDto.cancelled) {
+      if (!dto.adminPin) {
+        throw new ForbiddenException('Se requiere un PIN de administrador para cancelar la orden.');
+      }
+      
+      const adminUser = await this.prisma.user.findFirst({
+        where: { pin: dto.adminPin, role: 'ADMIN', isActive: true },
+      });
+      
+      if (!adminUser) {
+        throw new ForbiddenException('PIN de administrador inválido o usuario no tiene permisos.');
+      }
+    }
+
     if (dto.sentAt) {
       if (dto.status === OrderStatusDto.paid || dto.status === OrderStatusDto.cancelled) {
         throw new BadRequestException('Status inválido para cocina');
