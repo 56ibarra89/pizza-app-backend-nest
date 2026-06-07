@@ -5,6 +5,7 @@ import { OpenShiftDto } from '../dto/open-shift.dto';
 import { CloseShiftDto } from '../dto/close-shift.dto';
 import { ListShiftsQueryDto } from '../dto/list-shifts-query.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRoleDto } from '../../users/dto/user-role.dto';
 
 @ApiTags('shifts')
@@ -35,7 +36,7 @@ export class ShiftsController {
 
   @Post(':id/close')
   @Roles(UserRoleDto.admin, UserRoleDto.cajero)
-  close(@Param('id') id: string, @Body() dto: CloseShiftDto) {
-    return this.service.close(id, dto);
+  close(@Param('id') id: string, @Body() dto: CloseShiftDto, @CurrentUser() user: any) {
+    return this.service.close(id, dto, user);
   }
 }

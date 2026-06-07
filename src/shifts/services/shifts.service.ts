@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ShiftStatus } from '@prisma/client';
 import {
   SHIFTS_REPOSITORY,
@@ -48,10 +48,16 @@ export class ShiftsService {
     });
   }
 
-  async close(id: string, dto: CloseShiftDto) {
+  async close(id: string, dto: CloseShiftDto, user?: any) {
     const shift = await this.getById(id);
     if (shift.status !== ShiftStatus.OPEN) {
       throw new BadRequestException('Solo se puede cerrar un turno abierto');
+    }
+
+    if (user?.role !== 'admin') {
+      if (shift.cashierId && user?.sub !== shift.cashierId) {
+        throw new ForbiddenException('No puedes cerrar un turno que fue abierto por otro cajero');
+      }
     }
 
     return this.repo.close({
