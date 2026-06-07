@@ -9,6 +9,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { CartItemDto } from './cart-item.dto';
@@ -40,17 +41,21 @@ export class CreateOrderDto {
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   subTotal?: number;
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   discountAmount?: number;
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   taxAmount?: number;
 
   @IsNumber()
+  @Min(0)
   total!: number;
 
   @IsOptional()

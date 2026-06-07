@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsEnum, IsInt, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsEnum, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 import { PaymentMethodDto } from './payment-method.dto';
 import { OrderPaymentDto } from './order-payment.dto';
 import { OrderTypeDto } from './order-type.dto';
@@ -25,18 +25,22 @@ export class FinalizeOrderDto {
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   finalTotal?: number;
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   subTotal?: number;
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   discountAmount?: number;
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   taxAmount?: number;
 
   @IsOptional()

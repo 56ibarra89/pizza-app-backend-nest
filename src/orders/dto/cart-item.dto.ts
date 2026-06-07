@@ -26,6 +26,7 @@ export class CartItemDto {
   name!: string;
 
   @IsNumber()
+  @Min(0)
   price!: number;
 
   @IsEnum(ProductSizeDto)
