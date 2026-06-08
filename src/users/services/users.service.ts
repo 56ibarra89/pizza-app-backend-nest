@@ -173,7 +173,7 @@ export class UsersService {
     }
 
     await this.handleSuccessfulAttempt(user);
-    const access_token = this.jwtService.sign({ sub: user.id });
+    const access_token = this.jwtService.sign({ sub: user.id, tokenVersion: user.tokenVersion });
     return { success: true, username: user.username, role: user.role, email: user.email ?? undefined, firstName: user.firstName, lastName: user.lastName, access_token };
   }
 
@@ -191,7 +191,7 @@ export class UsersService {
     // El frontend ya hace lockout temporal.
     
     await this.handleSuccessfulAttempt(user);
-    const access_token = this.jwtService.sign({ sub: user.id });
+    const access_token = this.jwtService.sign({ sub: user.id, tokenVersion: user.tokenVersion });
     return { username: user.username, role: user.role, firstName: user.firstName, lastName: user.lastName, access_token };
   }
 
@@ -220,7 +220,7 @@ export class UsersService {
     }
 
     // Generar token JWT seguro con el ID del usuario
-    const token = this.jwtService.sign({ sub: user.id });
+    const token = this.jwtService.sign({ sub: user.id, tokenVersion: user.tokenVersion });
     const resetLink = `http://localhost:5173/#/reset-password?token=${token}`;
 
     const emailHtml = `
@@ -286,5 +286,14 @@ export class UsersService {
     } catch (error) {
       throw new UnauthorizedException('Enlace inválido o expirado. Solicita uno nuevo.');
     }
+  }
+
+  async revokeAllTokens(userId: string) {
+    const user = await this.repo.findById(userId);
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    
+    return await this.repo.update(userId, {
+      tokenVersion: user.tokenVersion + 1,
+    });
   }
 }

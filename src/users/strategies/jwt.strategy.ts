@@ -20,6 +20,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!user || !user.isActive) {
       throw new UnauthorizedException('Usuario inactivo o no existe');
     }
+    if (user.tokenVersion !== payload.tokenVersion) {
+      throw new UnauthorizedException('La sesión ha expirado en este dispositivo.');
+    }
     // Este objeto se inyectará en req.user
     return { id: user.id, username: user.username, role: user.role };
   }

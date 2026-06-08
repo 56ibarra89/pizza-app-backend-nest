@@ -16,4 +16,5 @@ export interface UserEntity {
   createdAt: Date;
   updatedAt: Date;
   lastVisit?: Date;
+  tokenVersion: number;
 }

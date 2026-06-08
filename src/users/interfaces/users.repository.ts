@@ -34,6 +34,7 @@ export interface IUsersRepository {
     lockoutLevel?: number;
     lockedUntil?: Date | null;
     lastVisit?: Date | null;
+    tokenVersion?: number;
   }): Promise<UserEntity>;
 
   delete(id: string): Promise<void>;

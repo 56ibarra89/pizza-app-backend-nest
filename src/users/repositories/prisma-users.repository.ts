@@ -76,6 +76,7 @@ export class PrismaUsersRepository implements IUsersRepository {
       lockoutLevel?: number;
       lockedUntil?: Date | null;
       lastVisit?: Date | null;
+      tokenVersion?: number;
     },
   ): Promise<UserEntity> {
     const updated = await this.prisma.user.update({
@@ -93,6 +94,7 @@ export class PrismaUsersRepository implements IUsersRepository {
         lockoutLevel: data.lockoutLevel,
         lockedUntil: data.lockedUntil,
         lastVisit: data.lastVisit,
+        tokenVersion: data.tokenVersion,
       },
     });
 
@@ -117,6 +119,7 @@ export class PrismaUsersRepository implements IUsersRepository {
     lockoutLevel: number;
     lockedUntil: Date | null;
     lastVisit: Date | null;
+    tokenVersion: number;
     createdAt: Date;
     updatedAt: Date;
   }): UserEntity {
@@ -134,6 +137,7 @@ export class PrismaUsersRepository implements IUsersRepository {
       lockoutLevel: u.lockoutLevel,
       lockedUntil: u.lockedUntil ?? undefined,
       lastVisit: u.lastVisit ?? undefined,
+      tokenVersion: u.tokenVersion,
       createdAt: u.createdAt,
       updatedAt: u.updatedAt,
     };
