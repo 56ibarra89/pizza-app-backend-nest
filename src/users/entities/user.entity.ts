@@ -16,5 +16,6 @@ export interface UserEntity {
   createdAt: Date;
   updatedAt: Date;
   lastVisit?: Date;
+  themePreference: string;
   tokenVersion: number;
 }

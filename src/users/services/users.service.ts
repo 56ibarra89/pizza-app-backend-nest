@@ -153,7 +153,7 @@ export class UsersService {
   async loginWithPassword(params: {
     identifier: string;
     password: string;
-  }): Promise<{ success: boolean; username?: string; role?: UserRoleDto; email?: string; firstName?: string; lastName?: string; access_token?: string }> {
+  }): Promise<{ success: boolean; username?: string; role?: UserRoleDto; email?: string; firstName?: string; lastName?: string; access_token?: string; themePreference?: string }> {
     const idLower = params.identifier.toLowerCase();
 
     const user =
@@ -174,10 +174,10 @@ export class UsersService {
 
     await this.handleSuccessfulAttempt(user);
     const access_token = this.jwtService.sign({ sub: user.id, tokenVersion: user.tokenVersion });
-    return { success: true, username: user.username, role: user.role, email: user.email ?? undefined, firstName: user.firstName, lastName: user.lastName, access_token };
+    return { success: true, username: user.username, role: user.role, email: user.email ?? undefined, firstName: user.firstName, lastName: user.lastName, access_token, themePreference: user.themePreference };
   }
 
-  async loginWithPin(pin: string): Promise<{ username: string; role: UserRoleDto; firstName: string; lastName: string; access_token: string } | null> {
+  async loginWithPin(pin: string): Promise<{ username: string; role: UserRoleDto; firstName: string; lastName: string; access_token: string; themePreference: string } | null> {
     const user = await this.repo.findByPin(pin);
     if (!user || !user.isActive) return null;
     
@@ -192,7 +192,7 @@ export class UsersService {
     
     await this.handleSuccessfulAttempt(user);
     const access_token = this.jwtService.sign({ sub: user.id, tokenVersion: user.tokenVersion });
-    return { username: user.username, role: user.role, firstName: user.firstName, lastName: user.lastName, access_token };
+    return { username: user.username, role: user.role, firstName: user.firstName, lastName: user.lastName, access_token, themePreference: user.themePreference };
   }
 
   async requireValidPin(pin: string): Promise<{ username: string; role: UserRoleDto }> {

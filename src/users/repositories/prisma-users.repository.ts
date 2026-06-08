@@ -76,6 +76,7 @@ export class PrismaUsersRepository implements IUsersRepository {
       lockoutLevel?: number;
       lockedUntil?: Date | null;
       lastVisit?: Date | null;
+      themePreference?: string;
       tokenVersion?: number;
     },
   ): Promise<UserEntity> {
@@ -94,6 +95,7 @@ export class PrismaUsersRepository implements IUsersRepository {
         lockoutLevel: data.lockoutLevel,
         lockedUntil: data.lockedUntil,
         lastVisit: data.lastVisit,
+        themePreference: data.themePreference,
         tokenVersion: data.tokenVersion,
       },
     });
@@ -119,6 +121,7 @@ export class PrismaUsersRepository implements IUsersRepository {
     lockoutLevel: number;
     lockedUntil: Date | null;
     lastVisit: Date | null;
+    themePreference: string;
     tokenVersion: number;
     createdAt: Date;
     updatedAt: Date;
@@ -137,6 +140,7 @@ export class PrismaUsersRepository implements IUsersRepository {
       lockoutLevel: u.lockoutLevel,
       lockedUntil: u.lockedUntil ?? undefined,
       lastVisit: u.lastVisit ?? undefined,
+      themePreference: u.themePreference,
       tokenVersion: u.tokenVersion,
       createdAt: u.createdAt,
       updatedAt: u.updatedAt,

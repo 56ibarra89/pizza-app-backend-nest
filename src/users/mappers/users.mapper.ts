@@ -14,5 +14,6 @@ export function toUserResponseDto(entity: UserEntity): UserResponseDto {
     createdAt: entity.createdAt.toISOString(),
     updatedAt: entity.updatedAt.toISOString(),
     lastVisit: entity.lastVisit ? entity.lastVisit.toISOString() : undefined,
+    themePreference: entity.themePreference,
   };
 }

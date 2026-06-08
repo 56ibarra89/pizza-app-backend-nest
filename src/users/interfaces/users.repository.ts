@@ -34,6 +34,7 @@ export interface IUsersRepository {
     lockoutLevel?: number;
     lockedUntil?: Date | null;
     lastVisit?: Date | null;
+    themePreference?: string;
     tokenVersion?: number;
   }): Promise<UserEntity>;
 

@@ -12,4 +12,5 @@ export interface UserResponseDto {
   createdAt: string;
   updatedAt: string;
   lastVisit?: string;
+  themePreference: string;
 }
