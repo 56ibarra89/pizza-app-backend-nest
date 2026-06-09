@@ -183,7 +183,14 @@ export class OrdersService {
       return this.repo.update(id, { status: derived });
     }
 
-    if (isFinal) return existing;
+    if (isFinal) {
+      // Permitir que las órdenes ya pagadas puedan ser anuladas
+      if (existing.status === OrderStatusDto.paid && dto.status === OrderStatusDto.cancelled) {
+        // Continuar con la anulación
+      } else {
+        return existing;
+      }
+    }
 
     const nextStatus = dto.status;
     if (nextStatus === OrderStatusDto.paid) {
