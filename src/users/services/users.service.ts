@@ -79,6 +79,7 @@ export class UsersService {
         passwordHash: passwordHash !== undefined ? passwordHash : undefined,
         role: dto.role,
         isActive: dto.isActive,
+        themePreference: dto.themePreference,
       });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
