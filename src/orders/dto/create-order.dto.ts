@@ -108,4 +108,8 @@ export class CreateOrderDto {
   @IsArray()
   @IsString({ each: true })
   linkedTables?: string[];
+
+  @IsOptional()
+  @IsString()
+  driverId?: string;
 }

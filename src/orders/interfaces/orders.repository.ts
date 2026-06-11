@@ -33,6 +33,7 @@ export interface IOrdersRepository {
     cashierSnapshotName?: string;
     isSentToKitchen?: boolean;
     linkedTables?: string[];
+    driverId?: string;
   }): Promise<OrderEntity>;
 
   update(id: string, data: {
@@ -56,6 +57,7 @@ export interface IOrdersRepository {
     cancelledAt?: Date | null;
     isSentToKitchen?: boolean;
     linkedTables?: string[];
+    driverId?: string | null;
   }): Promise<OrderEntity>;
 
   updateItemsKitchenStatus(params: {

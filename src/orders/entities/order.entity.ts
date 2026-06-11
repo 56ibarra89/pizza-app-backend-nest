@@ -28,6 +28,7 @@ export interface OrderEntity {
   customerSnapshotName?: string;
   customerAddress?: string;
   orderType?: OrderTypeDto;
+  driverId?: string;
   cuponId?: number;
 
   cashierSnapshotName?: string;
