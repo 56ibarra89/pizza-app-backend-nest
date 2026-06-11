@@ -536,6 +536,7 @@ enum UserRole {
   CAJERO
   MESERO
   COCINERO
+  MOTORIZADO
 }
 
 enum MesaEstado {

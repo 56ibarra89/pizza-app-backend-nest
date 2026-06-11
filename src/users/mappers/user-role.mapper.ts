@@ -11,6 +11,8 @@ export function toDbRole(role: UserRoleDto): DbUserRole {
       return DbUserRole.MESERO;
     case UserRoleDto.cocinero:
       return DbUserRole.COCINERO;
+    case UserRoleDto.motorizado:
+      return DbUserRole.MOTORIZADO;
     default:
       throw new Error(`Unsupported UserRoleDto: ${String(role)}`);
   }
@@ -26,6 +28,8 @@ export function fromDbRole(role: DbUserRole): UserRoleDto {
       return UserRoleDto.mesero;
     case DbUserRole.COCINERO:
       return UserRoleDto.cocinero;
+    case DbUserRole.MOTORIZADO:
+      return UserRoleDto.motorizado;
     default:
       throw new Error(`Unsupported DbUserRole: ${String(role)}`);
   }

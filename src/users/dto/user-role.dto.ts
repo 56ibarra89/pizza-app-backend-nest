@@ -3,4 +3,5 @@ export enum UserRoleDto {
   cajero = 'cajero',
   mesero = 'mesero',
   cocinero = 'cocinero',
+  motorizado = 'motorizado',
 }
