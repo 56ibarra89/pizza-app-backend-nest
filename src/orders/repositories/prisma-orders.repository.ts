@@ -104,6 +104,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     payments?: { method: import('../dto/payment-method.dto').PaymentMethodDto; amount: number; cashierId?: string; cashierSnapshotName?: string }[];
     cashierId?: string;
     cashierSnapshotName?: string;
+    driverId?: string;
     isSentToKitchen?: boolean;
     linkedTables?: string[];
   }): Promise<OrderEntity> {
@@ -134,6 +135,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           : {}),
         cashierId: data.cashierId ?? null,
         cashierSnapshotName: data.cashierSnapshotName ?? null,
+        driverId: data.driverId ?? null,
         isSentToKitchen: data.isSentToKitchen ?? false,
         ...(uniqueLinkedTables.length
           ? {
@@ -189,6 +191,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       payments?: { method: import('../dto/payment-method.dto').PaymentMethodDto; amount: number; cashierId?: string; cashierSnapshotName?: string }[] | null;
       cashierId?: string | null;
       cashierSnapshotName?: string | null;
+      driverId?: string | null;
       cancelReason?: string | null;
       cancelledById?: string | null;
       cancelledAt?: Date | null;
@@ -233,6 +236,12 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           ? undefined
           : data.cashierId
             ? { connect: { id: data.cashierId } }
+            : { disconnect: true },
+      driver:
+        data.driverId === undefined
+          ? undefined
+          : data.driverId
+            ? { connect: { id: data.driverId } }
             : { disconnect: true },
       cashierSnapshotName: data.cashierSnapshotName === undefined ? undefined : data.cashierSnapshotName,
       cancelReason: data.cancelReason === undefined ? undefined : data.cancelReason,
@@ -330,6 +339,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     customerSnapshotName: string | null;
     customerAddress: string | null;
     orderType: import('@prisma/client').OrderType | null;
+    driverId: string | null;
     cuponId: number | null;
     cashierSnapshotName: string | null;
     cancelReason: string | null;
@@ -392,6 +402,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       customerSnapshotName: o.customerSnapshotName ?? undefined,
       customerAddress: o.customerAddress ?? undefined,
       orderType: o.orderType ? fromDbOrderType(o.orderType) : undefined,
+      driverId: o.driverId ?? undefined,
       cuponId: o.cuponId ?? undefined,
       cashierSnapshotName: o.cashierSnapshotName ?? undefined,
       cancelReason: o.cancelReason ?? undefined,
