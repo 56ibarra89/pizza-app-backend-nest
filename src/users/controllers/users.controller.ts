@@ -25,6 +25,7 @@ export class UsersController {
   constructor(private readonly users: UsersService) {}
 
   @Get()
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero, UserRoleDto.cocinero)
   async getAll() {
     const list = await this.users.getAll();
     return list.map(toUserResponseDto);
