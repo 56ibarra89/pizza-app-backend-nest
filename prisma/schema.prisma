@@ -39,6 +39,7 @@ model User {
   updatedHappyHours   HappyHourPromotion[] @relation("HappyHourUpdatedBy")
   cancelledOrders     Order[]              @relation("OrderCancelledBy")
   cashierOrders       Order[]              @relation("OrderCashier")
+  drivenOrders        Order[]              @relation("OrderDriver")
   payments            Payment[]
   createdProducts     Product[]            @relation("ProductCreatedBy")
   updatedProducts     Product[]            @relation("ProductUpdatedBy")
@@ -147,12 +148,14 @@ model Order {
   cancelReason            String?
   cancelledAt             DateTime?
   cancelledById           String?
+  driverId                String?
   cashierSnapshotName     String?
   cuponId                 Int?
   customerSnapshotName    String?
   certificadosRedeemed    Certificado[]
   cancelledBy             User?         @relation("OrderCancelledBy", fields: [cancelledById], references: [id])
   cashier                 User?         @relation("OrderCashier", fields: [cashierId], references: [id])
+  driver                  User?         @relation("OrderDriver", fields: [driverId], references: [id])
   cupon                   Cupon?        @relation(fields: [cuponId], references: [id])
   customer                Customer?     @relation(fields: [customerId], references: [id])
   invoiceCorrelativo      Correlativo?  @relation("OrderInvoiceCorrelativo", fields: [invoiceCorrelativoId], references: [id])
@@ -167,6 +170,7 @@ model Order {
   @@index([customerId])
   @@index([status])
   @@index([cashierId])
+  @@index([driverId])
   @@index([cuponId])
   @@index([invoiceCorrelativoId])
   @@index([invoiceIssuedAt])
