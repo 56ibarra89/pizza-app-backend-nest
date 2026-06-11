@@ -67,6 +67,7 @@ export class OrdersService {
       payments: status === OrderStatusDto.paid ? undefined : dto.payments,
       cashierId,
       cashierSnapshotName: dto.cashierSnapshotName,
+      driverId: dto.driverId,
       isSentToKitchen,
       linkedTables: dto.linkedTables,
     });

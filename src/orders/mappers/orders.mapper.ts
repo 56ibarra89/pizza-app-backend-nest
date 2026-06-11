@@ -20,6 +20,7 @@ export function toOrderResponseDto(order: OrderEntity) {
     taxAmount: order.taxAmount,
     total: order.total,
     status: order.status,
+    driverId: order.driverId,
     timestamp: order.timestamp.toISOString(),
     customerSnapshotName: order.customerSnapshotName,
     orderType: order.orderType,
