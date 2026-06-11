@@ -7,6 +7,8 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Request,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { UsersService } from '../services/users.service';
@@ -35,7 +37,19 @@ export class UsersController {
   }
 
   @Get('username/:username')
-  async getByUsername(@Param('username') username: string) {
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.mesero,
+    UserRoleDto.cocinero,
+  )
+  async getByUsername(
+    @Param('username') username: string,
+    @Request() req: { user: { role: UserRoleDto; username: string; id: string } },
+  ) {
+    if (req.user.role !== UserRoleDto.admin && req.user.username !== username) {
+      throw new ForbiddenException('No tienes permiso para ver este perfil.');
+    }
     const user = await this.users.getByUsername(username);
     return toUserResponseDto(user);
   }
@@ -47,10 +61,22 @@ export class UsersController {
   }
 
   @Patch(':id')
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.mesero,
+    UserRoleDto.cocinero,
+  )
   async update(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateUserDto,
+    @Request() req: { user: { role: UserRoleDto; username: string; id: string } },
   ) {
+    if (req.user.role !== UserRoleDto.admin && req.user.id !== id) {
+      throw new ForbiddenException(
+        'No tienes permiso para editar este perfil.',
+      );
+    }
     const updated = await this.users.update(id, dto);
     return toUserResponseDto(updated);
   }
