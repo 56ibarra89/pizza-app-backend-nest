@@ -14,12 +14,14 @@ import type { CartItemEntity } from '../entities/order-item.entity';
 import { CorrelativoStatus, DocumentType, LogLevel, ShiftStatus } from '@prisma/client';
 import { toDbOrderType, toDbPaymentMethod } from '../mappers/status.mapper';
 import { PaymentMethodDto } from '../dto/payment-method.dto';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class OrdersService {
   constructor(
     @Inject(ORDERS_REPOSITORY) private readonly repo: IOrdersRepository,
     private readonly prisma: PrismaService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   listTodayOrActive(now = new Date()) {
@@ -178,6 +180,19 @@ export class OrdersService {
       });
 
       const reloaded = await this.getById(id);
+
+      if (dto.status === OrderStatusDto.delivered) {
+        // Find which table is assigned to this order, if any
+        const tableName = reloaded.linkedTables?.[0] || undefined;
+        const customerName = reloaded.customerSnapshotName || undefined;
+        this.eventEmitter.emit('order.ready', {
+          orderId: id,
+          isFullOrder: true,
+          tableName,
+          customerName,
+        });
+      }
+
       if (isFinal) return reloaded;
 
       const derived = this.deriveGlobalStatus(reloaded.items);
@@ -205,6 +220,17 @@ export class OrdersService {
       : existing.items;
 
     const updateData: Parameters<IOrdersRepository['update']>[1] = { status: nextStatus, items };
+
+    if (nextStatus === OrderStatusDto.delivered) {
+      const tableName = existing.linkedTables?.[0] || undefined;
+      const customerName = existing.customerSnapshotName || undefined;
+      this.eventEmitter.emit('order.ready', {
+        orderId: id,
+        isFullOrder: true,
+        tableName,
+        customerName,
+      });
+    }
 
     if (nextStatus === OrderStatusDto.cancelled) {
       updateData.cancelReason = dto.cancelReason;
@@ -242,6 +268,27 @@ export class OrdersService {
 
     const mappedItems = dto.items.map(item => ({ ...item, giftQuantity: item.giftQuantity ?? 0 }));
     const nextStatus = isFinal ? existing.status : this.deriveGlobalStatus(mappedItems as any);
+
+    // Detect items that changed to DELIVERED
+    if (!isFinal) {
+      for (let i = 0; i < mappedItems.length; i++) {
+        const item = mappedItems[i];
+        if (item.kitchenStatus === KitchenStatusDto.delivered) {
+          const existingItem = existing.items[i];
+          if (existingItem && existingItem.kitchenStatus !== KitchenStatusDto.delivered) {
+            const tableName = existing.linkedTables?.[0] || undefined;
+            const customerName = existing.customerSnapshotName || undefined;
+            this.eventEmitter.emit('order.ready', {
+              orderId: id,
+              itemName: item.name,
+              isFullOrder: false,
+              tableName,
+              customerName,
+            });
+          }
+        }
+      }
+    }
 
     return this.repo.update(id, {
       items: mappedItems as any,

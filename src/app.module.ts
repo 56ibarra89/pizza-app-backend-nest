@@ -19,6 +19,8 @@ import { ShiftsModule } from './shifts/shifts.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { MesasModule } from './mesas/mesas.module';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -54,6 +56,8 @@ import { MesasModule } from './mesas/mesas.module';
     CorrelativosModule,
     ShiftsModule,
     MesasModule,
+    EventEmitterModule.forRoot(),
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [

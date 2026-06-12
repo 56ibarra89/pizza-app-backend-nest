@@ -634,3 +634,17 @@ enum LogLevel {
   WARN
   ERROR
 }
+
+model Notification {
+  id        String   @id @default(uuid())
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  role      UserRole // Target role for this notification (e.g. ADMIN, CAJERO)
+  createdAt DateTime @default(now())
+
+  @@index([role])
+  @@index([isRead])
+  @@index([createdAt])
+}
+
