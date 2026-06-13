@@ -15,5 +15,6 @@ export function toUserResponseDto(entity: UserEntity): UserResponseDto {
     updatedAt: entity.updatedAt.toISOString(),
     lastVisit: entity.lastVisit ? entity.lastVisit.toISOString() : undefined,
     themePreference: entity.themePreference,
+    workDays: entity.workDays,
   };
 }

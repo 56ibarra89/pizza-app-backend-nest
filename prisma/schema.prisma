@@ -23,6 +23,7 @@ model User {
   lastVisit           DateTime?
   themePreference     String               @default("light")
   tokenVersion        Int                  @default(0)
+  workDays            WeekDay[]            @default([])
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   createdAppConfigs   AppConfig[]          @relation("AppConfigCreatedBy")

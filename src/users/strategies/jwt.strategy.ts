@@ -2,6 +2,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PassportStrategy } from '@nestjs/passport';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { fromDbRole } from '../mappers/user-role.mapper';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -27,6 +28,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('La sesión ha expirado en este dispositivo.');
     }
     // Este objeto se inyectará en req.user
-    return { id: user.id, username: user.username, role: user.role };
+    return { id: user.id, username: user.username, role: fromDbRole(user.role) };
   }
 }

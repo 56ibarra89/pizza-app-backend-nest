@@ -47,16 +47,17 @@ export class UsersService {
   async create(dto: CreateUserDto) {
     const passwordHash = dto.password ? await this.hasher.hash(dto.password) : undefined;
     try {
-      return await this.repo.create({
-        username: dto.username.toLowerCase(),
-        email: dto.email ? dto.email.toLowerCase() : undefined,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        pin: dto.pin,
-        passwordHash,
-        role: dto.role,
-        isActive: dto.isActive ?? true,
-      });
+        return await this.repo.create({
+          username: dto.username.toLowerCase(),
+          email: dto.email ? dto.email.toLowerCase() : undefined,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          pin: dto.pin,
+          passwordHash,
+          role: dto.role,
+          isActive: dto.isActive ?? true,
+          workDays: dto.workDays as any,
+        });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
         throw new ConflictException('Usuario/email/pin ya existe');
@@ -70,17 +71,18 @@ export class UsersService {
       dto.password !== undefined ? await this.hasher.hash(dto.password) : undefined;
 
     try {
-      return await this.repo.update(id, {
-        username: dto.username ? dto.username.toLowerCase() : undefined,
-        email: dto.email === undefined ? undefined : (dto.email ? dto.email.toLowerCase() : null),
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        pin: dto.pin,
-        passwordHash: passwordHash !== undefined ? passwordHash : undefined,
-        role: dto.role,
-        isActive: dto.isActive,
-        themePreference: dto.themePreference,
-      });
+        return await this.repo.update(id, {
+          username: dto.username ? dto.username.toLowerCase() : undefined,
+          email: dto.email === undefined ? undefined : (dto.email ? dto.email.toLowerCase() : null),
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          pin: dto.pin,
+          passwordHash: passwordHash !== undefined ? passwordHash : undefined,
+          role: dto.role,
+          isActive: dto.isActive,
+          themePreference: dto.themePreference,
+          workDays: dto.workDays as any,
+        });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
         throw new ConflictException('Usuario/email/pin ya existe');

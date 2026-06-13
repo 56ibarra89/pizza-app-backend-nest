@@ -18,4 +18,5 @@ export interface UserEntity {
   lastVisit?: Date;
   themePreference: string;
   tokenVersion: number;
+  workDays?: string[];
 }

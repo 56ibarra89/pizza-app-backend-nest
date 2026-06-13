@@ -19,6 +19,7 @@ export interface IUsersRepository {
     passwordHash?: string;
     role: UserRoleDto;
     isActive: boolean;
+    workDays?: string[];
   }): Promise<UserEntity>;
 
   update(id: string, data: {
@@ -36,6 +37,7 @@ export interface IUsersRepository {
     lastVisit?: Date | null;
     themePreference?: string;
     tokenVersion?: number;
+    workDays?: string[];
   }): Promise<UserEntity>;
 
   delete(id: string): Promise<void>;

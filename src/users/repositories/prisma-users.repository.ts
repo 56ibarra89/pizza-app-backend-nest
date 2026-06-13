@@ -45,6 +45,7 @@ export class PrismaUsersRepository implements IUsersRepository {
     passwordHash?: string;
     role: UserRoleDto;
     isActive: boolean;
+    workDays?: string[];
   }): Promise<UserEntity> {
     const created = await this.prisma.user.create({
       data: {
@@ -56,6 +57,7 @@ export class PrismaUsersRepository implements IUsersRepository {
         passwordHash: data.passwordHash,
         role: toDbRole(data.role),
         isActive: data.isActive,
+        workDays: data.workDays as any,
       },
     });
     return this.mapUser(created);
@@ -78,6 +80,7 @@ export class PrismaUsersRepository implements IUsersRepository {
       lastVisit?: Date | null;
       themePreference?: string;
       tokenVersion?: number;
+      workDays?: string[];
     },
   ): Promise<UserEntity> {
     const updated = await this.prisma.user.update({
@@ -97,6 +100,7 @@ export class PrismaUsersRepository implements IUsersRepository {
         lastVisit: data.lastVisit,
         themePreference: data.themePreference,
         tokenVersion: data.tokenVersion,
+        workDays: data.workDays as any,
       },
     });
 
@@ -125,6 +129,7 @@ export class PrismaUsersRepository implements IUsersRepository {
     tokenVersion: number;
     createdAt: Date;
     updatedAt: Date;
+    workDays?: any[];
   }): UserEntity {
     return {
       id: u.id,
@@ -144,6 +149,7 @@ export class PrismaUsersRepository implements IUsersRepository {
       tokenVersion: u.tokenVersion,
       createdAt: u.createdAt,
       updatedAt: u.updatedAt,
+      workDays: u.workDays as string[],
     };
   }
 }

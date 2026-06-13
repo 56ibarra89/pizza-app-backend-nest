@@ -13,4 +13,5 @@ export interface UserResponseDto {
   updatedAt: string;
   lastVisit?: string;
   themePreference: string;
+  workDays?: string[];
 }
