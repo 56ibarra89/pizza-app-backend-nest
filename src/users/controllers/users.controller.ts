@@ -9,6 +9,7 @@ import {
   Post,
   Request,
   ForbiddenException,
+  Query,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { UsersService } from '../services/users.service';
@@ -29,6 +30,14 @@ export class UsersController {
   async getAll() {
     const list = await this.users.getAll();
     return list.map(toUserResponseDto);
+  }
+
+  @Get('motorizados/delivery-stats')
+  async getDeliveryStats(@Query('date') date: string) {
+    if (!date) {
+      date = new Date().toISOString().split('T')[0];
+    }
+    return this.users.getDeliveryStats(date);
   }
 
   @Get(':id')
@@ -91,5 +100,23 @@ export class UsersController {
   async unlock(@Param('id', new ParseUUIDPipe()) id: string) {
     const updated = await this.users.unlockUser(id);
     return toUserResponseDto(updated);
+  }
+
+  @Roles(UserRoleDto.admin)
+  @Post(':id/extra-days')
+  async addExtraDay(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: { date: string; notes?: string },
+  ) {
+    return this.users.addExtraDay(id, body.date, body.notes);
+  }
+
+  @Roles(UserRoleDto.admin)
+  @Delete(':id/extra-days/:date')
+  async removeExtraDay(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('date') date: string,
+  ) {
+    return this.users.removeExtraDay(id, date);
   }
 }

@@ -12,27 +12,28 @@ export class PrismaUsersRepository implements IUsersRepository {
   async getAll(): Promise<UserEntity[]> {
     const users = await this.prisma.user.findMany({
       orderBy: { username: 'asc' },
+      include: { extraDays: true },
     });
     return users.map((u) => this.mapUser(u));
   }
 
   async findById(id: string): Promise<UserEntity | null> {
-    const found = await this.prisma.user.findUnique({ where: { id } });
+    const found = await this.prisma.user.findUnique({ where: { id }, include: { extraDays: true } });
     return found ? this.mapUser(found) : null;
   }
 
   async findByUsername(username: string): Promise<UserEntity | null> {
-    const found = await this.prisma.user.findUnique({ where: { username } });
+    const found = await this.prisma.user.findUnique({ where: { username }, include: { extraDays: true } });
     return found ? this.mapUser(found) : null;
   }
 
   async findByEmail(email: string): Promise<UserEntity | null> {
-    const found = await this.prisma.user.findUnique({ where: { email } });
+    const found = await this.prisma.user.findUnique({ where: { email }, include: { extraDays: true } });
     return found ? this.mapUser(found) : null;
   }
 
   async findByPin(pin: string): Promise<UserEntity | null> {
-    const found = await this.prisma.user.findUnique({ where: { pin } });
+    const found = await this.prisma.user.findUnique({ where: { pin }, include: { extraDays: true } });
     return found ? this.mapUser(found) : null;
   }
 
@@ -59,6 +60,7 @@ export class PrismaUsersRepository implements IUsersRepository {
         isActive: data.isActive,
         workDays: data.workDays as any,
       },
+      include: { extraDays: true },
     });
     return this.mapUser(created);
   }
@@ -102,6 +104,7 @@ export class PrismaUsersRepository implements IUsersRepository {
         tokenVersion: data.tokenVersion,
         workDays: data.workDays as any,
       },
+      include: { extraDays: true },
     });
 
     return this.mapUser(updated);
@@ -130,6 +133,7 @@ export class PrismaUsersRepository implements IUsersRepository {
     createdAt: Date;
     updatedAt: Date;
     workDays?: any[];
+    extraDays?: any[];
   }): UserEntity {
     return {
       id: u.id,
@@ -150,6 +154,7 @@ export class PrismaUsersRepository implements IUsersRepository {
       createdAt: u.createdAt,
       updatedAt: u.updatedAt,
       workDays: u.workDays as string[],
+      extraDays: u.extraDays?.map(ed => ({ date: ed.date, notes: ed.notes })),
     };
   }
 }

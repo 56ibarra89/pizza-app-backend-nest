@@ -46,6 +46,7 @@ model User {
   updatedProducts     Product[]            @relation("ProductUpdatedBy")
   cashierShifts       Shift[]              @relation("ShiftCashier")
   systemLogs          SystemLog[]          @relation("SystemLogUser")
+  extraDays           UserExtraDay[]       @relation("UserExtraDays")
 
   @@index([role])
   @@index([isActive])
@@ -649,3 +650,14 @@ model Notification {
   @@index([createdAt])
 }
 
+model UserExtraDay {
+  id        Int      @id @default(autoincrement())
+  userId    String
+  date      DateTime @db.Date
+  notes     String?
+  createdAt DateTime @default(now())
+  user      User     @relation("UserExtraDays", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([date])
+}

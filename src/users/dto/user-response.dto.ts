@@ -14,4 +14,5 @@ export interface UserResponseDto {
   lastVisit?: string;
   themePreference: string;
   workDays?: string[];
+  extraDays?: { date: string; notes?: string }[];
 }

@@ -13,7 +13,7 @@ export class NotificationsController {
   @Sse('stream')
   stream(@CurrentUser() user: any): Observable<MessageEvent> {
     return this.notificationsService.notificationStream.asObservable().pipe(
-      filter(notification => notification.role === user.role),
+      filter(notification => notification.role === user.role.toUpperCase()),
       map((notification) => ({
         data: notification,
       }) as MessageEvent),
@@ -23,7 +23,8 @@ export class NotificationsController {
   @UseGuards(JwtAuthGuard)
   @Get()
   async getUnreadNotifications(@CurrentUser() user: any) {
-    return this.notificationsService.getUnreadForRole(user.role);
+    // Convierte el rol a mayúsculas para coincidir con el enum UserRole de Prisma (ej. ADMIN, CAJERO)
+    return this.notificationsService.getUnreadForRole(user.role.toUpperCase());
   }
 
   @UseGuards(JwtAuthGuard)

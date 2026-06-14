@@ -19,4 +19,5 @@ export interface UserEntity {
   themePreference: string;
   tokenVersion: number;
   workDays?: string[];
+  extraDays?: { date: Date; notes?: string }[];
 }

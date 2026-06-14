@@ -10,6 +10,7 @@ import {
 import { MailerService } from '@nestjs-modules/mailer';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
 import {
   USERS_REPOSITORY,
   type IUsersRepository,
@@ -26,6 +27,7 @@ export class UsersService {
     private readonly hasher: PasswordHasherService,
     private readonly mailerService: MailerService,
     private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
   ) {}
 
   getAll() {
@@ -299,4 +301,78 @@ export class UsersService {
       tokenVersion: user.tokenVersion + 1,
     });
   }
+
+  async addExtraDay(userId: string, date: string, notes?: string) {
+    const user = await this.repo.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    // date from frontend should be YYYY-MM-DD
+    const parsedDate = new Date(`${date}T00:00:00.000Z`);
+
+    await this.prisma.userExtraDay.upsert({
+      where: {
+        userId_date: {
+          userId,
+          date: parsedDate,
+        },
+      },
+      create: {
+        userId,
+        date: parsedDate,
+        notes,
+      },
+      update: {
+        notes,
+      },
+    });
+
+    return { success: true };
+  }
+
+  async removeExtraDay(userId: string, date: string) {
+    const parsedDate = new Date(`${date}T00:00:00.000Z`);
+
+    try {
+      await this.prisma.userExtraDay.delete({
+        where: {
+          userId_date: {
+            userId,
+            date: parsedDate,
+          },
+        },
+      });
+    } catch (e) {
+      // Ignorar si no existe
+    }
+
+    return { success: true };
+  }
+
+  async getDeliveryStats(dateStr: string) {
+    const startOfDay = new Date(`${dateStr}T00:00:00.000Z`);
+    const endOfDay = new Date(`${dateStr}T23:59:59.999Z`);
+
+    // Only count DELIVERED orders, or all orders assigned to driver?
+    // Usually they want to see how many were completed today, so DELIVERED.
+    const stats = await this.prisma.order.groupBy({
+      by: ['driverId'],
+      where: {
+        driverId: { not: null },
+        status: 'DELIVERED',
+        createdAt: {
+          gte: startOfDay,
+          lte: endOfDay,
+        },
+      },
+      _count: {
+        id: true,
+      },
+    });
+
+    return stats.map((s) => ({
+      userId: s.driverId,
+      todayDeliveries: s._count.id,
+    }));
+  }
 }
+
