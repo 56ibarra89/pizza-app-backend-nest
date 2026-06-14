@@ -7,7 +7,6 @@ import type { CreateCategoryDto } from '../dto/create-category.dto';
 import type { UpdateCategoryDto } from '../dto/update-category.dto';
 import type { CreateProductDto } from '../dto/create-product.dto';
 import type { UpdateProductDto } from '../dto/update-product.dto';
-import { fromDbSize, toDbSize } from '../mappers/products.mapper';
 
 @Injectable()
 export class PrismaProductsRepository implements IProductsRepository {
@@ -115,13 +114,13 @@ export class PrismaProductsRepository implements IProductsRepository {
         isActive: dto.isActive ?? true,
         hasMultipleSizes: dto.hasMultipleSizes ?? false,
         prices: {
-          create: dto.prices.map((p) => ({ size: toDbSize(p.size), price: p.price })),
+          create: dto.prices.map((p) => ({ size: p.size, price: p.price })),
         },
         extras: dto.extras?.length
           ? {
               create: dto.extras.map((e) => ({
                 name: e.name,
-                prices: { create: e.prices.map((p) => ({ size: toDbSize(p.size), price: p.price })) },
+                prices: { create: e.prices.map((p) => ({ size: p.size, price: p.price })) },
               })),
             }
           : undefined,
@@ -154,7 +153,7 @@ export class PrismaProductsRepository implements IProductsRepository {
           hasMultipleSizes: dto.hasMultipleSizes,
           prices: dto.prices
             ? {
-                create: dto.prices.map((p) => ({ size: toDbSize(p.size), price: p.price })),
+                create: dto.prices.map((p) => ({ size: p.size, price: p.price })),
               }
             : undefined,
           extras: dto.extras
@@ -162,7 +161,7 @@ export class PrismaProductsRepository implements IProductsRepository {
               ? {
                   create: dto.extras.map((e) => ({
                     name: e.name,
-                    prices: { create: e.prices.map((p) => ({ size: toDbSize(p.size), price: p.price })) },
+                    prices: { create: e.prices.map((p) => ({ size: p.size, price: p.price })) },
                   })),
                 }
               : undefined
@@ -189,21 +188,21 @@ export class PrismaProductsRepository implements IProductsRepository {
     description: string | null;
     isActive: boolean;
     hasMultipleSizes: boolean;
-    prices: { size: import('@prisma/client').ProductSize; price: unknown }[];
+    prices: { size: string; price: unknown }[];
     extras: {
       name: string;
-      prices: { size: import('@prisma/client').ProductSize; price: unknown }[];
+      prices: { size: string; price: unknown }[];
     }[];
   }): ProductEntity {
     const prices = p.prices.map((pp) => ({
-      size: fromDbSize(pp.size),
+      size: pp.size,
       price: Number(pp.price),
     }));
 
     const extras = p.extras.length
       ? p.extras.map((e) => ({
           name: e.name,
-          prices: e.prices.map((ep) => ({ size: fromDbSize(ep.size), price: Number(ep.price) })),
+          prices: e.prices.map((ep) => ({ size: ep.size, price: Number(ep.price) })),
         }))
       : undefined;
 

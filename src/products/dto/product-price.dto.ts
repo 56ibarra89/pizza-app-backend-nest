@@ -1,10 +1,10 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsNumber, Min } from 'class-validator';
-import { ProductSizeDto } from './product-size.dto';
+import { IsString, IsNotEmpty, IsNumber, Min } from 'class-validator';
 
 export class ProductPriceDto {
-  @IsEnum(ProductSizeDto)
-  size!: ProductSizeDto;
+  @IsString()
+  @IsNotEmpty()
+  size!: string;
 
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })

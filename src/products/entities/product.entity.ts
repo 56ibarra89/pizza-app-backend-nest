@@ -1,4 +1,4 @@
-export type ProductSize = 'familiar' | 'mediana' | 'personal' | 'único';
+export type ProductSize = string;
 
 export interface ProductPriceEntity {
   size: ProductSize;

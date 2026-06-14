@@ -1,5 +1,4 @@
 import { BadRequestException } from '@nestjs/common';
-import { ProductSizeDto } from '../dto/product-size.dto';
 import type { CreateProductDto } from '../dto/create-product.dto';
 import type { UpdateProductDto } from '../dto/update-product.dto';
 
@@ -18,7 +17,7 @@ function validatePricesForMode(
 ): void {
   ensureUniqueSizes(prices, context);
 
-  const hasUnico = prices.some((p) => p.size === ProductSizeDto.unico);
+  const hasUnico = prices.some((p) => p.size.toLowerCase() === 'unico' || p.size.toLowerCase() === 'único');
 
   if (hasMultipleSizes) {
     if (hasUnico) {

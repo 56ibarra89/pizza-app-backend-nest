@@ -1,5 +1,4 @@
 import type { KitchenStatusDto } from '../dto/kitchen-status.dto';
-import type { ProductSizeDto } from '../dto/product-size.dto';
 
 export interface SelectedExtraEntity {
   name: string;
@@ -10,7 +9,7 @@ export interface CartItemEntity {
   productId?: string;
   name: string;
   price: number;
-  size: ProductSizeDto;
+  size: string;
   quantity: number;
   extras: SelectedExtraEntity[];
   note?: string;

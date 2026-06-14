@@ -10,12 +10,10 @@ import {
   fromDbOrderStatus,
   fromDbOrderType,
   fromDbPaymentMethod,
-  fromDbSize,
   toDbKitchenStatus,
   toDbOrderStatus,
   toDbOrderType,
   toDbPaymentMethod,
-  toDbSize,
 } from '../mappers/status.mapper';
 
 @Injectable()
@@ -150,7 +148,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
             productId: i.productId,
             name: i.name,
             price: i.price,
-            size: toDbSize(i.size),
+            size: i.size,
             quantity: i.quantity,
             note: i.note,
             giftQuantity: i.giftQuantity ?? 0,
@@ -277,7 +275,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           productId: i.productId,
           name: i.name,
           price: i.price,
-          size: toDbSize(i.size),
+          size: i.size,
           quantity: i.quantity,
           note: i.note,
           giftQuantity: i.giftQuantity ?? 0,
@@ -360,7 +358,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       id: number;
       name: string;
       price: Prisma.Decimal;
-      size: import('@prisma/client').ProductSize;
+      size: string;
       quantity: number;
       note: string | null;
       giftQuantity: number;
@@ -384,7 +382,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       items: o.items.map((i) => ({
         name: i.name,
         price: i.price.toNumber(),
-        size: fromDbSize(i.size),
+        size: i.size,
         quantity: i.quantity,
         extras: i.extras.map((e) => ({ name: e.name, price: e.price.toNumber() })),
         note: i.note ?? undefined,

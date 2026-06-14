@@ -12,7 +12,6 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { SelectedExtraDto } from './selected-extra.dto';
-import { ProductSizeDto } from './product-size.dto';
 import { KitchenStatusDto } from './kitchen-status.dto';
 
 export class CartItemDto {
@@ -29,8 +28,9 @@ export class CartItemDto {
   @Min(0)
   price!: number;
 
-  @IsEnum(ProductSizeDto)
-  size!: ProductSizeDto;
+  @IsString()
+  @IsNotEmpty()
+  size!: string;
 
   @IsInt()
   @Min(1)

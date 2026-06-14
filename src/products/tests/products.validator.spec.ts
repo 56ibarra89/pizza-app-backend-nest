@@ -1,5 +1,4 @@
 import { validateCreateProduct } from '../validators/products.validator';
-import { ProductSizeDto } from '../dto/product-size.dto';
 import type { CreateProductDto } from '../dto/create-product.dto';
 
 describe('products.validator', () => {
@@ -8,7 +7,7 @@ describe('products.validator', () => {
       categoryId: '00000000-0000-0000-0000-000000000000',
       name: 'Coca',
       hasMultipleSizes: false,
-      prices: [{ size: ProductSizeDto.unico, price: 10 }],
+      prices: [{ size: 'único', price: 10 }],
     };
 
     expect(() => validateCreateProduct(dto)).not.toThrow();
@@ -20,8 +19,8 @@ describe('products.validator', () => {
       name: 'Pizza',
       hasMultipleSizes: true,
       prices: [
-        { size: ProductSizeDto.familiar, price: 100 },
-        { size: ProductSizeDto.unico, price: 50 },
+        { size: 'familiar', price: 100 },
+        { size: 'único', price: 50 },
       ],
     };
 

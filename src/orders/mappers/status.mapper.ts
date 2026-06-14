@@ -3,13 +3,11 @@ import {
   OrderStatus as DbOrderStatus,
   OrderType as DbOrderType,
   PaymentMethod as DbPaymentMethod,
-  ProductSize as DbProductSize,
 } from '@prisma/client';
 import { KitchenStatusDto } from '../dto/kitchen-status.dto';
 import { OrderStatusDto } from '../dto/order-status.dto';
 import { OrderTypeDto } from '../dto/order-type.dto';
 import { PaymentMethodDto } from '../dto/payment-method.dto';
-import { ProductSizeDto } from '../dto/product-size.dto';
 
 export function toDbOrderStatus(status: OrderStatusDto): DbOrderStatus {
   switch (status) {
@@ -131,32 +129,3 @@ export function fromDbPaymentMethod(method: DbPaymentMethod): PaymentMethodDto {
   }
 }
 
-export function toDbSize(size: ProductSizeDto): DbProductSize {
-  switch (size) {
-    case ProductSizeDto.familiar:
-      return DbProductSize.FAMILIAR;
-    case ProductSizeDto.mediana:
-      return DbProductSize.MEDIANA;
-    case ProductSizeDto.personal:
-      return DbProductSize.PERSONAL;
-    case ProductSizeDto.unico:
-      return DbProductSize.UNICO;
-    default:
-      throw new Error(`Unsupported ProductSizeDto: ${String(size)}`);
-  }
-}
-
-export function fromDbSize(size: DbProductSize): ProductSizeDto {
-  switch (size) {
-    case DbProductSize.FAMILIAR:
-      return ProductSizeDto.familiar;
-    case DbProductSize.MEDIANA:
-      return ProductSizeDto.mediana;
-    case DbProductSize.PERSONAL:
-      return ProductSizeDto.personal;
-    case DbProductSize.UNICO:
-      return ProductSizeDto.unico;
-    default:
-      throw new Error(`Unsupported DbProductSize: ${String(size)}`);
-  }
-}
