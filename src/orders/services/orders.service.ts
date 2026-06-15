@@ -15,6 +15,8 @@ import { CorrelativoStatus, DocumentType, LogLevel, ShiftStatus } from '@prisma/
 import { toDbOrderType, toDbPaymentMethod } from '../mappers/status.mapper';
 import { PaymentMethodDto } from '../dto/payment-method.dto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ProductsService } from '../../products/services/products.service';
+import { AppConfigService } from '../../app-config/services/app-config.service';
 
 @Injectable()
 export class OrdersService {
@@ -22,6 +24,8 @@ export class OrdersService {
     @Inject(ORDERS_REPOSITORY) private readonly repo: IOrdersRepository,
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly productsService: ProductsService,
+    private readonly appConfigService: AppConfigService,
   ) {}
 
   listTodayOrActive(now = new Date()) {
@@ -51,15 +55,17 @@ export class OrdersService {
     const cashierId = dto.cashierId ?? (await this.tryResolveCashierId(dto.cashierSnapshotName));
     const shiftId = dto.shiftId ?? (await this.tryResolveActiveShiftId());
 
+    const { subTotal, taxAmount, total } = await this.calculateSecureTotals(dto.items, dto.discountAmount);
+
     const created = await this.repo.create({
       id: dto.id,
       shiftId,
       customerId,
       items: dto.items.map(item => ({ ...item, giftQuantity: item.giftQuantity ?? 0 })),
-      subTotal: dto.subTotal,
+      subTotal: subTotal,
       discountAmount: dto.discountAmount,
-      taxAmount: dto.taxAmount,
-      total: dto.total,
+      taxAmount: taxAmount,
+      total: total,
       status: status === OrderStatusDto.paid ? OrderStatusDto.pending : status,
       timestamp,
       customerSnapshotName: dto.customerSnapshotName,
@@ -80,10 +86,10 @@ export class OrdersService {
         customerSnapshotName: dto.customerSnapshotName,
         customerAddress: dto.customerAddress,
         orderType: dto.orderType,
-        subTotal: dto.subTotal,
-        taxAmount: dto.taxAmount,
+        subTotal: subTotal,
+        taxAmount: taxAmount,
         discountAmount: dto.discountAmount,
-        finalTotal: dto.total,
+        finalTotal: total,
         cuponId: dto.cuponId,
       });
     }
@@ -97,6 +103,68 @@ export class OrdersService {
     if (Math.abs(sum - expectedTotal) > 0.01) {
       throw new BadRequestException(`La suma de los pagos (${sum.toFixed(2)}) no coincide con el total de la orden (${expectedTotal.toFixed(2)}). No se puede marcar como pagada.`);
     }
+  }
+
+  private async calculateSecureTotals(
+    items: any[],
+    frontendDiscountAmount = 0
+  ): Promise<{ subTotal: number; taxAmount: number; total: number }> {
+    let calculatedSubTotal = 0;
+
+    const packagingConfig = await this.appConfigService.getByIdOrDefault('packaging_sizes');
+    const packagingSizes = (packagingConfig?.data as any)?.sizes || [];
+
+    for (const item of items) {
+      let itemBasePrice = 0;
+
+      if (item.productId) {
+        try {
+          const product = await this.productsService.getProductById(item.productId);
+          const priceConfig = product.prices.find((p: any) => p.size.toLowerCase() === item.size.toLowerCase());
+          itemBasePrice = priceConfig ? priceConfig.price : item.price;
+
+          let extrasTotal = 0;
+          if (item.extras && product.extras) {
+            for (const extra of item.extras) {
+              const extraConfig = product.extras.find((e: any) => e.name.toLowerCase() === extra.name.toLowerCase());
+              if (extraConfig) {
+                const extraPriceConfig = extraConfig.prices.find((p: any) => p.size.toLowerCase() === item.size.toLowerCase());
+                if (extraPriceConfig) extrasTotal += extraPriceConfig.price;
+              }
+            }
+          }
+          itemBasePrice += extrasTotal;
+        } catch {
+          itemBasePrice = item.price;
+        }
+      } else if (item.name && item.name.toLowerCase().startsWith('empaque')) {
+        const packName = item.name.replace(/empaque\s+/i, '').trim();
+        const packConfig = packagingSizes.find((s: any) => s.name.toLowerCase() === packName.toLowerCase());
+        itemBasePrice = packConfig ? packConfig.price : item.price;
+      } else {
+        itemBasePrice = item.price;
+      }
+
+      const billableQty = Math.max(0, item.quantity - (item.giftQuantity || 0));
+      calculatedSubTotal += itemBasePrice * billableQty;
+    }
+
+    const generalConfig = await this.appConfigService.getByIdOrDefault('general_config');
+    const taxesEnabled = (generalConfig?.data as any)?.enableTaxes || false;
+    const taxPercentage = (generalConfig?.data as any)?.taxPercentage || 0;
+    
+    let calculatedTax = 0;
+    if (taxesEnabled && taxPercentage > 0) {
+      calculatedTax = calculatedSubTotal * (taxPercentage / 100);
+    }
+
+    const finalTotal = calculatedSubTotal + calculatedTax - frontendDiscountAmount;
+
+    return {
+      subTotal: calculatedSubTotal,
+      taxAmount: calculatedTax,
+      total: Math.max(0, finalTotal),
+    };
   }
 
   private async tryResolveActiveShiftId(): Promise<string | undefined> {
@@ -290,13 +358,15 @@ export class OrdersService {
       }
     }
 
+    const { subTotal, taxAmount, total } = await this.calculateSecureTotals(mappedItems, dto.discountAmount);
+
     return this.repo.update(id, {
       items: mappedItems as any,
-      total: dto.total,
-      subTotal: dto.subTotal === undefined ? undefined : dto.subTotal,
-      discountAmount: dto.discountAmount === undefined ? undefined : dto.discountAmount,
-      taxAmount: dto.taxAmount === undefined ? undefined : dto.taxAmount,
-      cuponId: dto.cuponId === undefined ? undefined : dto.cuponId,
+      total: total,
+      subTotal: subTotal,
+      discountAmount: dto.discountAmount,
+      taxAmount: taxAmount,
+      cuponId: dto.cuponId,
       status: nextStatus,
       isSentToKitchen: dto.isSentToKitchen,
     });
@@ -309,9 +379,13 @@ export class OrdersService {
     const existing = await this.getById(id);
     if (existing.status === OrderStatusDto.paid) return existing;
 
-    const finalTotal = dto.finalTotal ?? existing.total;
+    const { subTotal, taxAmount, total: secureFinalTotal } = await this.calculateSecureTotals(
+      existing.items,
+      dto.discountAmount ?? existing.discountAmount
+    );
+
     const finalPayments = dto.payments ?? existing.payments;
-    this.validatePaymentsSum(finalTotal, finalPayments);
+    this.validatePaymentsSum(secureFinalTotal, finalPayments);
 
     await this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({
@@ -344,10 +418,10 @@ export class OrdersService {
             customerSnapshotName: dto.customerSnapshotName ?? undefined,
             customerAddress: dto.customerAddress ?? undefined,
             orderType: dto.orderType ? toDbOrderType(dto.orderType) : undefined,
-            total: finalTotal,
-            subTotal: dto.subTotal === undefined ? undefined : dto.subTotal,
-            discountAmount: dto.discountAmount === undefined ? undefined : dto.discountAmount,
-            taxAmount: dto.taxAmount === undefined ? undefined : dto.taxAmount,
+            total: secureFinalTotal,
+            subTotal: subTotal,
+            discountAmount: dto.discountAmount ?? existing.discountAmount,
+            taxAmount: taxAmount,
             cuponId: dto.cuponId === undefined ? undefined : dto.cuponId,
           },
         });
@@ -459,10 +533,10 @@ export class OrdersService {
           customerSnapshotName: dto.customerSnapshotName ?? undefined,
           customerAddress: dto.customerAddress ?? undefined,
           orderType: dto.orderType ? toDbOrderType(dto.orderType) : undefined,
-          total: finalTotal,
-          subTotal: dto.subTotal === undefined ? undefined : dto.subTotal,
-          discountAmount: dto.discountAmount === undefined ? undefined : dto.discountAmount,
-          taxAmount: dto.taxAmount === undefined ? undefined : dto.taxAmount,
+          total: secureFinalTotal,
+          subTotal: subTotal,
+          discountAmount: dto.discountAmount ?? existing.discountAmount,
+          taxAmount: taxAmount,
           cuponId: dto.cuponId === undefined ? undefined : dto.cuponId,
           shiftId: shiftId ?? null,
 
@@ -484,8 +558,8 @@ export class OrdersService {
         correlativoId: correlativo.id,
         resolutionNumber: correlativo.resolutionNumber,
         payments: dto.payments,
-        finalTotal,
-        taxAmount: dto.taxAmount,
+        finalTotal: secureFinalTotal,
+        taxAmount: taxAmount,
         cuponId: dto.cuponId,
       });
 
