@@ -57,15 +57,15 @@ export class NotificationsService {
     this.notificationStream.next(notification);
   }
 
-  async getUnreadForRole(role: UserRole) {
+  async getRecentForRole(role: UserRole) {
     return this.prisma.notification.findMany({
       where: {
         role,
-        isRead: false,
       },
       orderBy: {
         createdAt: 'desc',
       },
+      take: 50,
     });
   }
 

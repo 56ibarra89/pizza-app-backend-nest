@@ -1,4 +1,4 @@
-import { Controller, Sse, MessageEvent, UseGuards, Get, Delete, Param } from '@nestjs/common';
+import { Controller, Sse, MessageEvent, UseGuards, Get, Delete, Param, Patch } from '@nestjs/common';
 import { NotificationsService, NotificationEvent } from '../services/notifications.service';
 import { Observable } from 'rxjs';
 import { map, filter } from 'rxjs/operators';
@@ -22,14 +22,20 @@ export class NotificationsController {
 
   @UseGuards(JwtAuthGuard)
   @Get()
-  async getUnreadNotifications(@CurrentUser() user: any) {
+  async getRecentNotifications(@CurrentUser() user: any) {
     // Convierte el rol a mayúsculas para coincidir con el enum UserRole de Prisma (ej. ADMIN, CAJERO)
-    return this.notificationsService.getUnreadForRole(user.role.toUpperCase());
+    return this.notificationsService.getRecentForRole(user.role.toUpperCase());
   }
 
   @UseGuards(JwtAuthGuard)
   @Delete(':id')
   async deleteNotification(@Param('id') id: string) {
     return this.notificationsService.deleteNotification(id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/read')
+  async markAsRead(@Param('id') id: string) {
+    return this.notificationsService.markAsRead(id);
   }
 }
