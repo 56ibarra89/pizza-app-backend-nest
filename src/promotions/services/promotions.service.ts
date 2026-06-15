@@ -274,6 +274,12 @@ export class PromotionsService {
     return list.map((c) => this.mapCupon(c, now));
   }
 
+  async getCuponById(id: number, now = new Date()) {
+    const cupon = await this.repo.findCuponById(id);
+    if (!cupon) return null;
+    return this.mapCupon(cupon, now);
+  }
+
   async createCupon(dto: CreateCuponDto) {
     const expiresDate = dto.expiresDate ? new Date(dto.expiresDate) : null;
 

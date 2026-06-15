@@ -17,6 +17,7 @@ import { PaymentMethodDto } from '../dto/payment-method.dto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ProductsService } from '../../products/services/products.service';
 import { AppConfigService } from '../../app-config/services/app-config.service';
+import { PromotionsService } from '../../promotions/services/promotions.service';
 
 @Injectable()
 export class OrdersService {
@@ -26,6 +27,7 @@ export class OrdersService {
     private readonly eventEmitter: EventEmitter2,
     private readonly productsService: ProductsService,
     private readonly appConfigService: AppConfigService,
+    private readonly promotionsService: PromotionsService,
   ) {}
 
   listTodayOrActive(now = new Date()) {
@@ -55,7 +57,7 @@ export class OrdersService {
     const cashierId = dto.cashierId ?? (await this.tryResolveCashierId(dto.cashierSnapshotName));
     const shiftId = dto.shiftId ?? (await this.tryResolveActiveShiftId());
 
-    const { subTotal, taxAmount, total } = await this.calculateSecureTotals(dto.items, dto.discountAmount);
+    const { subTotal, taxAmount, total, appliedDiscountAmount } = await this.calculateSecureTotals(dto.items, dto.cuponId);
 
     const created = await this.repo.create({
       id: dto.id,
@@ -63,7 +65,7 @@ export class OrdersService {
       customerId,
       items: dto.items.map(item => ({ ...item, giftQuantity: item.giftQuantity ?? 0 })),
       subTotal: subTotal,
-      discountAmount: dto.discountAmount,
+      discountAmount: appliedDiscountAmount,
       taxAmount: taxAmount,
       total: total,
       status: status === OrderStatusDto.paid ? OrderStatusDto.pending : status,
@@ -88,7 +90,7 @@ export class OrdersService {
         orderType: dto.orderType,
         subTotal: subTotal,
         taxAmount: taxAmount,
-        discountAmount: dto.discountAmount,
+        discountAmount: appliedDiscountAmount,
         finalTotal: total,
         cuponId: dto.cuponId,
       });
@@ -107,8 +109,8 @@ export class OrdersService {
 
   private async calculateSecureTotals(
     items: any[],
-    frontendDiscountAmount = 0
-  ): Promise<{ subTotal: number; taxAmount: number; total: number }> {
+    cuponId?: number
+  ): Promise<{ subTotal: number; taxAmount: number; total: number; appliedDiscountAmount: number }> {
     let calculatedSubTotal = 0;
 
     const packagingConfig = await this.appConfigService.getByIdOrDefault('packaging_sizes');
@@ -153,17 +155,34 @@ export class OrdersService {
     const taxesEnabled = (generalConfig?.data as any)?.enableTaxes || false;
     const taxPercentage = (generalConfig?.data as any)?.taxPercentage || 0;
     
-    let calculatedTax = 0;
-    if (taxesEnabled && taxPercentage > 0) {
-      calculatedTax = calculatedSubTotal * (taxPercentage / 100);
+    let appliedDiscountAmount = 0;
+    if (cuponId) {
+      const cupon = await this.promotionsService.getCuponById(cuponId);
+      // Validar cupón
+      if (cupon && cupon.status === 'Activo' && (!cupon.maxUses || cupon.currentUses < cupon.maxUses)) {
+        if (cupon.discountType === 'porcentaje') {
+          appliedDiscountAmount = calculatedSubTotal * (cupon.discountValue / 100);
+        } else {
+          appliedDiscountAmount = cupon.discountValue;
+        }
+        appliedDiscountAmount = Math.min(appliedDiscountAmount, calculatedSubTotal);
+      }
     }
 
-    const finalTotal = calculatedSubTotal + calculatedTax - frontendDiscountAmount;
+    const calculatedSubTotalAfterDiscount = calculatedSubTotal - appliedDiscountAmount;
+
+    let calculatedTax = 0;
+    if (taxesEnabled && taxPercentage > 0) {
+      calculatedTax = calculatedSubTotalAfterDiscount * (taxPercentage / 100);
+    }
+
+    const finalTotal = calculatedSubTotalAfterDiscount + calculatedTax;
 
     return {
       subTotal: calculatedSubTotal,
       taxAmount: calculatedTax,
       total: Math.max(0, finalTotal),
+      appliedDiscountAmount,
     };
   }
 
@@ -358,13 +377,13 @@ export class OrdersService {
       }
     }
 
-    const { subTotal, taxAmount, total } = await this.calculateSecureTotals(mappedItems, dto.discountAmount);
+    const { subTotal, taxAmount, total, appliedDiscountAmount } = await this.calculateSecureTotals(mappedItems, dto.cuponId);
 
     return this.repo.update(id, {
       items: mappedItems as any,
       total: total,
       subTotal: subTotal,
-      discountAmount: dto.discountAmount,
+      discountAmount: appliedDiscountAmount,
       taxAmount: taxAmount,
       cuponId: dto.cuponId,
       status: nextStatus,
@@ -379,9 +398,10 @@ export class OrdersService {
     const existing = await this.getById(id);
     if (existing.status === OrderStatusDto.paid) return existing;
 
-    const { subTotal, taxAmount, total: secureFinalTotal } = await this.calculateSecureTotals(
+    const cuponIdToUse = dto.cuponId !== undefined ? dto.cuponId : existing.cuponId ?? undefined;
+    const { subTotal, taxAmount, total: secureFinalTotal, appliedDiscountAmount } = await this.calculateSecureTotals(
       existing.items,
-      dto.discountAmount ?? existing.discountAmount
+      cuponIdToUse
     );
 
     const finalPayments = dto.payments ?? existing.payments;
@@ -420,9 +440,9 @@ export class OrdersService {
             orderType: dto.orderType ? toDbOrderType(dto.orderType) : undefined,
             total: secureFinalTotal,
             subTotal: subTotal,
-            discountAmount: dto.discountAmount ?? existing.discountAmount,
+            discountAmount: appliedDiscountAmount,
             taxAmount: taxAmount,
-            cuponId: dto.cuponId === undefined ? undefined : dto.cuponId,
+            cuponId: cuponIdToUse,
           },
         });
         return;
@@ -535,9 +555,9 @@ export class OrdersService {
           orderType: dto.orderType ? toDbOrderType(dto.orderType) : undefined,
           total: secureFinalTotal,
           subTotal: subTotal,
-          discountAmount: dto.discountAmount ?? existing.discountAmount,
+          discountAmount: appliedDiscountAmount,
           taxAmount: taxAmount,
-          cuponId: dto.cuponId === undefined ? undefined : dto.cuponId,
+          cuponId: cuponIdToUse,
           shiftId: shiftId ?? null,
 
           invoiceCorrelativoId: correlativo.id,
@@ -560,7 +580,7 @@ export class OrdersService {
         payments: dto.payments,
         finalTotal: secureFinalTotal,
         taxAmount: taxAmount,
-        cuponId: dto.cuponId,
+        cuponId: cuponIdToUse,
       });
 
       await tx.systemLog.create({

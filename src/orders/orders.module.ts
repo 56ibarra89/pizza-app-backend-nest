@@ -5,9 +5,10 @@ import { ORDERS_REPOSITORY } from './interfaces/orders.repository';
 import { OrdersService } from './services/orders.service';
 import { ProductsModule } from '../products/products.module';
 import { AppConfigModule } from '../app-config/app-config.module';
+import { PromotionsModule } from '../promotions/promotions.module';
 
 @Module({
-  imports: [ProductsModule, AppConfigModule],
+  imports: [ProductsModule, AppConfigModule, PromotionsModule],
   controllers: [OrdersController],
   providers: [
     OrdersService,

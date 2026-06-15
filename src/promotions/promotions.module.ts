@@ -13,5 +13,6 @@ import { PrismaPromotionsRepository } from './repositories/prisma-promotions.rep
       useClass: PrismaPromotionsRepository,
     },
   ],
+  exports: [PromotionsService],
 })
 export class PromotionsModule {}
