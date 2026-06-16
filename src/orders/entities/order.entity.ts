@@ -32,6 +32,8 @@ export interface OrderEntity {
   cuponId?: number;
 
   cashierSnapshotName?: string;
+  customerTendered?: number;
+  deliveryChange?: number;
   isSentToKitchen?: boolean;
   linkedTables?: string[];
 

@@ -22,6 +22,8 @@ export function toOrderResponseDto(order: OrderEntity) {
     status: order.status,
     driverId: order.driverId,
     timestamp: order.timestamp.toISOString(),
+    customerTendered: order.customerTendered,
+    deliveryChange: order.deliveryChange,
     customerSnapshotName: order.customerSnapshotName,
     orderType: order.orderType,
     customerAddress: order.customerAddress,

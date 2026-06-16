@@ -11,7 +11,9 @@ import { AuthController } from './controllers/auth.controller';
 @Module({
   imports: [
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'pizza-secret-key',
+      secret: process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' 
+        ? (() => { throw new Error('JWT_SECRET must be defined in production!'); })() 
+        : 'pizza-secret-key-dev-only-change-me'),
       signOptions: { expiresIn: '1h' },
     }),
   ],

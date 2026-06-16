@@ -32,6 +32,25 @@ export class OrdersController {
     return list.map(toOrderResponseDto);
   }
 
+  @Get('driver/:driverId/today')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero, UserRoleDto.motorizado)
+  async getDriverTodayOrders(
+    @Param('driverId') driverId: string,
+    @Query('date') dateStr?: string,
+  ) {
+    let dateToUse = dateStr;
+    if (!dateToUse) {
+      const now = new Date();
+      dateToUse = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    }
+    const [year, month, day] = dateToUse.split('-').map(Number);
+    const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
+    const endOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
+    
+    const list = await this.orders.listByDriverAndDate(driverId, startOfDay, endOfDay);
+    return list.map(toOrderResponseDto);
+  }
+
   @Get(':id')
   async getById(@Param('id') id: string) {
     const order = await this.orders.getById(id);

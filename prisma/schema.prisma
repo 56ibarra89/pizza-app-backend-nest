@@ -147,6 +147,8 @@ model Order {
   invoiceNumber           String?       @unique
   invoiceIssuedAt         DateTime?
   discountAmount          Decimal?      @db.Decimal(12, 2)
+  customerTendered        Decimal?      @db.Decimal(12, 2)
+  deliveryChange          Decimal?      @db.Decimal(12, 2)
   cancelReason            String?
   cancelledAt             DateTime?
   cancelledById           String?

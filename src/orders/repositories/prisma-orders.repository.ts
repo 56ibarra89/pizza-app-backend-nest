@@ -55,12 +55,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
   }
 
   async listByDateRange(startDate: Date, endDate: Date): Promise<OrderEntity[]> {
-    const orders = await this.prisma.order.findMany({
+    const list = await this.prisma.order.findMany({
       where: {
-        timestamp: {
-          gte: startDate,
-          lte: endDate,
-        },
+        createdAt: { gte: startDate, lte: endDate },
       },
       include: {
         payments: true,
@@ -69,7 +66,24 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       },
       orderBy: { timestamp: 'desc' },
     });
-    return orders.map((o) => this.mapOrder(o));
+    return list.map((o) => this.mapOrder(o));
+  }
+
+  async listByDriverAndDate(driverId: string, startDate: Date, endDate: Date): Promise<OrderEntity[]> {
+    const list = await this.prisma.order.findMany({
+      where: {
+        driverId,
+        status: { not: 'CANCELLED' },
+        createdAt: { gte: startDate, lte: endDate },
+      },
+      include: {
+        payments: true,
+        items: { include: { extras: true }, orderBy: { id: 'asc' } },
+        linkedTables: { select: { tableId: true } },
+      },
+      orderBy: { timestamp: 'desc' },
+    });
+    return list.map((o) => this.mapOrder(o));
   }
 
   async findById(id: string): Promise<OrderEntity | null> {
@@ -105,6 +119,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     driverId?: string;
     isSentToKitchen?: boolean;
     linkedTables?: string[];
+    customerTendered?: number;
+    deliveryChange?: number;
   }): Promise<OrderEntity> {
     const uniqueLinkedTables = Array.from(new Set((data.linkedTables ?? []).filter(Boolean)));
 
@@ -120,10 +136,11 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         status: toDbOrderStatus(data.status),
         timestamp: data.timestamp,
 
-        customerSnapshotName: data.customerSnapshotName ?? null,
         customerAddress: data.customerAddress ?? null,
         orderType: data.orderType ? toDbOrderType(data.orderType) : undefined,
         cuponId: data.cuponId ?? null,
+        customerTendered: data.customerTendered ?? null,
+        deliveryChange: data.deliveryChange ?? null,
         ...(data.payments?.length
           ? {
             payments: {
@@ -195,6 +212,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       cancelledAt?: Date | null;
       isSentToKitchen?: boolean;
       linkedTables?: string[];
+      customerTendered?: number | null;
+      deliveryChange?: number | null;
     },
   ): Promise<OrderEntity> {
     const updateData: Prisma.OrderUpdateInput = {
@@ -251,6 +270,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
             : { disconnect: true },
       cancelledAt: data.cancelledAt === undefined ? undefined : data.cancelledAt,
       isSentToKitchen: data.isSentToKitchen,
+      customerTendered: data.customerTendered === undefined ? undefined : data.customerTendered,
+      deliveryChange: data.deliveryChange === undefined ? undefined : data.deliveryChange,
     };
 
     if (data.payments) {
@@ -367,6 +388,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       kitchenStatus: KitchenStatus | null;
       extras: Array<{ id: number; name: string; price: Prisma.Decimal }>;
     }>;
+    customerTendered: Prisma.Decimal | null;
+    deliveryChange: Prisma.Decimal | null;
   }): OrderEntity {
     return {
       id: o.id,
@@ -408,6 +431,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       cancelledAt: o.cancelledAt ?? undefined,
       isSentToKitchen: o.isSentToKitchen,
       linkedTables: o.linkedTables.map((t) => t.tableId),
+      customerTendered: o.customerTendered ? o.customerTendered.toNumber() : undefined,
+      deliveryChange: o.deliveryChange ? o.deliveryChange.toNumber() : undefined,
       invoice:
         o.invoiceCorrelativoId &&
         o.invoiceDocumentType &&

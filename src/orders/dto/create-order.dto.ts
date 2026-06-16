@@ -54,6 +54,16 @@ export class CreateOrderDto {
   @Min(0)
   taxAmount?: number;
 
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  customerTendered?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  deliveryChange?: number;
+
   @IsNumber()
   @Min(0)
   total!: number;

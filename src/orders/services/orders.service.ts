@@ -42,6 +42,10 @@ export class OrdersService {
     return this.repo.listByDateRange(startDate, endDate);
   }
 
+  listByDriverAndDate(driverId: string, startDate: Date, endDate: Date) {
+    return this.repo.listByDriverAndDate(driverId, startDate, endDate);
+  }
+
   async getById(id: string) {
     const found = await this.repo.findById(id);
     if (!found) throw new NotFoundException('Orden no encontrada');
@@ -78,6 +82,8 @@ export class OrdersService {
       cashierId,
       cashierSnapshotName: dto.cashierSnapshotName,
       driverId: dto.driverId,
+      customerTendered: dto.customerTendered,
+      deliveryChange: dto.deliveryChange,
       isSentToKitchen,
       linkedTables: dto.linkedTables,
     });
@@ -151,10 +157,16 @@ export class OrdersService {
       calculatedSubTotal += itemBasePrice * billableQty;
     }
 
-    const generalConfig = await this.appConfigService.getByIdOrDefault('general_config');
-    const taxesEnabled = (generalConfig?.data as any)?.enableTaxes || false;
-    const taxPercentage = (generalConfig?.data as any)?.taxPercentage || 0;
-    
+    const taxConfig = await this.appConfigService.getByIdOrDefault('app_factura_tax_config');
+    const isExonerated = (taxConfig?.data as any)?.isExonerated || false;
+    let taxPercentage = 0;
+    if (!isExonerated) {
+      const taxes = (taxConfig?.data as any)?.taxes || [];
+      if (taxes.length > 0) {
+        taxPercentage = taxes[0].percentage || 0;
+      }
+    }
+    const taxesEnabled = taxPercentage > 0;    
     let appliedDiscountAmount = 0;
     if (cuponId) {
       const cupon = await this.promotionsService.getCuponById(cuponId);

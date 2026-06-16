@@ -13,7 +13,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         ExtractJwt.fromUrlQueryParameter('token'),
       ]),
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET || 'pizza-secret-key',
+      secretOrKey: process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' 
+        ? (() => { throw new Error('JWT_SECRET must be defined in production!'); })() 
+        : 'pizza-secret-key-dev-only-change-me'),
     });
   }
 

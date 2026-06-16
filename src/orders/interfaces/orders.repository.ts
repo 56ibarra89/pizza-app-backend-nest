@@ -11,6 +11,7 @@ export interface IOrdersRepository {
   listTodayOrActive(now: Date): Promise<OrderEntity[]>;
   listAll(): Promise<OrderEntity[]>;
   listByDateRange(startDate: Date, endDate: Date): Promise<OrderEntity[]>;
+  listByDriverAndDate(driverId: string, startDate: Date, endDate: Date): Promise<OrderEntity[]>;
   findById(id: string): Promise<OrderEntity | null>;
 
   create(data: {
@@ -34,6 +35,8 @@ export interface IOrdersRepository {
     isSentToKitchen?: boolean;
     linkedTables?: string[];
     driverId?: string;
+    customerTendered?: number;
+    deliveryChange?: number;
   }): Promise<OrderEntity>;
 
   update(id: string, data: {
@@ -58,6 +61,8 @@ export interface IOrdersRepository {
     isSentToKitchen?: boolean;
     linkedTables?: string[];
     driverId?: string | null;
+    customerTendered?: number | null;
+    deliveryChange?: number | null;
   }): Promise<OrderEntity>;
 
   updateItemsKitchenStatus(params: {

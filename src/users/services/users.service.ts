@@ -349,8 +349,9 @@ export class UsersService {
   }
 
   async getDeliveryStats(dateStr: string) {
-    const startOfDay = new Date(`${dateStr}T00:00:00.000Z`);
-    const endOfDay = new Date(`${dateStr}T23:59:59.999Z`);
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
+    const endOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
 
     // Only count DELIVERED orders, or all orders assigned to driver?
     // Usually they want to see how many were completed today, so DELIVERED.
@@ -358,7 +359,7 @@ export class UsersService {
       by: ['driverId'],
       where: {
         driverId: { not: null },
-        status: 'DELIVERED',
+        status: { not: 'CANCELLED' },
         createdAt: {
           gte: startOfDay,
           lte: endOfDay,
