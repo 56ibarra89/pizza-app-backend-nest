@@ -332,7 +332,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       where: {
         orderId: params.orderId,
         isSentToKitchen: true,
-        sentAt: params.sentAt,
+        // Se elimina la coincidencia exacta de sentAt para evitar fallos de precisión en BD
+        // y para asegurar que todo el ticket avance correctamente.
       },
       data: {
         kitchenStatus: toDbKitchenStatus(params.kitchenStatus),
