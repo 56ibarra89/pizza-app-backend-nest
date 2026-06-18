@@ -3,6 +3,7 @@ import { IsArray, IsEnum, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNe
 import { PaymentMethodDto } from './payment-method.dto';
 import { OrderPaymentDto } from './order-payment.dto';
 import { OrderTypeDto } from './order-type.dto';
+import { OrderStatusDto } from './order-status.dto';
 
 export class FinalizeOrderDto {
   @IsOptional()
@@ -46,4 +47,8 @@ export class FinalizeOrderDto {
   @IsOptional()
   @IsInt()
   cuponId?: number;
+
+  @IsOptional()
+  @IsEnum(OrderStatusDto)
+  status?: OrderStatusDto;
 }
