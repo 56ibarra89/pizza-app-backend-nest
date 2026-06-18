@@ -471,7 +471,7 @@ export class OrdersService {
         await tx.order.update({
           where: { id },
           data: {
-            status: 'PAID',
+            status: (dto.status?.toUpperCase() as any) ?? 'PAID',
             ...(dto.payments !== undefined ? {
               payments: {
                 deleteMany: {},
@@ -586,7 +586,7 @@ export class OrdersService {
       await tx.order.update({
         where: { id },
         data: {
-          status: 'PAID',
+          status: (dto.status?.toUpperCase() as any) ?? 'PAID',
           ...(dto.payments !== undefined ? {
             payments: {
               deleteMany: {},
