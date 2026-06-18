@@ -297,27 +297,36 @@ export class OrdersService {
         });
       }
 
-      if (isFinal) return reloaded;
-
       const derived = this.deriveGlobalStatus(reloaded.items);
+      console.log(`[updateStatus] Bloque dto.sentAt terminado. derives global status: ${derived}`);
       return this.repo.update(id, { status: derived });
     }
 
     if (isFinal) {
-      // Permitir que las órdenes ya pagadas puedan ser anuladas
-      if (existing.status === OrderStatusDto.paid && dto.status === OrderStatusDto.cancelled) {
-        // Continuar con la anulación
+      console.log(`[updateStatus] Entrando al bloque isFinal`);
+      // Permitir que las órdenes ya pagadas puedan ser anuladas o actualizadas por la cocina
+      if (
+        existing.status === OrderStatusDto.paid &&
+        (dto.status === OrderStatusDto.cancelled ||
+          dto.status === OrderStatusDto.preparing ||
+          dto.status === OrderStatusDto.ready ||
+          dto.status === OrderStatusDto.delivered)
+      ) {
+        console.log(`[updateStatus] Permitiendo actualización de status de cocina en orden pagada`);
+        // Continuar
       } else {
+        console.log(`[updateStatus] Retornando existing sin modificar porque no cumple validación de cocina.`);
         return existing;
       }
     }
 
     const nextStatus = dto.status;
-    if (nextStatus === OrderStatusDto.paid) {
+    if (nextStatus === OrderStatusDto.paid && existing.status !== OrderStatusDto.paid) {
       this.validatePaymentsSum(existing.total, existing.payments);
     }
 
     const updateItemsKitchen = this.asKitchenStatusOrUndefined(nextStatus);
+    console.log(`[updateStatus] Actualizando items a kitchenStatus: ${updateItemsKitchen}`);
 
     const items = updateItemsKitchen
       ? existing.items.map((i) => ({ ...i, kitchenStatus: updateItemsKitchen }))
