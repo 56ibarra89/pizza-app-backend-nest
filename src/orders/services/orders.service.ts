@@ -611,21 +611,24 @@ export class OrdersService {
   }
 
   private deriveGlobalStatus(items: CartItemEntity[]): OrderStatusDto {
-    if (items.length === 0) return OrderStatusDto.pending;
+    const sentItems = items.filter((i) => i.isSentToKitchen);
 
-    const hasUnsent = items.some((i) => !i.isSentToKitchen);
-    if (hasUnsent) return OrderStatusDto.pending;
+    if (sentItems.length === 0) {
+      // If nothing is sent to kitchen, the status depends on whether there are items at all.
+      // Usually, it stays as is, but we default to pending if recalculating from scratch.
+      return OrderStatusDto.pending;
+    }
 
-    const anyPending = items.some((i) => i.kitchenStatus === KitchenStatusDto.pending);
+    const anyPending = sentItems.some((i) => i.kitchenStatus === KitchenStatusDto.pending);
     if (anyPending) return OrderStatusDto.pending;
 
-    const anyPreparing = items.some((i) => i.kitchenStatus === KitchenStatusDto.preparing);
+    const anyPreparing = sentItems.some((i) => i.kitchenStatus === KitchenStatusDto.preparing);
     if (anyPreparing) return OrderStatusDto.preparing;
 
-    const allDelivered = items.every((i) => i.kitchenStatus === KitchenStatusDto.delivered);
+    const allDelivered = sentItems.every((i) => i.kitchenStatus === KitchenStatusDto.delivered);
     if (allDelivered) return OrderStatusDto.delivered;
 
-    const anyReady = items.some((i) => i.kitchenStatus === KitchenStatusDto.ready);
+    const anyReady = sentItems.some((i) => i.kitchenStatus === KitchenStatusDto.ready);
     if (anyReady) return OrderStatusDto.ready;
 
     return OrderStatusDto.pending;
