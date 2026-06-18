@@ -253,6 +253,7 @@ export class OrdersService {
       }
     }
 
+    let authorizerAdmin: any = null;
     if (dto.status === OrderStatusDto.cancelled) {
       if (!dto.adminPin) {
         throw new ForbiddenException('Se requiere un PIN de administrador para cancelar la orden.');
@@ -265,9 +266,13 @@ export class OrdersService {
       if (!adminUser) {
         throw new ForbiddenException('PIN de administrador inválido o usuario no tiene permisos.');
       }
+      dto.cancelledById = adminUser.id;
+      authorizerAdmin = adminUser;
     }
+    console.log(`[updateStatus] START id=${id}, dto.status=${dto.status}, dto.sentAt=${dto.sentAt}, existing.status=${existing.status}, isFinal=${isFinal}`);
 
     if (dto.sentAt) {
+      console.log(`[updateStatus] Entrando al bloque de dto.sentAt con valor: ${dto.sentAt}`);
       if (dto.status === OrderStatusDto.paid || dto.status === OrderStatusDto.cancelled) {
         throw new BadRequestException('Status inválido para cocina');
       }
@@ -335,6 +340,20 @@ export class OrdersService {
       updateData.cancelReason = dto.cancelReason;
       updateData.cancelledById = dto.cancelledById;
       updateData.cancelledAt = new Date();
+
+      // Send email to all admins
+      const cashierName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'Desconocido';
+      const adminName = authorizerAdmin ? `${authorizerAdmin.firstName || ''} ${authorizerAdmin.lastName || ''}`.trim() : 'Desconocido';
+      const reasonStr = dto.cancelReason || 'No especificado';
+      const invoiceNum = existing.invoice?.invoiceNumber ? `#${existing.invoice.invoiceNumber}` : 'Sin Factura';
+
+      this.eventEmitter.emit('order.cancelled', {
+        orderId: existing.id,
+        invoiceNum,
+        cashierName,
+        adminName,
+        reasonStr
+      });
     }
 
     return this.repo.update(id, updateData);
