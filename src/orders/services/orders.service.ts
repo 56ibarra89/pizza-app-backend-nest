@@ -298,8 +298,11 @@ export class OrdersService {
       }
 
       const derived = this.deriveGlobalStatus(reloaded.items);
-      console.log(`[updateStatus] Bloque dto.sentAt terminado. derives global status: ${derived}`);
-      return this.repo.update(id, { status: derived });
+      const nextGlobalStatus = (existing.status === OrderStatusDto.paid || existing.status === OrderStatusDto.cancelled) 
+                               ? existing.status 
+                               : derived;
+      console.log(`[updateStatus] Bloque dto.sentAt terminado. derives global status: ${nextGlobalStatus}`);
+      return this.repo.update(id, { status: nextGlobalStatus });
     }
 
     if (isFinal) {
