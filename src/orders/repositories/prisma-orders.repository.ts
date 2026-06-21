@@ -136,6 +136,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         status: toDbOrderStatus(data.status),
         timestamp: data.timestamp,
 
+        customerSnapshotName: data.customerSnapshotName ?? null,
         customerAddress: data.customerAddress ?? null,
         orderType: data.orderType ? toDbOrderType(data.orderType) : undefined,
         cuponId: data.cuponId ?? null,

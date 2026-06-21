@@ -53,6 +53,8 @@ export class OrdersService {
   }
 
   async create(dto: CreateOrderDto) {
+    const fs = require('fs');
+    fs.appendFileSync('create_debug.log', new Date().toISOString() + ' --- INCOMING CREATE DTO ---\n' + JSON.stringify(dto, null, 2) + '\n');
     const status = dto.status ?? (dto.payments?.length ? OrderStatusDto.paid : OrderStatusDto.pending);
     const timestamp = dto.timestamp ?? new Date();
     const isSentToKitchen = dto.isSentToKitchen ?? !(dto.linkedTables && dto.linkedTables.length > 0);
@@ -61,48 +63,60 @@ export class OrdersService {
     const cashierId = dto.cashierId ?? (await this.tryResolveCashierId(dto.cashierSnapshotName));
     const shiftId = dto.shiftId ?? (await this.tryResolveActiveShiftId());
 
-    const { subTotal, taxAmount, total, appliedDiscountAmount } = await this.calculateSecureTotals(dto.items, dto.cuponId);
+    try {
+      const { subTotal, taxAmount, total, appliedDiscountAmount } = await this.calculateSecureTotals(dto.items, dto.cuponId);
+      fs.appendFileSync('create_debug.log', new Date().toISOString() + ' --- CALCULATED TOTALS ---\n' + JSON.stringify({ subTotal, taxAmount, total, appliedDiscountAmount }, null, 2) + '\n');
 
-    const created = await this.repo.create({
-      id: dto.id,
-      shiftId,
-      customerId,
-      items: dto.items.map(item => ({ ...item, giftQuantity: item.giftQuantity ?? 0 })),
-      subTotal: subTotal,
-      discountAmount: appliedDiscountAmount,
-      taxAmount: taxAmount,
-      total: total,
-      status: status === OrderStatusDto.paid ? OrderStatusDto.pending : status,
-      timestamp,
-      customerSnapshotName: dto.customerSnapshotName,
-      customerAddress: dto.customerAddress,
-      orderType: dto.orderType,
-      cuponId: dto.cuponId,
-      payments: status === OrderStatusDto.paid ? undefined : dto.payments,
-      cashierId,
-      cashierSnapshotName: dto.cashierSnapshotName,
-      driverId: dto.driverId,
-      customerTendered: dto.customerTendered,
-      deliveryChange: dto.deliveryChange,
-      isSentToKitchen,
-      linkedTables: dto.linkedTables,
-    });
-
-    if (status === OrderStatusDto.paid) {
-      return this.finalize(created.id, {
-        payments: dto.payments,
-        customerSnapshotName: dto.customerSnapshotName,
-        customerAddress: dto.customerAddress,
-        orderType: dto.orderType,
+      const created = await this.repo.create({
+        id: dto.id,
+        shiftId,
+        customerId,
+        items: dto.items.map(item => ({ ...item, giftQuantity: item.giftQuantity ?? 0 })),
         subTotal: subTotal,
-        taxAmount: taxAmount,
         discountAmount: appliedDiscountAmount,
-        finalTotal: total,
+        taxAmount: taxAmount,
+        total: Math.max(0, total),
+        timestamp,
+        status: status === OrderStatusDto.paid ? OrderStatusDto.pending : status,
+        customerSnapshotName: dto.customerSnapshotName,
+        cashierId,
+        cashierSnapshotName: dto.cashierSnapshotName,
+        orderType: dto.orderType,
+        customerAddress: dto.customerAddress,
+        linkedTables: dto.linkedTables,
+        isSentToKitchen,
         cuponId: dto.cuponId,
+        driverId: dto.driverId,
+        payments: status === OrderStatusDto.paid ? undefined : dto.payments,
+        customerTendered: dto.customerTendered,
+        deliveryChange: dto.deliveryChange,
       });
-    }
 
-    return created;
+      if (status === OrderStatusDto.paid) {
+        try {
+          return await this.finalize(created.id, {
+            payments: dto.payments,
+            customerSnapshotName: dto.customerSnapshotName,
+            customerAddress: dto.customerAddress,
+            orderType: dto.orderType,
+            subTotal: subTotal,
+            taxAmount: taxAmount,
+            discountAmount: appliedDiscountAmount,
+            finalTotal: total,
+            cuponId: dto.cuponId,
+          }, 'system');
+        } catch (error) {
+          fs.appendFileSync('create_debug.log', new Date().toISOString() + ' --- FINALIZE ERROR ---\n' + error.stack + '\n');
+          await this.prisma.order.delete({ where: { id: created.id } });
+          throw error;
+        }
+      }
+
+      return created;
+    } catch (globalError) {
+      fs.appendFileSync('create_debug.log', new Date().toISOString() + ' --- GLOBAL CREATE ERROR ---\n' + globalError.stack + '\n');
+      throw globalError;
+    }
   }
 
   private validatePaymentsSum(expectedTotal: number, payments: { amount: number }[]) {
@@ -158,10 +172,20 @@ export class OrdersService {
     }
 
     const taxConfig = await this.appConfigService.getByIdOrDefault('app_factura_tax_config');
-    const isExonerated = (taxConfig?.data as any)?.isExonerated || false;
+    let taxData = taxConfig?.data as any;
+    
+    // Apply the same default tax configuration as the frontend if no data exists
+    if (!taxData || Object.keys(taxData).length === 0) {
+      taxData = {
+        taxes: [{ id: '1', name: 'Módulo Principal de ITBMS/IVA', percentage: 15 }],
+        isExonerated: false
+      };
+    }
+
+    const isExonerated = taxData.isExonerated || false;
     let taxPercentage = 0;
     if (!isExonerated) {
-      const taxes = (taxConfig?.data as any)?.taxes || [];
+      const taxes = taxData.taxes || [];
       if (taxes.length > 0) {
         taxPercentage = taxes[0].percentage || 0;
       }

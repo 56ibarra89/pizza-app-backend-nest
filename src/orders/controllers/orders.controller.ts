@@ -59,7 +59,10 @@ export class OrdersController {
 
   @Post()
   @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero)
-  async create(@Body() dto: CreateOrderDto) {
+  async create(@Body() dto: CreateOrderDto, @CurrentUser() user: any) {
+    console.log('--- INCOMING CREATE DTO ---');
+    console.dir(dto, { depth: null });
+    console.log('---------------------------');
     const created = await this.orders.create(dto);
     return toOrderResponseDto(created);
   }
