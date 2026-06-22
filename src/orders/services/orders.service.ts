@@ -594,7 +594,11 @@ export class OrdersService {
 
       const width = String(correlativo.endNumber).length;
       const padded = String(issuedNumber).padStart(width, '0');
-      const invoiceNumber = `${dynamicPrefix}${correlativo.prefix ?? ''}${padded}`;
+      
+      // Remove any existing month-year prefix (e.g. JUN26-) from the user's configured prefix
+      // so we don't stack them (e.g. JUL26-JUN26-00001)
+      const cleanUserPrefix = (correlativo.prefix ?? '').replace(/^[a-z]{3}\d{2}-/i, '');
+      const invoiceNumber = `${dynamicPrefix}${cleanUserPrefix}${padded}`;
 
       const nextNumber = issuedNumber + 1;
       const nextStatus = nextNumber > correlativo.endNumber ? CorrelativoStatus.AGOTADO : correlativo.status;

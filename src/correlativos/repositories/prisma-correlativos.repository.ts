@@ -126,7 +126,14 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
   }
 
   async deleteById(id: string): Promise<void> {
-    await this.prisma.correlativo.delete({ where: { id } });
+    try {
+      await this.prisma.correlativo.delete({ where: { id } });
+    } catch (e: any) {
+      if (e.code === 'P2025') {
+        throw new NotFoundException('Correlativo no encontrado');
+      }
+      throw e;
+    }
   }
 
   private map(row: {
