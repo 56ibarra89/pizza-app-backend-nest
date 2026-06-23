@@ -540,6 +540,7 @@ enum UserRole {
   MESERO
   COCINERO
   MOTORIZADO
+  DESPACHADOR
 }
 
 enum MesaEstado {

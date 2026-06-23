@@ -42,6 +42,8 @@ export class NotificationsService {
     await this.createNotification(title, message, 'CAJERO');
     // Guardamos notificación para ADMIN
     await this.createNotification(title, message, 'ADMIN');
+    // Guardamos notificación para DESPACHADOR
+    await this.createNotification(title, message, 'DESPACHADOR');
   }
 
   async createNotification(title: string, message: string, role: UserRole) {

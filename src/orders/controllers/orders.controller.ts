@@ -33,7 +33,7 @@ export class OrdersController {
   }
 
   @Get('driver/:driverId/today')
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero, UserRoleDto.motorizado)
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero, UserRoleDto.motorizado, UserRoleDto.despachador)
   async getDriverTodayOrders(
     @Param('driverId') driverId: string,
     @Query('date') dateStr?: string,
@@ -58,7 +58,7 @@ export class OrdersController {
   }
 
   @Post()
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero)
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero, UserRoleDto.despachador)
   async create(@Body() dto: CreateOrderDto, @CurrentUser() user: any) {
     console.log('--- INCOMING CREATE DTO ---');
     console.dir(dto, { depth: null });
@@ -68,7 +68,7 @@ export class OrdersController {
   }
 
   @Patch(':id/status')
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero, UserRoleDto.cocinero)
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero, UserRoleDto.cocinero, UserRoleDto.despachador)
   async updateStatus(
     @Param('id') id: string,
     @Body() dto: UpdateOrderStatusDto,
@@ -79,7 +79,7 @@ export class OrdersController {
   }
 
   @Patch(':id/items')
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero)
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero, UserRoleDto.despachador)
   async updateItems(
     @Param('id') id: string,
     @Body() dto: UpdateOrderItemsDto,
@@ -90,14 +90,14 @@ export class OrdersController {
   }
 
   @Patch(':id/tables')
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero)
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero, UserRoleDto.despachador)
   async updateTables(@Param('id') id: string, @Body('tableIds') tableIds: string[]) {
     const updated = await this.orders.updateTables(id, tableIds);
     return toOrderResponseDto(updated);
   }
 
   @Patch(':id/finalize')
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero)
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero, UserRoleDto.despachador)
   async finalize(
     @Param('id') id: string,
     @Body() dto: FinalizeOrderDto,

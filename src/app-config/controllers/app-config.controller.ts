@@ -12,6 +12,14 @@ export class AppConfigController {
   constructor(private readonly service: AppConfigService) {}
 
   @Get(':id')
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.mesero,
+    UserRoleDto.cocinero,
+    UserRoleDto.motorizado,
+    UserRoleDto.despachador,
+  )
   getById(@Param('id') id: string) {
     return this.service.getByIdOrDefault(id);
   }

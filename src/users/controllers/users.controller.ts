@@ -26,13 +26,25 @@ export class UsersController {
   constructor(private readonly users: UsersService) {}
 
   @Get()
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero, UserRoleDto.cocinero)
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.mesero,
+    UserRoleDto.cocinero,
+    UserRoleDto.motorizado,
+    UserRoleDto.despachador,
+  )
   async getAll() {
     const list = await this.users.getAll();
     return list.map(toUserResponseDto);
   }
 
   @Get('motorizados/delivery-stats')
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.despachador,
+  )
   async getDeliveryStats(@Query('date') date: string) {
     if (!date) {
       const now = new Date();
@@ -53,6 +65,8 @@ export class UsersController {
     UserRoleDto.cajero,
     UserRoleDto.mesero,
     UserRoleDto.cocinero,
+    UserRoleDto.motorizado,
+    UserRoleDto.despachador,
   )
   async getByUsername(
     @Param('username') username: string,
@@ -77,6 +91,8 @@ export class UsersController {
     UserRoleDto.cajero,
     UserRoleDto.mesero,
     UserRoleDto.cocinero,
+    UserRoleDto.motorizado,
+    UserRoleDto.despachador,
   )
   async update(
     @Param('id', new ParseUUIDPipe()) id: string,
