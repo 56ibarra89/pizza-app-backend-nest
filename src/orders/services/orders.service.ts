@@ -85,7 +85,7 @@ export class OrdersService {
     const shiftId = dto.shiftId ?? (await this.tryResolveActiveShiftId());
 
     try {
-      const { subTotal, taxAmount, total, appliedDiscountAmount } = await this.calculateSecureTotals(dto.items, dto.cuponId);
+      const { subTotal, taxAmount, total, appliedDiscountAmount } = await this.calculateSecureTotals(dto.items, dto.cuponId, dto.discountAmount);
       fs.appendFileSync('create_debug.log', new Date().toISOString() + ' --- CALCULATED TOTALS ---\n' + JSON.stringify({ subTotal, taxAmount, total, appliedDiscountAmount }, null, 2) + '\n');
 
       const created = await this.repo.create({
@@ -150,7 +150,8 @@ export class OrdersService {
 
   private async calculateSecureTotals(
     items: any[],
-    cuponId?: number
+    cuponId?: number,
+    providedDiscountAmount?: number
   ): Promise<{ subTotal: number; taxAmount: number; total: number; appliedDiscountAmount: number }> {
     let calculatedSubTotal = 0;
 
@@ -212,7 +213,7 @@ export class OrdersService {
       }
     }
     const taxesEnabled = taxPercentage > 0;    
-    let appliedDiscountAmount = 0;
+    let appliedDiscountAmount = providedDiscountAmount || 0;
     if (cuponId) {
       const cupon = await this.promotionsService.getCuponById(cuponId);
       // Validar cupón
@@ -465,7 +466,7 @@ export class OrdersService {
       }
     }
 
-    const { subTotal, taxAmount, total, appliedDiscountAmount } = await this.calculateSecureTotals(mappedItems, dto.cuponId);
+    const { subTotal, taxAmount, total, appliedDiscountAmount } = await this.calculateSecureTotals(mappedItems, dto.cuponId, dto.discountAmount);
 
     return this.repo.update(id, {
       items: mappedItems as any,
@@ -489,7 +490,8 @@ export class OrdersService {
     const cuponIdToUse = dto.cuponId !== undefined ? dto.cuponId : existing.cuponId ?? undefined;
     const { subTotal, taxAmount, total: secureFinalTotal, appliedDiscountAmount } = await this.calculateSecureTotals(
       existing.items,
-      cuponIdToUse
+      cuponIdToUse,
+      dto.discountAmount
     );
 
     const finalPayments = dto.payments ?? existing.payments;
