@@ -1,4 +1,4 @@
-import { IsEnum, IsNumber, IsOptional, IsPositive, IsString } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, Min, IsString } from 'class-validator';
 import { PaymentMethodDto } from './payment-method.dto';
 
 export class OrderPaymentDto {
@@ -6,7 +6,7 @@ export class OrderPaymentDto {
   method!: PaymentMethodDto;
 
   @IsNumber()
-  @IsPositive()
+  @Min(0)
   amount!: number;
 
   @IsOptional()
