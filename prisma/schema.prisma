@@ -659,3 +659,10 @@ model UserExtraDay {
   @@unique([userId, date])
   @@index([date])
 }
+
+model HiddenKitchenTicket {
+  id        String   @id @default(uuid())
+  ticketId  String   @unique
+  hiddenAt  DateTime @default(now())
+  hiddenBy  String?
+}

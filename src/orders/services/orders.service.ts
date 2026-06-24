@@ -46,6 +46,27 @@ export class OrdersService {
     return this.repo.listByDriverAndDate(driverId, startDate, endDate);
   }
 
+  async getHiddenKitchenTickets(): Promise<string[]> {
+    const hidden = await this.prisma.hiddenKitchenTicket.findMany({
+      select: { ticketId: true },
+    });
+    return hidden.map(h => h.ticketId);
+  }
+
+  async addHiddenKitchenTickets(ticketIds: string[], user: any): Promise<void> {
+    if (!ticketIds || ticketIds.length === 0) return;
+    
+    const data = ticketIds.map(ticketId => ({
+      ticketId,
+      hiddenBy: user?.username || 'unknown',
+    }));
+
+    await this.prisma.hiddenKitchenTicket.createMany({
+      data,
+      skipDuplicates: true,
+    });
+  }
+
   async getById(id: string) {
     const found = await this.repo.findById(id);
     if (!found) throw new NotFoundException('Orden no encontrada');

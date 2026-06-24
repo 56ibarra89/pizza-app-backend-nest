@@ -51,6 +51,19 @@ export class OrdersController {
     return list.map(toOrderResponseDto);
   }
 
+  @Get('kitchen/hidden-tickets')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.cocinero, UserRoleDto.despachador)
+  async getHiddenKitchenTickets() {
+    return this.orders.getHiddenKitchenTickets();
+  }
+
+  @Post('kitchen/hidden-tickets')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.cocinero, UserRoleDto.despachador)
+  async addHiddenKitchenTickets(@Body('ticketIds') ticketIds: string[], @CurrentUser() user: any) {
+    await this.orders.addHiddenKitchenTickets(ticketIds, user);
+    return { success: true };
+  }
+
   @Get(':id')
   async getById(@Param('id') id: string) {
     const order = await this.orders.getById(id);
