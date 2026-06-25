@@ -25,18 +25,38 @@ export class NotificationsService {
   @OnEvent('order.ready')
   async handleOrderReadyEvent(payload: { orderId: string, itemName?: string, tableName?: string, isFullOrder?: boolean, customerName?: string, orderType?: string }) {
     this.logger.log(`Received order.ready event for order: ${payload.orderId}`);
-    
     let title = payload.isFullOrder ? '¡Orden Lista!' : '¡Producto Listo!';
     
-    const targetName = payload.customerName ? payload.customerName : `ORD-${payload.orderId.substring(0, 4).toUpperCase()}`;
+    let formattedTableName = payload.tableName;
+    if (formattedTableName && formattedTableName.startsWith('F') && formattedTableName.includes('-M')) {
+      try {
+        const parts = formattedTableName.split('-M');
+        const floorId = parseInt(parts[0].substring(1), 10);
+        const mesaNum = parts[1];
+        
+        const configRecord = await this.prisma.appConfig.findUnique({ where: { id: 'floors_config' } });
+        let floorName = `Planta ${floorId}`;
+        
+        if (configRecord && configRecord.data) {
+          const floors = configRecord.data as Array<{id: number, name: string}>;
+          const floor = floors.find(f => f.id === floorId);
+          if (floor && floor.name) {
+            floorName = floor.name;
+          }
+        }
+        formattedTableName = `${floorName} - Mesa ${mesaNum}`;
+      } catch (e) {
+        this.logger.error('Error formatting table name for notification', e);
+      }
+    }
+
+    const targetName = formattedTableName 
+      ? `la ${formattedTableName}` 
+      : (payload.customerName ? payload.customerName : `ORD-${payload.orderId.slice(-4)}`);
 
     let message = payload.isFullOrder 
       ? `La orden de ${targetName} está lista para ser entregada.`
       : `El producto "${payload.itemName}" de ${targetName} está listo.`;
-
-    if (payload.tableName) {
-      message += ` (Mesa: ${payload.tableName})`;
-    }
 
     // Guardamos notificación para CAJERO
     await this.createNotification(title, message, 'CAJERO');
