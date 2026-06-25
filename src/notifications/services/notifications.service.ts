@@ -23,7 +23,7 @@ export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
 
   @OnEvent('order.ready')
-  async handleOrderReadyEvent(payload: { orderId: string, itemName?: string, tableName?: string, isFullOrder?: boolean, customerName?: string }) {
+  async handleOrderReadyEvent(payload: { orderId: string, itemName?: string, tableName?: string, isFullOrder?: boolean, customerName?: string, orderType?: string }) {
     this.logger.log(`Received order.ready event for order: ${payload.orderId}`);
     
     let title = payload.isFullOrder ? '¡Orden Lista!' : '¡Producto Listo!';
@@ -42,8 +42,11 @@ export class NotificationsService {
     await this.createNotification(title, message, 'CAJERO');
     // Guardamos notificación para ADMIN
     await this.createNotification(title, message, 'ADMIN');
-    // Guardamos notificación para DESPACHADOR
-    await this.createNotification(title, message, 'DESPACHADOR');
+    
+    // Guardamos notificación para DESPACHADOR solo si es delivery
+    if (payload.orderType === 'delivery') {
+      await this.createNotification(title, message, 'DESPACHADOR');
+    }
   }
 
   async createNotification(title: string, message: string, role: UserRole) {

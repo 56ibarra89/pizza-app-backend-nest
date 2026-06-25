@@ -335,11 +335,13 @@ export class OrdersService {
         // Find which table is assigned to this order, if any
         const tableName = reloaded.linkedTables?.[0] || undefined;
         const customerName = reloaded.customerSnapshotName || undefined;
+        const orderType = reloaded.orderType || undefined;
         this.eventEmitter.emit('order.ready', {
           orderId: id,
           isFullOrder: true,
           tableName,
           customerName,
+          orderType,
         });
       }
 
@@ -386,11 +388,13 @@ export class OrdersService {
     if (nextStatus === OrderStatusDto.delivered) {
       const tableName = existing.linkedTables?.[0] || undefined;
       const customerName = existing.customerSnapshotName || undefined;
+      const orderType = existing.orderType || undefined;
       this.eventEmitter.emit('order.ready', {
         orderId: id,
         isFullOrder: true,
         tableName,
         customerName,
+        orderType,
       });
     }
 
@@ -454,12 +458,14 @@ export class OrdersService {
           if (existingItem && existingItem.kitchenStatus !== KitchenStatusDto.delivered) {
             const tableName = existing.linkedTables?.[0] || undefined;
             const customerName = existing.customerSnapshotName || undefined;
+            const orderType = existing.orderType || undefined;
             this.eventEmitter.emit('order.ready', {
               orderId: id,
               itemName: item.name,
               isFullOrder: false,
               tableName,
               customerName,
+              orderType,
             });
           }
         }
