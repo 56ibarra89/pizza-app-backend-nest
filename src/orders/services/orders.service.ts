@@ -154,12 +154,14 @@ export class OrdersService {
     providedDiscountAmount?: number
   ): Promise<{ subTotal: number; taxAmount: number; total: number; appliedDiscountAmount: number }> {
     let calculatedSubTotal = 0;
+    let discountableSubTotal = 0;
 
     const packagingConfig = await this.appConfigService.getByIdOrDefault('packaging_sizes');
     const packagingSizes = (packagingConfig?.data as any)?.sizes || [];
 
     for (const item of items) {
       let itemBasePrice = 0;
+      let isDiscountable = true;
 
       if (item.productId) {
         try {
@@ -185,12 +187,18 @@ export class OrdersService {
         const packName = item.name.replace(/empaque\s+/i, '').trim();
         const packConfig = packagingSizes.find((s: any) => s.name.toLowerCase() === packName.toLowerCase());
         itemBasePrice = packConfig ? packConfig.price : item.price;
+        isDiscountable = false;
+      } else if (item.name && item.name.toLowerCase() === 'delivery') {
+        itemBasePrice = item.price;
+        isDiscountable = false;
       } else {
         itemBasePrice = item.price;
       }
 
       const billableQty = Math.max(0, item.quantity - (item.giftQuantity || 0));
-      calculatedSubTotal += itemBasePrice * billableQty;
+      const itemTotal = itemBasePrice * billableQty;
+      calculatedSubTotal += itemTotal;
+      if (isDiscountable) discountableSubTotal += itemTotal;
     }
 
     const taxConfig = await this.appConfigService.getByIdOrDefault('app_factura_tax_config');
@@ -219,7 +227,7 @@ export class OrdersService {
       // Validar cupón
       if (cupon && cupon.status === 'Activo' && (!cupon.maxUses || cupon.currentUses < cupon.maxUses)) {
         if (cupon.discountType === 'porcentaje') {
-          appliedDiscountAmount = calculatedSubTotal * (cupon.discountValue / 100);
+          appliedDiscountAmount = discountableSubTotal * (cupon.discountValue / 100);
         } else {
           appliedDiscountAmount = cupon.discountValue;
         }
@@ -497,7 +505,7 @@ export class OrdersService {
     const { subTotal, taxAmount, total: secureFinalTotal, appliedDiscountAmount } = await this.calculateSecureTotals(
       existing.items,
       cuponIdToUse,
-      dto.discountAmount
+      dto.discountAmount !== undefined ? dto.discountAmount : existing.discountAmount
     );
 
     const finalPayments = dto.payments ?? existing.payments;
