@@ -642,9 +642,11 @@ model Notification {
   message   String
   isRead    Boolean  @default(false)
   role      UserRole // Target role for this notification (e.g. ADMIN, CAJERO)
+  targetUsername String? // Opcional: target specific user
   createdAt DateTime @default(now())
 
   @@index([role])
+  @@index([targetUsername])
   @@index([isRead])
   @@index([createdAt])
 }

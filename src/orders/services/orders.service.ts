@@ -350,6 +350,7 @@ export class OrdersService {
           tableName,
           customerName,
           orderType,
+          targetUsername: reloaded.cashierSnapshotName,
         });
       }
 
@@ -403,6 +404,7 @@ export class OrdersService {
         tableName,
         customerName,
         orderType,
+        targetUsername: existing.cashierSnapshotName,
       });
     }
 
@@ -474,6 +476,7 @@ export class OrdersService {
               tableName,
               customerName,
               orderType,
+              targetUsername: existing.cashierSnapshotName,
             });
           }
         }

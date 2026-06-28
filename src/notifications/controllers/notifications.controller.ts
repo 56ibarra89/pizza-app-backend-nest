@@ -1,5 +1,15 @@
-import { Controller, Sse, MessageEvent, UseGuards, Get, Delete, Param, Patch } from '@nestjs/common';
-import { NotificationsService, NotificationEvent } from '../services/notifications.service';
+import {
+  Controller,
+  Sse,
+  MessageEvent,
+  UseGuards,
+  Get,
+  Delete,
+  Param,
+  Patch,
+} from '@nestjs/common';
+import { NotificationsService } from '../services/notifications.service';
+import { UserRole } from '@prisma/client';
 import { Observable } from 'rxjs';
 import { map, filter } from 'rxjs/operators';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -11,20 +21,32 @@ export class NotificationsController {
 
   @UseGuards(JwtAuthGuard)
   @Sse('stream')
-  stream(@CurrentUser() user: any): Observable<MessageEvent> {
+  stream(
+    @CurrentUser() user: { role: string; username: string },
+  ): Observable<MessageEvent> {
     return this.notificationsService.notificationStream.asObservable().pipe(
-      filter(notification => notification.role === user.role.toUpperCase()),
+      filter(
+        (notification) =>
+          notification.role === user.role.toUpperCase() &&
+          (!notification.targetUsername ||
+            notification.targetUsername === user.username),
+      ),
       map((notification) => ({
         data: notification,
-      }) as MessageEvent),
+      })),
     );
   }
 
   @UseGuards(JwtAuthGuard)
   @Get()
-  async getRecentNotifications(@CurrentUser() user: any) {
+  async getRecentNotifications(
+    @CurrentUser() user: { role: string; username: string },
+  ) {
     // Convierte el rol a mayúsculas para coincidir con el enum UserRole de Prisma (ej. ADMIN, CAJERO)
-    return this.notificationsService.getRecentForRole(user.role.toUpperCase());
+    return this.notificationsService.getRecentForRole(
+      user.role.toUpperCase() as UserRole,
+      user.username,
+    );
   }
 
   @UseGuards(JwtAuthGuard)

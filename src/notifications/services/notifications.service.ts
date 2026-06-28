@@ -9,6 +9,7 @@ export interface NotificationEvent {
   title: string;
   message: string;
   role: UserRole;
+  targetUsername?: string | null;
   createdAt: Date;
   isRead: boolean;
 }
@@ -16,30 +17,47 @@ export interface NotificationEvent {
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
-  
+
   // Subject for SSE
   public readonly notificationStream = new Subject<NotificationEvent>();
 
   constructor(private readonly prisma: PrismaService) {}
 
   @OnEvent('order.ready')
-  async handleOrderReadyEvent(payload: { orderId: string, itemName?: string, tableName?: string, isFullOrder?: boolean, customerName?: string, orderType?: string }) {
+  async handleOrderReadyEvent(payload: {
+    orderId: string;
+    itemName?: string;
+    tableName?: string;
+    isFullOrder?: boolean;
+    customerName?: string;
+    orderType?: string;
+    targetUsername?: string;
+  }) {
     this.logger.log(`Received order.ready event for order: ${payload.orderId}`);
-    let title = payload.isFullOrder ? '¡Orden Lista!' : '¡Producto Listo!';
-    
+    const title = payload.isFullOrder ? '¡Orden Lista!' : '¡Producto Listo!';
+
     let formattedTableName = payload.tableName;
-    if (formattedTableName && formattedTableName.startsWith('F') && formattedTableName.includes('-M')) {
+    if (
+      formattedTableName &&
+      formattedTableName.startsWith('F') &&
+      formattedTableName.includes('-M')
+    ) {
       try {
         const parts = formattedTableName.split('-M');
         const floorId = parseInt(parts[0].substring(1), 10);
         const mesaNum = parts[1];
-        
-        const configRecord = await this.prisma.appConfig.findUnique({ where: { id: 'floors_config' } });
+
+        const configRecord = await this.prisma.appConfig.findUnique({
+          where: { id: 'floors_config' },
+        });
         let floorName = `Planta ${floorId}`;
-        
+
         if (configRecord && configRecord.data) {
-          const floors = configRecord.data as Array<{id: number, name: string}>;
-          const floor = floors.find(f => f.id === floorId);
+          const floors = configRecord.data as Array<{
+            id: number;
+            name: string;
+          }>;
+          const floor = floors.find((f) => f.id === floorId);
           if (floor && floor.name) {
             floorName = floor.name;
           }
@@ -50,11 +68,13 @@ export class NotificationsService {
       }
     }
 
-    const targetName = formattedTableName 
-      ? `la ${formattedTableName}` 
-      : (payload.customerName ? payload.customerName : `ORD-${payload.orderId.slice(-4)}`);
+    const targetName = formattedTableName
+      ? `la ${formattedTableName}`
+      : payload.customerName
+        ? payload.customerName
+        : `ORD-${payload.orderId.slice(-4)}`;
 
-    let message = payload.isFullOrder 
+    const message = payload.isFullOrder
       ? `La orden de ${targetName} está lista para ser entregada.`
       : `El producto "${payload.itemName}" de ${targetName} está listo.`;
 
@@ -62,32 +82,44 @@ export class NotificationsService {
     await this.createNotification(title, message, 'CAJERO');
     // Guardamos notificación para ADMIN
     await this.createNotification(title, message, 'ADMIN');
-    // Guardamos notificación para MESERO
-    await this.createNotification(title, message, 'MESERO');
-    
+    // Guardamos notificación para MESERO (dirigida al usuario específico si existe)
+    await this.createNotification(
+      title,
+      message,
+      'MESERO',
+      payload.targetUsername,
+    );
+
     // Guardamos notificación para DESPACHADOR solo si es delivery
     if (payload.orderType === 'delivery') {
       await this.createNotification(title, message, 'DESPACHADOR');
     }
   }
 
-  async createNotification(title: string, message: string, role: UserRole) {
+  async createNotification(
+    title: string,
+    message: string,
+    role: UserRole,
+    targetUsername?: string,
+  ) {
     const notification = await this.prisma.notification.create({
       data: {
         title,
         message,
         role,
-      }
+        targetUsername,
+      },
     });
 
     // Emitir al SSE
     this.notificationStream.next(notification);
   }
 
-  async getRecentForRole(role: UserRole) {
+  async getRecentForRole(role: UserRole, username?: string) {
     return this.prisma.notification.findMany({
       where: {
         role,
+        OR: [{ targetUsername: null }, { targetUsername: username }],
       },
       orderBy: {
         createdAt: 'desc',
@@ -99,13 +131,13 @@ export class NotificationsService {
   async markAsRead(id: string) {
     return this.prisma.notification.update({
       where: { id },
-      data: { isRead: true }
+      data: { isRead: true },
     });
   }
 
   async deleteNotification(id: string) {
     return this.prisma.notification.delete({
-      where: { id }
+      where: { id },
     });
   }
 }
