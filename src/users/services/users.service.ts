@@ -375,5 +375,31 @@ export class UsersService {
       todayDeliveries: s._count.id,
     }));
   }
+
+  async getWaiterZones(userId: string) {
+    const assignments = await this.prisma.waiterZoneAssignment.findMany({
+      where: { userId },
+    });
+    return assignments.map(a => ({ day: a.day, floor: a.floor }));
+  }
+
+  async updateWaiterZones(userId: string, zones: { day: string, floor: number }[]) {
+    // We can delete all and recreate, or upsert. Delete + Create is easier.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.waiterZoneAssignment.deleteMany({
+        where: { userId },
+      });
+      if (zones.length > 0) {
+        await tx.waiterZoneAssignment.createMany({
+          data: zones.map(z => ({
+            userId,
+            day: z.day as any,
+            floor: z.floor,
+          })),
+        });
+      }
+    });
+    return { success: true };
+  }
 }
 

@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Request,
   ForbiddenException,
   Query,
@@ -135,5 +136,20 @@ export class UsersController {
     @Param('date') date: string,
   ) {
     return this.users.removeExtraDay(id, date);
+  }
+
+  @Get(':id/zones')
+  @Roles(UserRoleDto.admin, UserRoleDto.mesero)
+  async getWaiterZones(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.users.getWaiterZones(id);
+  }
+
+  @Put(':id/zones')
+  @Roles(UserRoleDto.admin)
+  async updateWaiterZones(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: { zones: { day: string; floor: number }[] },
+  ) {
+    return this.users.updateWaiterZones(id, body.zones);
   }
 }

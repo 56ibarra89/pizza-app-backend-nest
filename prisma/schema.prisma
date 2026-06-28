@@ -47,6 +47,7 @@ model User {
   cashierShifts       Shift[]              @relation("ShiftCashier")
   systemLogs          SystemLog[]          @relation("SystemLogUser")
   extraDays           UserExtraDay[]       @relation("UserExtraDays")
+  waiterZoneAssignments WaiterZoneAssignment[] @relation("UserWaiterZones")
 
   @@index([role])
   @@index([isActive])
@@ -658,6 +659,19 @@ model UserExtraDay {
 
   @@unique([userId, date])
   @@index([date])
+}
+
+model WaiterZoneAssignment {
+  id        Int      @id @default(autoincrement())
+  userId    String
+  day       WeekDay
+  floor     Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation("UserWaiterZones", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, day])
+  @@index([userId])
 }
 
 model HiddenKitchenTicket {
