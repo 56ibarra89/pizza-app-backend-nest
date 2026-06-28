@@ -62,6 +62,8 @@ export class NotificationsService {
     await this.createNotification(title, message, 'CAJERO');
     // Guardamos notificación para ADMIN
     await this.createNotification(title, message, 'ADMIN');
+    // Guardamos notificación para MESERO
+    await this.createNotification(title, message, 'MESERO');
     
     // Guardamos notificación para DESPACHADOR solo si es delivery
     if (payload.orderType === 'delivery') {
