@@ -8,45 +8,45 @@ datasource db {
 }
 
 model User {
-  id                  String               @id @default(uuid())
-  username            String               @unique
-  email               String?              @unique
-  firstName           String
-  lastName            String
-  pin                 String               @unique
-  passwordHash        String?
-  role                UserRole
-  isActive            Boolean              @default(true)
-  failedLoginAttempts Int                  @default(0)
-  lockoutLevel        Int                  @default(0)
-  lockedUntil         DateTime?
-  lastVisit           DateTime?
-  themePreference     String               @default("light")
-  tokenVersion        Int                  @default(0)
-  workDays            WeekDay[]            @default([])
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  createdAppConfigs   AppConfig[]          @relation("AppConfigCreatedBy")
-  updatedAppConfigs   AppConfig[]          @relation("AppConfigUpdatedBy")
-  createdCategories   Category[]           @relation("CategoryCreatedBy")
-  updatedCategories   Category[]           @relation("CategoryUpdatedBy")
-  createdCertificados Certificado[]        @relation("CertificadoCreatedBy")
-  updatedCertificados Certificado[]        @relation("CertificadoUpdatedBy")
-  createdCupones      Cupon[]              @relation("CuponCreatedBy")
-  updatedCupones      Cupon[]              @relation("CuponUpdatedBy")
-  createdDiscounts    DiscountPromotion[]  @relation("DiscountCreatedBy")
-  updatedDiscounts    DiscountPromotion[]  @relation("DiscountUpdatedBy")
-  createdHappyHours   HappyHourPromotion[] @relation("HappyHourCreatedBy")
-  updatedHappyHours   HappyHourPromotion[] @relation("HappyHourUpdatedBy")
-  cancelledOrders     Order[]              @relation("OrderCancelledBy")
-  cashierOrders       Order[]              @relation("OrderCashier")
-  drivenOrders        Order[]              @relation("OrderDriver")
-  payments            Payment[]
-  createdProducts     Product[]            @relation("ProductCreatedBy")
-  updatedProducts     Product[]            @relation("ProductUpdatedBy")
-  cashierShifts       Shift[]              @relation("ShiftCashier")
-  systemLogs          SystemLog[]          @relation("SystemLogUser")
-  extraDays           UserExtraDay[]       @relation("UserExtraDays")
+  id                    String                 @id @default(uuid())
+  username              String                 @unique
+  email                 String?                @unique
+  firstName             String
+  lastName              String
+  pin                   String                 @unique
+  passwordHash          String?
+  role                  UserRole
+  isActive              Boolean                @default(true)
+  failedLoginAttempts   Int                    @default(0)
+  lockoutLevel          Int                    @default(0)
+  lockedUntil           DateTime?
+  lastVisit             DateTime?
+  themePreference       String                 @default("light")
+  tokenVersion          Int                    @default(0)
+  workDays              WeekDay[]              @default([])
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  createdAppConfigs     AppConfig[]            @relation("AppConfigCreatedBy")
+  updatedAppConfigs     AppConfig[]            @relation("AppConfigUpdatedBy")
+  createdCategories     Category[]             @relation("CategoryCreatedBy")
+  updatedCategories     Category[]             @relation("CategoryUpdatedBy")
+  createdCertificados   Certificado[]          @relation("CertificadoCreatedBy")
+  updatedCertificados   Certificado[]          @relation("CertificadoUpdatedBy")
+  createdCupones        Cupon[]                @relation("CuponCreatedBy")
+  updatedCupones        Cupon[]                @relation("CuponUpdatedBy")
+  createdDiscounts      DiscountPromotion[]    @relation("DiscountCreatedBy")
+  updatedDiscounts      DiscountPromotion[]    @relation("DiscountUpdatedBy")
+  createdHappyHours     HappyHourPromotion[]   @relation("HappyHourCreatedBy")
+  updatedHappyHours     HappyHourPromotion[]   @relation("HappyHourUpdatedBy")
+  cancelledOrders       Order[]                @relation("OrderCancelledBy")
+  cashierOrders         Order[]                @relation("OrderCashier")
+  drivenOrders          Order[]                @relation("OrderDriver")
+  payments              Payment[]
+  createdProducts       Product[]              @relation("ProductCreatedBy")
+  updatedProducts       Product[]              @relation("ProductUpdatedBy")
+  cashierShifts         Shift[]                @relation("ShiftCashier")
+  systemLogs            SystemLog[]            @relation("SystemLogUser")
+  extraDays             UserExtraDay[]         @relation("UserExtraDays")
   waiterZoneAssignments WaiterZoneAssignment[] @relation("UserWaiterZones")
 
   @@index([role])
@@ -160,9 +160,9 @@ model Order {
   certificadosRedeemed    Certificado[]
   cancelledBy             User?         @relation("OrderCancelledBy", fields: [cancelledById], references: [id])
   cashier                 User?         @relation("OrderCashier", fields: [cashierId], references: [id])
-  driver                  User?         @relation("OrderDriver", fields: [driverId], references: [id])
   cupon                   Cupon?        @relation(fields: [cuponId], references: [id])
   customer                Customer?     @relation(fields: [customerId], references: [id])
+  driver                  User?         @relation("OrderDriver", fields: [driverId], references: [id])
   invoiceCorrelativo      Correlativo?  @relation("OrderInvoiceCorrelativo", fields: [invoiceCorrelativoId], references: [id])
   shift                   Shift?        @relation(fields: [shiftId], references: [id])
   items                   OrderItem[]
@@ -504,11 +504,11 @@ model Product {
 }
 
 model ProductPrice {
-  id        String      @id @default(uuid())
+  id        String  @id @default(uuid())
   productId String
   size      String
-  price     Decimal     @db.Decimal(10, 2)
-  product   Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  price     Decimal @db.Decimal(10, 2)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@unique([productId, size])
 }
@@ -533,7 +533,52 @@ model ExtraPrice {
   @@unique([extraId, size])
 }
 
+model Notification {
+  id             String   @id @default(uuid())
+  title          String
+  message        String
+  isRead         Boolean  @default(false)
+  role           UserRole
+  createdAt      DateTime @default(now())
+  targetUsername String?
 
+  @@index([role])
+  @@index([targetUsername])
+  @@index([isRead])
+  @@index([createdAt])
+}
+
+model UserExtraDay {
+  id        Int      @id @default(autoincrement())
+  userId    String
+  date      DateTime @db.Date
+  notes     String?
+  createdAt DateTime @default(now())
+  user      User     @relation("UserExtraDays", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([date])
+}
+
+model WaiterZoneAssignment {
+  id        Int      @id @default(autoincrement())
+  userId    String
+  day       WeekDay
+  floor     Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation("UserWaiterZones", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, day])
+  @@index([userId])
+}
+
+model HiddenKitchenTicket {
+  id       String   @id @default(uuid())
+  ticketId String   @unique
+  hiddenAt DateTime @default(now())
+  hiddenBy String?
+}
 
 enum UserRole {
   ADMIN
@@ -634,51 +679,4 @@ enum LogLevel {
   INFO
   WARN
   ERROR
-}
-
-model Notification {
-  id        String   @id @default(uuid())
-  title     String
-  message   String
-  isRead    Boolean  @default(false)
-  role      UserRole // Target role for this notification (e.g. ADMIN, CAJERO)
-  targetUsername String? // Opcional: target specific user
-  createdAt DateTime @default(now())
-
-  @@index([role])
-  @@index([targetUsername])
-  @@index([isRead])
-  @@index([createdAt])
-}
-
-model UserExtraDay {
-  id        Int      @id @default(autoincrement())
-  userId    String
-  date      DateTime @db.Date
-  notes     String?
-  createdAt DateTime @default(now())
-  user      User     @relation("UserExtraDays", fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, date])
-  @@index([date])
-}
-
-model WaiterZoneAssignment {
-  id        Int      @id @default(autoincrement())
-  userId    String
-  day       WeekDay
-  floor     Int
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user      User     @relation("UserWaiterZones", fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, day])
-  @@index([userId])
-}
-
-model HiddenKitchenTicket {
-  id        String   @id @default(uuid())
-  ticketId  String   @unique
-  hiddenAt  DateTime @default(now())
-  hiddenBy  String?
 }
