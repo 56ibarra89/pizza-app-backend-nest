@@ -20,4 +20,8 @@ export class UpdateOrderStatusDto {
   @IsOptional()
   @IsString()
   adminPin?: string;
+
+  @IsOptional()
+  @IsString()
+  kitchenId?: string;
 }

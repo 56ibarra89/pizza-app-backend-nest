@@ -228,6 +228,8 @@ model OrderItem {
   updatedAt       DateTime         @updatedAt
   productId       String?
   giftReason      String?
+  kitchenId       String?
+  kitchen         Kitchen?         @relation(fields: [kitchenId], references: [id])
   order           Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product         Product?         @relation(fields: [productId], references: [id])
   extras          OrderItemExtra[]
@@ -469,10 +471,23 @@ model Category {
   discounts   DiscountCategory[]
   happyHours  HappyHourCategory[]
   products    Product[]
+  kitchenId   String?
+  kitchen     Kitchen?            @relation(fields: [kitchenId], references: [id])
 
   @@index([deletedAt])
   @@index([createdById])
   @@index([updatedById])
+  @@index([kitchenId])
+}
+
+model Kitchen {
+  id          String     @id @default(uuid())
+  name        String     @unique
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  categories  Category[]
+  orderItems  OrderItem[]
 }
 
 model Product {

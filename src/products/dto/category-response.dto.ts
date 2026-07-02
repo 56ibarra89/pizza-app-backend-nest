@@ -4,5 +4,6 @@ export interface CategoryResponseDto {
   id: string;
   label: string;
   icon?: string;
+  kitchenId?: string;
   items: ProductResponseDto[];
 }

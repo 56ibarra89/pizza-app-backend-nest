@@ -173,6 +173,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
             isSentToKitchen: i.isSentToKitchen ?? false,
             sentAt: i.sentAt ? new Date(i.sentAt) : undefined,
             kitchenStatus: i.kitchenStatus ? toDbKitchenStatus(i.kitchenStatus) : undefined,
+            kitchenId: i.kitchenId,
             extras: {
               create: i.extras.map((e) => ({ name: e.name, price: e.price })),
             },
@@ -304,6 +305,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           isSentToKitchen: i.isSentToKitchen ?? false,
           sentAt: i.sentAt ? new Date(i.sentAt) : undefined,
           kitchenStatus: i.kitchenStatus ? toDbKitchenStatus(i.kitchenStatus) : undefined,
+          kitchenId: i.kitchenId,
           extras: {
             create: i.extras.map((e) => ({ name: e.name, price: e.price })),
           },
@@ -328,14 +330,21 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     orderId: string;
     sentAt: Date;
     kitchenStatus: KitchenStatusDto;
+    kitchenId?: string;
   }): Promise<void> {
+    const whereClause: any = {
+      orderId: params.orderId,
+      isSentToKitchen: true,
+      // Se elimina la coincidencia exacta de sentAt para evitar fallos de precisión en BD
+      // y para asegurar que todo el ticket avance correctamente, a menos que se use kitchenId.
+    };
+
+    if (params.kitchenId) {
+      whereClause.kitchenId = params.kitchenId;
+    }
+
     await this.prisma.orderItem.updateMany({
-      where: {
-        orderId: params.orderId,
-        isSentToKitchen: true,
-        // Se elimina la coincidencia exacta de sentAt para evitar fallos de precisión en BD
-        // y para asegurar que todo el ticket avance correctamente.
-      },
+      where: whereClause,
       data: {
         kitchenStatus: toDbKitchenStatus(params.kitchenStatus),
       },
@@ -388,6 +397,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       isSentToKitchen: boolean;
       sentAt: Date | null;
       kitchenStatus: KitchenStatus | null;
+      kitchenId: string | null;
       extras: Array<{ id: number; name: string; price: Prisma.Decimal }>;
     }>;
     customerTendered: Prisma.Decimal | null;
@@ -415,6 +425,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         isSentToKitchen: i.isSentToKitchen,
         sentAt: i.sentAt ? i.sentAt.getTime() : undefined,
         kitchenStatus: i.kitchenStatus ? fromDbKitchenStatus(i.kitchenStatus) : undefined,
+        kitchenId: i.kitchenId ?? undefined,
       })),
       subTotal: o.subTotal ? o.subTotal.toNumber() : undefined,
       discountAmount: o.discountAmount ? o.discountAmount.toNumber() : undefined,

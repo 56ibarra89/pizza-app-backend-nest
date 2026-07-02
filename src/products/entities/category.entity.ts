@@ -4,5 +4,6 @@ export interface CategoryEntity {
   id: string;
   label: string;
   icon?: string;
+  kitchenId?: string;
   items: ProductEntity[];
 }

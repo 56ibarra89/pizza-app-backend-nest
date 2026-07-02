@@ -14,6 +14,7 @@ export function toOrderResponseDto(order: OrderEntity) {
       isSentToKitchen: i.isSentToKitchen,
       sentAt: i.sentAt,
       kitchenStatus: i.kitchenStatus,
+      kitchenId: i.kitchenId,
     })),
     subTotal: order.subTotal,
     discountAmount: order.discountAmount,

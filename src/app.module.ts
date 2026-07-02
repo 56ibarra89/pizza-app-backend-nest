@@ -21,6 +21,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { MesasModule } from './mesas/mesas.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { NotificationsModule } from './notifications/notifications.module';
+import { KitchensModule } from './kitchens/kitchens.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     MesasModule,
     EventEmitterModule.forRoot(),
     NotificationsModule,
+    KitchensModule,
   ],
   controllers: [AppController],
   providers: [

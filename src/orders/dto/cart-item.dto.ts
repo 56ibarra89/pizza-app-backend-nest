@@ -59,6 +59,10 @@ export class CartItemDto {
   sentAt?: number; // epoch ms
 
   @IsOptional()
+  @IsString()
+  kitchenId?: string;
+
+  @IsOptional()
   @IsEnum(KitchenStatusDto)
   kitchenStatus?: KitchenStatusDto;
 }

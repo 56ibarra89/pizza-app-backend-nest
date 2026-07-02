@@ -8,4 +8,8 @@ export class UpdateCategoryDto {
   @IsOptional()
   @IsString()
   icon?: string;
+
+  @IsOptional()
+  @IsString()
+  kitchenId?: string;
 }

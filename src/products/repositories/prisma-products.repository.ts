@@ -32,23 +32,24 @@ export class PrismaProductsRepository implements IProductsRepository {
       id: c.id,
       label: c.label,
       icon: c.icon ?? undefined,
+      kitchenId: c.kitchenId ?? undefined,
       items: c.products.map((p) => this.mapProduct(p)),
     }));
   }
 
   async createCategory(dto: CreateCategoryDto): Promise<CategoryEntity> {
     const created = await this.prisma.category.create({
-      data: { label: dto.label, icon: dto.icon },
+      data: { label: dto.label, icon: dto.icon, kitchenId: dto.kitchenId },
       include: { products: true },
     });
 
-    return { id: created.id, label: created.label, icon: created.icon ?? undefined, items: [] };
+    return { id: created.id, label: created.label, icon: created.icon ?? undefined, kitchenId: created.kitchenId ?? undefined, items: [] };
   }
 
   async updateCategory(id: string, dto: UpdateCategoryDto): Promise<CategoryEntity> {
     const updated = await this.prisma.category.update({
       where: { id },
-      data: { label: dto.label, icon: dto.icon },
+      data: { label: dto.label, icon: dto.icon, kitchenId: dto.kitchenId },
       include: {
         products: {
           where: { deletedAt: null },
@@ -65,6 +66,7 @@ export class PrismaProductsRepository implements IProductsRepository {
       id: updated.id,
       label: updated.label,
       icon: updated.icon ?? undefined,
+      kitchenId: updated.kitchenId ?? undefined,
       items: updated.products.map((p) => this.mapProduct(p)),
     };
   }
