@@ -12,6 +12,19 @@ export class KitchensController {
     return this.kitchensService.create(createKitchenDto);
   }
 
+  @Get('cooks/assignments')
+  getCooksWithAssignments() {
+    return this.kitchensService.getCooksWithAssignments();
+  }
+
+  @Patch('cooks/:userId/assignments')
+  updateCookAssignments(
+    @Param('userId') userId: string,
+    @Body('assignments') assignments: { dayOfWeek: any; kitchenId: string | null }[],
+  ) {
+    return this.kitchensService.updateCookAssignments(userId, assignments);
+  }
+
   @Get()
   findAll() {
     return this.kitchensService.findAll();

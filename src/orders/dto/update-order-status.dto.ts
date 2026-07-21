@@ -24,4 +24,8 @@ export class UpdateOrderStatusDto {
   @IsOptional()
   @IsString()
   kitchenId?: string;
+
+  @IsOptional()
+  @IsNumber()
+  itemId?: number;
 }

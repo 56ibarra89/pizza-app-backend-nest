@@ -43,4 +43,36 @@ export class KitchensService {
       where: { id },
     });
   }
+
+  async getCooksWithAssignments() {
+    return this.prisma.user.findMany({
+      where: { role: 'COCINERO' },
+      include: {
+        kitchenAssignments: true,
+      },
+      orderBy: { firstName: 'asc' },
+    });
+  }
+
+  async updateCookAssignments(userId: string, assignments: { dayOfWeek: any; kitchenId: string | null }[]) {
+    // Delete existing assignments for the given user
+    await this.prisma.cookKitchenAssignment.deleteMany({
+      where: { userId },
+    });
+
+    // Filter out null kitchenIds
+    const validAssignments = assignments.filter(a => a.kitchenId !== null);
+
+    if (validAssignments.length > 0) {
+      await this.prisma.cookKitchenAssignment.createMany({
+        data: validAssignments.map(a => ({
+          userId,
+          dayOfWeek: a.dayOfWeek,
+          kitchenId: a.kitchenId as string,
+        })),
+      });
+    }
+
+    return { success: true };
+  }
 }

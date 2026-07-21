@@ -70,5 +70,6 @@ export interface IOrdersRepository {
     sentAt: Date;
     kitchenStatus: KitchenStatusDto;
     kitchenId?: string;
+    itemId?: number;
   }): Promise<void>;
 }

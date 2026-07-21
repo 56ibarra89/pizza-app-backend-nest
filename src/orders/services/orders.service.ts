@@ -336,6 +336,7 @@ export class OrdersService {
         sentAt: new Date(dto.sentAt),
         kitchenStatus: dto.status as unknown as KitchenStatusDto,
         kitchenId: dto.kitchenId,
+        itemId: dto.itemId,
       });
 
       const reloaded = await this.getById(id);

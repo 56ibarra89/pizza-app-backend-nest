@@ -48,6 +48,7 @@ model User {
   systemLogs            SystemLog[]            @relation("SystemLogUser")
   extraDays             UserExtraDay[]         @relation("UserExtraDays")
   waiterZoneAssignments WaiterZoneAssignment[] @relation("UserWaiterZones")
+  kitchenAssignments    CookKitchenAssignment[] @relation("UserKitchenAssignments")
 
   @@index([role])
   @@index([isActive])
@@ -488,6 +489,21 @@ model Kitchen {
   updatedAt   DateTime   @updatedAt
   categories  Category[]
   orderItems  OrderItem[]
+  assignments CookKitchenAssignment[]
+}
+
+model CookKitchenAssignment {
+  id        String   @id @default(uuid())
+  userId    String
+  kitchenId String
+  dayOfWeek WeekDay
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation("UserKitchenAssignments", fields: [userId], references: [id], onDelete: Cascade)
+  kitchen   Kitchen  @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dayOfWeek])
+  @@index([kitchenId])
 }
 
 model Product {

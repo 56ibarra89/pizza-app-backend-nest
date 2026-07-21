@@ -331,6 +331,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     sentAt: Date;
     kitchenStatus: KitchenStatusDto;
     kitchenId?: string;
+    itemId?: number;
   }): Promise<void> {
     const whereClause: any = {
       orderId: params.orderId,
@@ -341,6 +342,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
 
     if (params.kitchenId) {
       whereClause.kitchenId = params.kitchenId;
+    }
+
+    if (params.itemId !== undefined) {
+      whereClause.id = params.itemId;
     }
 
     await this.prisma.orderItem.updateMany({
@@ -415,6 +420,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         createdAt: p.createdAt,
       })),
       items: o.items.map((i) => ({
+        id: i.id,
         name: i.name,
         price: i.price.toNumber(),
         size: i.size,
