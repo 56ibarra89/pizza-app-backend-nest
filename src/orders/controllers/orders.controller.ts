@@ -9,6 +9,7 @@ import { toOrderResponseDto } from '../mappers/orders.mapper';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRoleDto } from '../../users/dto/user-role.dto';
+import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 
 @ApiTags('orders')
 @Controller('orders')
@@ -59,7 +60,10 @@ export class OrdersController {
 
   @Post('kitchen/hidden-tickets')
   @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.cocinero, UserRoleDto.despachador)
-  async addHiddenKitchenTickets(@Body('ticketIds') ticketIds: string[], @CurrentUser() user: any) {
+  async addHiddenKitchenTickets(
+    @Body('ticketIds') ticketIds: string[],
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     await this.orders.addHiddenKitchenTickets(ticketIds, user);
     return { success: true };
   }
@@ -72,10 +76,7 @@ export class OrdersController {
 
   @Post()
   @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero, UserRoleDto.despachador)
-  async create(@Body() dto: CreateOrderDto, @CurrentUser() user: any) {
-    console.log('--- INCOMING CREATE DTO ---');
-    console.dir(dto, { depth: null });
-    console.log('---------------------------');
+  async create(@Body() dto: CreateOrderDto) {
     const created = await this.orders.create(dto);
     return toOrderResponseDto(created);
   }
@@ -85,7 +86,7 @@ export class OrdersController {
   async updateStatus(
     @Param('id') id: string,
     @Body() dto: UpdateOrderStatusDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     const updated = await this.orders.updateStatus(id, dto, user);
     return toOrderResponseDto(updated);
@@ -96,9 +97,8 @@ export class OrdersController {
   async updateItems(
     @Param('id') id: string,
     @Body() dto: UpdateOrderItemsDto,
-    @CurrentUser() user: any,
   ) {
-    const updated = await this.orders.updateItems(id, dto, user);
+    const updated = await this.orders.updateItems(id, dto);
     return toOrderResponseDto(updated);
   }
 
@@ -114,7 +114,7 @@ export class OrdersController {
   async finalize(
     @Param('id') id: string,
     @Body() dto: FinalizeOrderDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     const updated = await this.orders.finalize(id, dto, user);
     return toOrderResponseDto(updated);

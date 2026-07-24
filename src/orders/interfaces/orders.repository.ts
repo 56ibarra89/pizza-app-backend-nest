@@ -39,6 +39,8 @@ export interface IOrdersRepository {
     deliveryChange?: number;
   }): Promise<OrderEntity>;
 
+  delete(id: string): Promise<void>;
+
   update(id: string, data: {
     items?: CartItemEntity[];
     subTotal?: number | null;

@@ -190,6 +190,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     return this.mapOrder(created);
   }
 
+  async delete(id: string): Promise<void> {
+    await this.prisma.order.delete({ where: { id } });
+  }
+
   async update(
     id: string,
     data: {
@@ -333,7 +337,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     kitchenId?: string;
     itemId?: number;
   }): Promise<void> {
-    const whereClause: any = {
+    const whereClause: Prisma.OrderItemWhereInput = {
       orderId: params.orderId,
       isSentToKitchen: true,
       // Se elimina la coincidencia exacta de sentAt para evitar fallos de precisión en BD

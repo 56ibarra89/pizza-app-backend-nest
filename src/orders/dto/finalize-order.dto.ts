@@ -49,6 +49,15 @@ export class FinalizeOrderDto {
   cuponId?: number;
 
   @IsOptional()
+  @IsString()
+  promotionCode?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  certificateSerials?: string[];
+
+  @IsOptional()
   @IsEnum(OrderStatusDto)
   status?: OrderStatusDto;
 }

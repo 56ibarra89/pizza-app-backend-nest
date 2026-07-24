@@ -96,6 +96,15 @@ export class CreateOrderDto {
   cuponId?: number;
 
   @IsOptional()
+  @IsString()
+  promotionCode?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  certificateSerials?: string[];
+
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => OrderPaymentDto)

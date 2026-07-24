@@ -31,5 +31,6 @@ import { AuthController } from './controllers/auth.controller';
       useClass: PrismaUsersRepository,
     },
   ],
+  exports: [USERS_REPOSITORY],
 })
 export class UsersModule {}
