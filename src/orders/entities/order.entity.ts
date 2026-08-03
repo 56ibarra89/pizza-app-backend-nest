@@ -30,6 +30,8 @@ export interface OrderEntity {
   orderType?: OrderTypeDto;
   driverId?: string;
   cuponId?: number;
+  discountId?: number;
+  happyHourId?: number;
 
   cashierSnapshotName?: string;
   customerTendered?: number;

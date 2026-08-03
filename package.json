@@ -12,6 +12,7 @@
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:init": "prisma migrate dev --name init",
     "prisma:migrate:deploy": "prisma migrate deploy",

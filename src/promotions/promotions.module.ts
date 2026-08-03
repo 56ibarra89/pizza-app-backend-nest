@@ -45,6 +45,11 @@ import { PrismaHappyHourPromotionsRepository } from './repositories/prisma-happy
       useClass: PrismaCertificatePromotionsRepository,
     },
   ],
-  exports: [PromotionsService, CouponPromotionsService],
+  exports: [
+    PromotionsService,
+    CouponPromotionsService,
+    DISCOUNT_PROMOTIONS_REPOSITORY,
+    HAPPY_HOUR_PROMOTIONS_REPOSITORY,
+  ],
 })
 export class PromotionsModule {}

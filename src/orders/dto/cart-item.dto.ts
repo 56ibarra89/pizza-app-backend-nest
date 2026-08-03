@@ -51,6 +51,10 @@ export class CartItemDto {
   giftQuantity?: number;
 
   @IsOptional()
+  @IsString()
+  giftReason?: string;
+
+  @IsOptional()
   @IsBoolean()
   isSentToKitchen?: boolean;
 

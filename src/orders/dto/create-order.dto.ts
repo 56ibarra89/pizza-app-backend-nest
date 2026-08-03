@@ -14,9 +14,9 @@ import {
 } from 'class-validator';
 import { CartItemDto } from './cart-item.dto';
 import { OrderStatusDto } from './order-status.dto';
-import { PaymentMethodDto } from './payment-method.dto';
 import { OrderTypeDto } from './order-type.dto';
 import { OrderPaymentDto } from './order-payment.dto';
+import { OrderPromotionSourceDto } from './order-promotion-source.dto';
 
 export class CreateOrderDto {
   @IsOptional()
@@ -89,8 +89,6 @@ export class CreateOrderDto {
   @IsString()
   customerAddress?: string;
 
-  
-
   @IsOptional()
   @IsInt()
   cuponId?: number;
@@ -98,6 +96,18 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   promotionCode?: string;
+
+  @IsOptional()
+  @IsEnum(OrderPromotionSourceDto)
+  promotionSource?: OrderPromotionSourceDto;
+
+  @IsOptional()
+  @IsInt()
+  discountId?: number;
+
+  @IsOptional()
+  @IsInt()
+  happyHourId?: number;
 
   @IsOptional()
   @IsArray()

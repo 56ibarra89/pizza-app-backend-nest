@@ -25,15 +25,12 @@ export class OrderFinalizationService {
       throw new ForbiddenException('Los cocineros no pueden facturar órdenes.');
     }
 
-    const cuponId = await this.pricing.resolveCouponId(
-      dto.cuponId ?? order.cuponId,
-      dto.promotionCode,
-    );
-    const totals = await this.pricing.calculate(
-      order.items,
-      cuponId,
-      dto.discountAmount ?? order.discountAmount,
-    );
+    const promotion = await this.pricing.resolvePromotion(dto, {
+      cuponId: order.cuponId,
+      discountId: order.discountId,
+      happyHourId: order.happyHourId,
+    });
+    const totals = await this.pricing.calculate(order.items, promotion);
     const payments = dto.payments ?? order.payments;
     assertPaymentsMatchTotal(totals.total, payments);
 
@@ -42,7 +39,7 @@ export class OrderFinalizationService {
         orderId: order.id,
         dto,
         totals,
-        cuponId,
+        promotion,
       }),
     );
   }

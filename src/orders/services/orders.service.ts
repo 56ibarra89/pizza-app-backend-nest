@@ -82,8 +82,7 @@ export class OrdersService {
       (dto.payments?.length ? OrderStatusDto.paid : OrderStatusDto.pending);
     const timestamp = dto.timestamp ?? new Date();
     const isSentToKitchen =
-      dto.isSentToKitchen ??
-      !(dto.linkedTables && dto.linkedTables.length > 0);
+      dto.isSentToKitchen ?? !(dto.linkedTables && dto.linkedTables.length > 0);
 
     const { customerId, cashierId, shiftId } =
       await this.referenceResolver.resolve(dto);
@@ -91,45 +90,43 @@ export class OrdersService {
       ...item,
       giftQuantity: item.giftQuantity ?? 0,
     }));
-    const cuponId = await this.pricing.resolveCouponId(
-      dto.cuponId,
-      dto.promotionCode,
-    );
-    const totals = await this.pricing.calculate(
+    const promotion = await this.pricing.resolvePromotion(dto);
+    const totals = await this.pricing.calculate(items, promotion);
+
+    const created = await this.repo.create({
+      id: dto.id,
+      shiftId,
+      customerId,
       items,
-      cuponId,
-      dto.discountAmount,
-    );
+      subTotal: totals.subTotal,
+      discountAmount: totals.discountAmount,
+      taxAmount: totals.taxAmount,
+      total: totals.total,
+      timestamp,
+      status: status === OrderStatusDto.paid ? OrderStatusDto.pending : status,
+      customerSnapshotName: dto.customerSnapshotName,
+      cashierId,
+      cashierSnapshotName: dto.cashierSnapshotName,
+      orderType: dto.orderType,
+      customerAddress: dto.customerAddress,
+      linkedTables: dto.linkedTables,
+      isSentToKitchen,
+      cuponId: promotion.source === 'coupon' ? promotion.cuponId : undefined,
+      discountId:
+        promotion.source === 'discount' ? promotion.discountId : undefined,
+      happyHourId:
+        promotion.source === 'happy-hour' ? promotion.happyHourId : undefined,
+      driverId: dto.driverId,
+      payments: status === OrderStatusDto.paid ? undefined : dto.payments,
+      customerTendered: dto.customerTendered,
+      deliveryChange: dto.deliveryChange,
+    });
 
-    try {
-      const created = await this.repo.create({
-        id: dto.id,
-        shiftId,
-        customerId,
-        items,
-        subTotal: totals.subTotal,
-        discountAmount: totals.discountAmount,
-        taxAmount: totals.taxAmount,
-        total: totals.total,
-        timestamp,
-        status: status === OrderStatusDto.paid ? OrderStatusDto.pending : status,
-        customerSnapshotName: dto.customerSnapshotName,
-        cashierId,
-        cashierSnapshotName: dto.cashierSnapshotName,
-        orderType: dto.orderType,
-        customerAddress: dto.customerAddress,
-        linkedTables: dto.linkedTables,
-        isSentToKitchen,
-        cuponId,
-        driverId: dto.driverId,
-        payments: status === OrderStatusDto.paid ? undefined : dto.payments,
-        customerTendered: dto.customerTendered,
-        deliveryChange: dto.deliveryChange,
-      });
-
-      if (status === OrderStatusDto.paid) {
-        try {
-          return await this.finalize(created.id, {
+    if (status === OrderStatusDto.paid) {
+      try {
+        return await this.finalize(
+          created.id,
+          {
             payments: dto.payments,
             customerSnapshotName: dto.customerSnapshotName,
             customerAddress: dto.customerAddress,
@@ -138,20 +135,29 @@ export class OrdersService {
             taxAmount: totals.taxAmount,
             discountAmount: totals.discountAmount,
             finalTotal: totals.total,
-            cuponId,
+            cuponId:
+              promotion.source === 'coupon' ? promotion.cuponId : undefined,
+            discountId:
+              promotion.source === 'discount'
+                ? promotion.discountId
+                : undefined,
+            happyHourId:
+              promotion.source === 'happy-hour'
+                ? promotion.happyHourId
+                : undefined,
+            promotionSource: dto.promotionSource,
             promotionCode: dto.promotionCode,
             certificateSerials: dto.certificateSerials,
-          }, 'system');
-        } catch (error) {
-          await this.repo.delete(created.id);
-          throw error;
-        }
+          },
+          'system',
+        );
+      } catch (error) {
+        await this.repo.delete(created.id);
+        throw error;
       }
-
-      return created;
-    } catch (error) {
-      throw error;
     }
+
+    return created;
   }
 
   async updateStatus(
@@ -160,12 +166,19 @@ export class OrdersService {
     user?: AuthenticatedUser,
   ) {
     const existing = await this.getById(id);
-    const isFinal = existing.status === OrderStatusDto.paid || existing.status === OrderStatusDto.cancelled;
+    const isFinal =
+      existing.status === OrderStatusDto.paid ||
+      existing.status === OrderStatusDto.cancelled;
 
     // Regla de Negocio: El COCINERO no puede cambiar estados financieros
     if (user?.role === UserRoleDto.cocinero) {
-      if (dto.status === OrderStatusDto.paid || dto.status === OrderStatusDto.cancelled) {
-        throw new ForbiddenException('Los cocineros no tienen permiso para cobrar o cancelar órdenes.');
+      if (
+        dto.status === OrderStatusDto.paid ||
+        dto.status === OrderStatusDto.cancelled
+      ) {
+        throw new ForbiddenException(
+          'Los cocineros no tienen permiso para cobrar o cancelar órdenes.',
+        );
       }
     }
 
@@ -179,7 +192,10 @@ export class OrdersService {
 
     if (dto.sentAt) {
       this.logger.debug(`Actualizando ticket de cocina sentAt=${dto.sentAt}`);
-      if (dto.status === OrderStatusDto.paid || dto.status === OrderStatusDto.cancelled) {
+      if (
+        dto.status === OrderStatusDto.paid ||
+        dto.status === OrderStatusDto.cancelled
+      ) {
         throw new BadRequestException('Status inválido para cocina');
       }
 
@@ -209,9 +225,11 @@ export class OrdersService {
       }
 
       const derived = this.deriveGlobalStatus(reloaded.items);
-      const nextGlobalStatus = (existing.status === OrderStatusDto.paid || existing.status === OrderStatusDto.cancelled) 
-                               ? existing.status 
-                               : derived;
+      const nextGlobalStatus =
+        existing.status === OrderStatusDto.paid ||
+        existing.status === OrderStatusDto.cancelled
+          ? existing.status
+          : derived;
       this.logger.debug(`Estado global derivado: ${nextGlobalStatus}`);
       return this.repo.update(id, { status: nextGlobalStatus });
     }
@@ -239,7 +257,10 @@ export class OrdersService {
     }
 
     const nextStatus = dto.status;
-    if (nextStatus === OrderStatusDto.paid && existing.status !== OrderStatusDto.paid) {
+    if (
+      nextStatus === OrderStatusDto.paid &&
+      existing.status !== OrderStatusDto.paid
+    ) {
       assertPaymentsMatchTotal(existing.total, existing.payments);
     }
 
@@ -252,7 +273,10 @@ export class OrdersService {
       ? existing.items.map((i) => ({ ...i, kitchenStatus: updateItemsKitchen }))
       : existing.items;
 
-    const updateData: Parameters<IOrdersRepository['update']>[1] = { status: nextStatus, items };
+    const updateData: Parameters<IOrdersRepository['update']>[1] = {
+      status: nextStatus,
+      items,
+    };
 
     if (nextStatus === OrderStatusDto.delivered) {
       const tableName = existing.linkedTables?.[0] || undefined;
@@ -274,17 +298,23 @@ export class OrdersService {
       updateData.cancelledAt = new Date();
 
       // Send email to all admins
-      const cashierName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'Desconocido';
-      const adminName = authorizerAdmin ? `${authorizerAdmin.firstName || ''} ${authorizerAdmin.lastName || ''}`.trim() : 'Desconocido';
+      const cashierName = user
+        ? `${user.firstName || ''} ${user.lastName || ''}`.trim()
+        : 'Desconocido';
+      const adminName = authorizerAdmin
+        ? `${authorizerAdmin.firstName || ''} ${authorizerAdmin.lastName || ''}`.trim()
+        : 'Desconocido';
       const reasonStr = dto.cancelReason || 'No especificado';
-      const invoiceNum = existing.invoice?.invoiceNumber ? `#${existing.invoice.invoiceNumber}` : 'Sin Factura';
+      const invoiceNum = existing.invoice?.invoiceNumber
+        ? `#${existing.invoice.invoiceNumber}`
+        : 'Sin Factura';
 
       this.eventEmitter.emit('order.cancelled', {
         orderId: existing.id,
         invoiceNum,
         cashierName,
         adminName,
-        reasonStr
+        reasonStr,
       });
     }
 
@@ -299,7 +329,9 @@ export class OrdersService {
 
   async updateItems(id: string, dto: UpdateOrderItemsDto) {
     const existing = await this.getById(id);
-    const isFinal = existing.status === OrderStatusDto.paid || existing.status === OrderStatusDto.cancelled;
+    const isFinal =
+      existing.status === OrderStatusDto.paid ||
+      existing.status === OrderStatusDto.cancelled;
 
     const mappedItems: CartItemEntity[] = dto.items.map((item) => ({
       ...item,
@@ -315,7 +347,10 @@ export class OrdersService {
         const item = mappedItems[i];
         if (item.kitchenStatus === KitchenStatusDto.delivered) {
           const existingItem = existing.items[i];
-          if (existingItem && existingItem.kitchenStatus !== KitchenStatusDto.delivered) {
+          if (
+            existingItem &&
+            existingItem.kitchenStatus !== KitchenStatusDto.delivered
+          ) {
             const tableName = existing.linkedTables?.[0] || undefined;
             const customerName = existing.customerSnapshotName || undefined;
             const orderType = existing.orderType || undefined;
@@ -333,11 +368,12 @@ export class OrdersService {
       }
     }
 
-    const totals = await this.pricing.calculate(
-      mappedItems,
-      dto.cuponId,
-      dto.discountAmount,
-    );
+    const promotion = await this.pricing.resolvePromotion(dto, {
+      cuponId: existing.cuponId,
+      discountId: existing.discountId,
+      happyHourId: existing.happyHourId,
+    });
+    const totals = await this.pricing.calculate(mappedItems, promotion);
 
     return this.repo.update(id, {
       items: mappedItems,
@@ -345,7 +381,10 @@ export class OrdersService {
       subTotal: totals.subTotal,
       discountAmount: totals.discountAmount,
       taxAmount: totals.taxAmount,
-      cuponId: dto.cuponId,
+      cuponId: promotion.source === 'coupon' ? promotion.cuponId : null,
+      discountId: promotion.source === 'discount' ? promotion.discountId : null,
+      happyHourId:
+        promotion.source === 'happy-hour' ? promotion.happyHourId : null,
       status: nextStatus,
       isSentToKitchen: dto.isSentToKitchen,
     });
@@ -372,22 +411,32 @@ export class OrdersService {
       return OrderStatusDto.pending;
     }
 
-    const anyPending = sentItems.some((i) => i.kitchenStatus === KitchenStatusDto.pending);
+    const anyPending = sentItems.some(
+      (i) => i.kitchenStatus === KitchenStatusDto.pending,
+    );
     if (anyPending) return OrderStatusDto.pending;
 
-    const anyPreparing = sentItems.some((i) => i.kitchenStatus === KitchenStatusDto.preparing);
+    const anyPreparing = sentItems.some(
+      (i) => i.kitchenStatus === KitchenStatusDto.preparing,
+    );
     if (anyPreparing) return OrderStatusDto.preparing;
 
-    const allDelivered = sentItems.every((i) => i.kitchenStatus === KitchenStatusDto.delivered);
+    const allDelivered = sentItems.every(
+      (i) => i.kitchenStatus === KitchenStatusDto.delivered,
+    );
     if (allDelivered) return OrderStatusDto.delivered;
 
-    const anyReady = sentItems.some((i) => i.kitchenStatus === KitchenStatusDto.ready);
+    const anyReady = sentItems.some(
+      (i) => i.kitchenStatus === KitchenStatusDto.ready,
+    );
     if (anyReady) return OrderStatusDto.ready;
 
     return OrderStatusDto.pending;
   }
 
-  private asKitchenStatusOrUndefined(status: OrderStatusDto): KitchenStatusDto | undefined {
+  private asKitchenStatusOrUndefined(
+    status: OrderStatusDto,
+  ): KitchenStatusDto | undefined {
     switch (status) {
       case OrderStatusDto.pending:
         return KitchenStatusDto.pending;

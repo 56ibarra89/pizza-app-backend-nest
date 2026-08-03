@@ -1,6 +1,17 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import { CartItemDto } from './cart-item.dto';
+import { OrderPromotionSourceDto } from './order-promotion-source.dto';
 
 export class UpdateOrderItemsDto {
   @IsArray()
@@ -30,6 +41,22 @@ export class UpdateOrderItemsDto {
   @IsOptional()
   @IsInt()
   cuponId?: number;
+
+  @IsOptional()
+  @IsString()
+  promotionCode?: string;
+
+  @IsOptional()
+  @IsEnum(OrderPromotionSourceDto)
+  promotionSource?: OrderPromotionSourceDto;
+
+  @IsOptional()
+  @IsInt()
+  discountId?: number;
+
+  @IsOptional()
+  @IsInt()
+  happyHourId?: number;
 
   @IsOptional()
   @IsBoolean()

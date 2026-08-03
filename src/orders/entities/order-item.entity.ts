@@ -8,6 +8,7 @@ export interface SelectedExtraEntity {
 export interface CartItemEntity {
   id?: number;
   productId?: string;
+  categoryId?: string;
   name: string;
   price: number;
   size: string;

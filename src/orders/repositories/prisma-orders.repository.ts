@@ -33,7 +33,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       },
       include: {
         payments: true,
-        items: { include: { extras: true }, orderBy: { id: 'asc' } },
+        items: {
+          include: { extras: true, product: { select: { categoryId: true } } },
+          orderBy: { id: 'asc' },
+        },
         linkedTables: { select: { tableId: true } },
       },
       orderBy: { timestamp: 'desc' },
@@ -46,7 +49,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     const orders = await this.prisma.order.findMany({
       include: {
         payments: true,
-        items: { include: { extras: true }, orderBy: { id: 'asc' } },
+        items: {
+          include: { extras: true, product: { select: { categoryId: true } } },
+          orderBy: { id: 'asc' },
+        },
         linkedTables: { select: { tableId: true } },
       },
       orderBy: { timestamp: 'desc' },
@@ -54,14 +60,20 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     return orders.map((o) => this.mapOrder(o));
   }
 
-  async listByDateRange(startDate: Date, endDate: Date): Promise<OrderEntity[]> {
+  async listByDateRange(
+    startDate: Date,
+    endDate: Date,
+  ): Promise<OrderEntity[]> {
     const list = await this.prisma.order.findMany({
       where: {
         createdAt: { gte: startDate, lte: endDate },
       },
       include: {
         payments: true,
-        items: { include: { extras: true }, orderBy: { id: 'asc' } },
+        items: {
+          include: { extras: true, product: { select: { categoryId: true } } },
+          orderBy: { id: 'asc' },
+        },
         linkedTables: { select: { tableId: true } },
       },
       orderBy: { timestamp: 'desc' },
@@ -69,7 +81,11 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     return list.map((o) => this.mapOrder(o));
   }
 
-  async listByDriverAndDate(driverId: string, startDate: Date, endDate: Date): Promise<OrderEntity[]> {
+  async listByDriverAndDate(
+    driverId: string,
+    startDate: Date,
+    endDate: Date,
+  ): Promise<OrderEntity[]> {
     const list = await this.prisma.order.findMany({
       where: {
         driverId,
@@ -78,7 +94,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       },
       include: {
         payments: true,
-        items: { include: { extras: true }, orderBy: { id: 'asc' } },
+        items: {
+          include: { extras: true, product: { select: { categoryId: true } } },
+          orderBy: { id: 'asc' },
+        },
         linkedTables: { select: { tableId: true } },
       },
       orderBy: { timestamp: 'desc' },
@@ -91,7 +110,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       where: { id },
       include: {
         payments: true,
-        items: { include: { extras: true }, orderBy: { id: 'asc' } },
+        items: {
+          include: { extras: true, product: { select: { categoryId: true } } },
+          orderBy: { id: 'asc' },
+        },
         linkedTables: { select: { tableId: true } },
       },
     });
@@ -113,7 +135,14 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     customerAddress?: string;
     orderType?: import('../dto/order-type.dto').OrderTypeDto;
     cuponId?: number;
-    payments?: { method: import('../dto/payment-method.dto').PaymentMethodDto; amount: number; cashierId?: string; cashierSnapshotName?: string }[];
+    discountId?: number;
+    happyHourId?: number;
+    payments?: {
+      method: import('../dto/payment-method.dto').PaymentMethodDto;
+      amount: number;
+      cashierId?: string;
+      cashierSnapshotName?: string;
+    }[];
     cashierId?: string;
     cashierSnapshotName?: string;
     driverId?: string;
@@ -122,7 +151,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     customerTendered?: number;
     deliveryChange?: number;
   }): Promise<OrderEntity> {
-    const uniqueLinkedTables = Array.from(new Set((data.linkedTables ?? []).filter(Boolean)));
+    const uniqueLinkedTables = Array.from(
+      new Set((data.linkedTables ?? []).filter(Boolean)),
+    );
 
     const created = await this.prisma.order.create({
       data: {
@@ -140,12 +171,19 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         customerAddress: data.customerAddress ?? null,
         orderType: data.orderType ? toDbOrderType(data.orderType) : undefined,
         cuponId: data.cuponId ?? null,
+        discountId: data.discountId ?? null,
+        happyHourId: data.happyHourId ?? null,
         customerTendered: data.customerTendered ?? null,
         deliveryChange: data.deliveryChange ?? null,
         ...(data.payments?.length
           ? {
-            payments: {
-                create: data.payments.map((p) => ({ method: toDbPaymentMethod(p.method), amount: p.amount, cashierId: p.cashierId, cashierSnapshotName: p.cashierSnapshotName })),
+              payments: {
+                create: data.payments.map((p) => ({
+                  method: toDbPaymentMethod(p.method),
+                  amount: p.amount,
+                  cashierId: p.cashierId,
+                  cashierSnapshotName: p.cashierSnapshotName,
+                })),
               },
             }
           : {}),
@@ -170,9 +208,12 @@ export class PrismaOrdersRepository implements IOrdersRepository {
             quantity: i.quantity,
             note: i.note,
             giftQuantity: i.giftQuantity ?? 0,
+            giftReason: i.giftReason,
             isSentToKitchen: i.isSentToKitchen ?? false,
             sentAt: i.sentAt ? new Date(i.sentAt) : undefined,
-            kitchenStatus: i.kitchenStatus ? toDbKitchenStatus(i.kitchenStatus) : undefined,
+            kitchenStatus: i.kitchenStatus
+              ? toDbKitchenStatus(i.kitchenStatus)
+              : undefined,
             kitchenId: i.kitchenId,
             extras: {
               create: i.extras.map((e) => ({ name: e.name, price: e.price })),
@@ -182,7 +223,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       },
       include: {
         payments: true,
-        items: { include: { extras: true }, orderBy: { id: 'asc' } },
+        items: {
+          include: { extras: true, product: { select: { categoryId: true } } },
+          orderBy: { id: 'asc' },
+        },
         linkedTables: { select: { tableId: true } },
       },
     });
@@ -209,7 +253,16 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       customerAddress?: string | null;
       orderType?: import('../dto/order-type.dto').OrderTypeDto | null;
       cuponId?: number | null;
-      payments?: { method: import('../dto/payment-method.dto').PaymentMethodDto; amount: number; cashierId?: string; cashierSnapshotName?: string }[] | null;
+      discountId?: number | null;
+      happyHourId?: number | null;
+      payments?:
+        | {
+            method: import('../dto/payment-method.dto').PaymentMethodDto;
+            amount: number;
+            cashierId?: string;
+            cashierSnapshotName?: string;
+          }[]
+        | null;
       cashierId?: string | null;
       cashierSnapshotName?: string | null;
       driverId?: string | null;
@@ -224,7 +277,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
   ): Promise<OrderEntity> {
     const updateData: Prisma.OrderUpdateInput = {
       subTotal: data.subTotal === undefined ? undefined : data.subTotal,
-      discountAmount: data.discountAmount === undefined ? undefined : data.discountAmount,
+      discountAmount:
+        data.discountAmount === undefined ? undefined : data.discountAmount,
       taxAmount: data.taxAmount === undefined ? undefined : data.taxAmount,
       total: data.total,
       status: data.status ? toDbOrderStatus(data.status) : undefined,
@@ -240,8 +294,12 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           : data.customerId
             ? { connect: { id: data.customerId } }
             : { disconnect: true },
-      customerSnapshotName: data.customerSnapshotName === undefined ? undefined : data.customerSnapshotName,
-      customerAddress: data.customerAddress === undefined ? undefined : data.customerAddress,
+      customerSnapshotName:
+        data.customerSnapshotName === undefined
+          ? undefined
+          : data.customerSnapshotName,
+      customerAddress:
+        data.customerAddress === undefined ? undefined : data.customerAddress,
       orderType:
         data.orderType === undefined
           ? undefined
@@ -253,6 +311,18 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           ? undefined
           : data.cuponId
             ? { connect: { id: data.cuponId } }
+            : { disconnect: true },
+      discount:
+        data.discountId === undefined
+          ? undefined
+          : data.discountId
+            ? { connect: { id: data.discountId } }
+            : { disconnect: true },
+      happyHour:
+        data.happyHourId === undefined
+          ? undefined
+          : data.happyHourId
+            ? { connect: { id: data.happyHourId } }
             : { disconnect: true },
       cashier:
         data.cashierId === undefined
@@ -266,29 +336,43 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           : data.driverId
             ? { connect: { id: data.driverId } }
             : { disconnect: true },
-      cashierSnapshotName: data.cashierSnapshotName === undefined ? undefined : data.cashierSnapshotName,
-      cancelReason: data.cancelReason === undefined ? undefined : data.cancelReason,
+      cashierSnapshotName:
+        data.cashierSnapshotName === undefined
+          ? undefined
+          : data.cashierSnapshotName,
+      cancelReason:
+        data.cancelReason === undefined ? undefined : data.cancelReason,
       cancelledBy:
         data.cancelledById === undefined
           ? undefined
           : data.cancelledById
             ? { connect: { id: data.cancelledById } }
             : { disconnect: true },
-      cancelledAt: data.cancelledAt === undefined ? undefined : data.cancelledAt,
+      cancelledAt:
+        data.cancelledAt === undefined ? undefined : data.cancelledAt,
       isSentToKitchen: data.isSentToKitchen,
-      customerTendered: data.customerTendered === undefined ? undefined : data.customerTendered,
-      deliveryChange: data.deliveryChange === undefined ? undefined : data.deliveryChange,
+      customerTendered:
+        data.customerTendered === undefined ? undefined : data.customerTendered,
+      deliveryChange:
+        data.deliveryChange === undefined ? undefined : data.deliveryChange,
     };
 
     if (data.payments) {
       updateData.payments = {
         deleteMany: {},
-        create: data.payments.map((p) => ({ method: toDbPaymentMethod(p.method), amount: p.amount, cashierId: p.cashierId, cashierSnapshotName: p.cashierSnapshotName })),
+        create: data.payments.map((p) => ({
+          method: toDbPaymentMethod(p.method),
+          amount: p.amount,
+          cashierId: p.cashierId,
+          cashierSnapshotName: p.cashierSnapshotName,
+        })),
       };
     }
 
     if (data.linkedTables) {
-      const uniqueLinkedTables = Array.from(new Set(data.linkedTables.filter(Boolean)));
+      const uniqueLinkedTables = Array.from(
+        new Set(data.linkedTables.filter(Boolean)),
+      );
       updateData.linkedTables = {
         deleteMany: {},
         create: uniqueLinkedTables.map((tableId) => ({ tableId })),
@@ -306,9 +390,12 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           quantity: i.quantity,
           note: i.note,
           giftQuantity: i.giftQuantity ?? 0,
+          giftReason: i.giftReason,
           isSentToKitchen: i.isSentToKitchen ?? false,
           sentAt: i.sentAt ? new Date(i.sentAt) : undefined,
-          kitchenStatus: i.kitchenStatus ? toDbKitchenStatus(i.kitchenStatus) : undefined,
+          kitchenStatus: i.kitchenStatus
+            ? toDbKitchenStatus(i.kitchenStatus)
+            : undefined,
           kitchenId: i.kitchenId,
           extras: {
             create: i.extras.map((e) => ({ name: e.name, price: e.price })),
@@ -322,7 +409,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       data: updateData,
       include: {
         payments: true,
-        items: { include: { extras: true }, orderBy: { id: 'asc' } },
+        items: {
+          include: { extras: true, product: { select: { categoryId: true } } },
+          orderBy: { id: 'asc' },
+        },
         linkedTables: { select: { tableId: true } },
       },
     });
@@ -380,6 +470,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     orderType: import('@prisma/client').OrderType | null;
     driverId: string | null;
     cuponId: number | null;
+    discountId: number | null;
+    happyHourId: number | null;
     cashierSnapshotName: string | null;
     cancelReason: string | null;
     cancelledById: string | null;
@@ -397,16 +489,19 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     }>;
     items: Array<{
       id: number;
+      productId: string | null;
       name: string;
       price: Prisma.Decimal;
       size: string;
       quantity: number;
       note: string | null;
       giftQuantity: number;
+      giftReason: string | null;
       isSentToKitchen: boolean;
       sentAt: Date | null;
       kitchenStatus: KitchenStatus | null;
       kitchenId: string | null;
+      product: { categoryId: string } | null;
       extras: Array<{ id: number; name: string; price: Prisma.Decimal }>;
     }>;
     customerTendered: Prisma.Decimal | null;
@@ -425,20 +520,30 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       })),
       items: o.items.map((i) => ({
         id: i.id,
+        productId: i.productId ?? undefined,
+        categoryId: i.product?.categoryId,
         name: i.name,
         price: i.price.toNumber(),
         size: i.size,
         quantity: i.quantity,
-        extras: i.extras.map((e) => ({ name: e.name, price: e.price.toNumber() })),
+        extras: i.extras.map((e) => ({
+          name: e.name,
+          price: e.price.toNumber(),
+        })),
         note: i.note ?? undefined,
         giftQuantity: i.giftQuantity,
+        giftReason: i.giftReason ?? undefined,
         isSentToKitchen: i.isSentToKitchen,
         sentAt: i.sentAt ? i.sentAt.getTime() : undefined,
-        kitchenStatus: i.kitchenStatus ? fromDbKitchenStatus(i.kitchenStatus) : undefined,
+        kitchenStatus: i.kitchenStatus
+          ? fromDbKitchenStatus(i.kitchenStatus)
+          : undefined,
         kitchenId: i.kitchenId ?? undefined,
       })),
       subTotal: o.subTotal ? o.subTotal.toNumber() : undefined,
-      discountAmount: o.discountAmount ? o.discountAmount.toNumber() : undefined,
+      discountAmount: o.discountAmount
+        ? o.discountAmount.toNumber()
+        : undefined,
       taxAmount: o.taxAmount ? o.taxAmount.toNumber() : undefined,
       total: o.total.toNumber(),
       status: fromDbOrderStatus(o.status),
@@ -448,14 +553,20 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       orderType: o.orderType ? fromDbOrderType(o.orderType) : undefined,
       driverId: o.driverId ?? undefined,
       cuponId: o.cuponId ?? undefined,
+      discountId: o.discountId ?? undefined,
+      happyHourId: o.happyHourId ?? undefined,
       cashierSnapshotName: o.cashierSnapshotName ?? undefined,
       cancelReason: o.cancelReason ?? undefined,
       cancelledById: o.cancelledById ?? undefined,
       cancelledAt: o.cancelledAt ?? undefined,
       isSentToKitchen: o.isSentToKitchen,
       linkedTables: o.linkedTables.map((t) => t.tableId),
-      customerTendered: o.customerTendered ? o.customerTendered.toNumber() : undefined,
-      deliveryChange: o.deliveryChange ? o.deliveryChange.toNumber() : undefined,
+      customerTendered: o.customerTendered
+        ? o.customerTendered.toNumber()
+        : undefined,
+      deliveryChange: o.deliveryChange
+        ? o.deliveryChange.toNumber()
+        : undefined,
       invoice:
         o.invoiceCorrelativoId &&
         o.invoiceDocumentType &&

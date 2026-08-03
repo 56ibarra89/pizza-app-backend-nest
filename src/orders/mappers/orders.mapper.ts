@@ -5,6 +5,8 @@ export function toOrderResponseDto(order: OrderEntity) {
     id: order.id,
     items: order.items.map((i) => ({
       id: i.id,
+      productId: i.productId,
+      categoryId: i.categoryId,
       name: i.name,
       price: i.price,
       size: i.size,
@@ -12,6 +14,7 @@ export function toOrderResponseDto(order: OrderEntity) {
       extras: i.extras.map((e) => ({ name: e.name, price: e.price })),
       note: i.note,
       giftQuantity: i.giftQuantity,
+      giftReason: i.giftReason,
       isSentToKitchen: i.isSentToKitchen,
       sentAt: i.sentAt,
       kitchenStatus: i.kitchenStatus,
@@ -30,6 +33,15 @@ export function toOrderResponseDto(order: OrderEntity) {
     orderType: order.orderType,
     customerAddress: order.customerAddress,
     cuponId: order.cuponId,
+    discountId: order.discountId,
+    happyHourId: order.happyHourId,
+    promotionSource: order.cuponId
+      ? 'coupon'
+      : order.discountId
+        ? 'discount'
+        : order.happyHourId
+          ? 'happy-hour'
+          : 'none',
     payments: order.payments,
     cashierSnapshotName: order.cashierSnapshotName,
     cancelReason: order.cancelReason,

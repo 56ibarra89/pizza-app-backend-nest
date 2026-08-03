@@ -20,12 +20,13 @@ import {
   toDbPaymentMethod,
 } from '../mappers/status.mapper';
 import type { OrderTotals } from '../types/order-totals';
+import type { ResolvedOrderPromotion } from '../types/order-promotion';
 
 interface IssueInvoiceParams {
   orderId: string;
   dto: FinalizeOrderDto;
   totals: OrderTotals;
-  cuponId?: number;
+  promotion: ResolvedOrderPromotion;
 }
 
 interface DgiConfig {
@@ -75,8 +76,14 @@ function readDgiConfig(value: Prisma.JsonValue | null): DgiConfig {
 export class InvoiceIssuingService {
   async issue(
     tx: Prisma.TransactionClient,
-    { orderId, dto, totals, cuponId }: IssueInvoiceParams,
+    { orderId, dto, totals, promotion }: IssueInvoiceParams,
   ): Promise<void> {
+    const cuponId =
+      promotion.source === 'coupon' ? promotion.cuponId : undefined;
+    const discountId =
+      promotion.source === 'discount' ? promotion.discountId : undefined;
+    const happyHourId =
+      promotion.source === 'happy-hour' ? promotion.happyHourId : undefined;
     const lockedOrders = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT id
       FROM "Order"
@@ -127,6 +134,8 @@ export class InvoiceIssuingService {
           discountAmount: totals.discountAmount,
           taxAmount: totals.taxAmount,
           cuponId,
+          discountId,
+          happyHourId,
         },
       });
       return;
@@ -254,6 +263,8 @@ export class InvoiceIssuingService {
         discountAmount: totals.discountAmount,
         taxAmount: totals.taxAmount,
         cuponId,
+        discountId,
+        happyHourId,
         shiftId: shiftId ?? null,
         invoiceCorrelativoId: correlativo.id,
         invoiceDocumentType: DocumentType.FACTURA,
@@ -280,7 +291,11 @@ export class InvoiceIssuingService {
           finalTotal: totals.total,
           taxAmount: totals.taxAmount,
           cuponId,
-          promotionCode: dto.promotionCode,
+          discountId,
+          happyHourId,
+          promotionSource: promotion.source,
+          promotionCode:
+            promotion.source === 'coupon' ? promotion.promotionCode : undefined,
           certificateSerials: dto.certificateSerials,
         }),
         level: LogLevel.INFO,

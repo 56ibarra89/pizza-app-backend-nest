@@ -11,7 +11,11 @@ export interface IOrdersRepository {
   listTodayOrActive(now: Date): Promise<OrderEntity[]>;
   listAll(): Promise<OrderEntity[]>;
   listByDateRange(startDate: Date, endDate: Date): Promise<OrderEntity[]>;
-  listByDriverAndDate(driverId: string, startDate: Date, endDate: Date): Promise<OrderEntity[]>;
+  listByDriverAndDate(
+    driverId: string,
+    startDate: Date,
+    endDate: Date,
+  ): Promise<OrderEntity[]>;
   findById(id: string): Promise<OrderEntity | null>;
 
   create(data: {
@@ -29,6 +33,8 @@ export interface IOrdersRepository {
     customerAddress?: string;
     orderType?: OrderTypeDto;
     cuponId?: number;
+    discountId?: number;
+    happyHourId?: number;
     payments?: { method: PaymentMethodDto; amount: number }[];
     cashierId?: string;
     cashierSnapshotName?: string;
@@ -41,31 +47,36 @@ export interface IOrdersRepository {
 
   delete(id: string): Promise<void>;
 
-  update(id: string, data: {
-    items?: CartItemEntity[];
-    subTotal?: number | null;
-    discountAmount?: number | null;
-    taxAmount?: number | null;
-    total?: number;
-    status?: OrderStatusDto;
-    shiftId?: string | null;
-    customerId?: string | null;
-    customerSnapshotName?: string | null;
-    customerAddress?: string | null;
-    orderType?: OrderTypeDto | null;
-    cuponId?: number | null;
-    payments?: { method: PaymentMethodDto; amount: number }[] | null;
-    cashierId?: string | null;
-    cashierSnapshotName?: string | null;
-    cancelReason?: string | null;
-    cancelledById?: string | null;
-    cancelledAt?: Date | null;
-    isSentToKitchen?: boolean;
-    linkedTables?: string[];
-    driverId?: string | null;
-    customerTendered?: number | null;
-    deliveryChange?: number | null;
-  }): Promise<OrderEntity>;
+  update(
+    id: string,
+    data: {
+      items?: CartItemEntity[];
+      subTotal?: number | null;
+      discountAmount?: number | null;
+      taxAmount?: number | null;
+      total?: number;
+      status?: OrderStatusDto;
+      shiftId?: string | null;
+      customerId?: string | null;
+      customerSnapshotName?: string | null;
+      customerAddress?: string | null;
+      orderType?: OrderTypeDto | null;
+      cuponId?: number | null;
+      discountId?: number | null;
+      happyHourId?: number | null;
+      payments?: { method: PaymentMethodDto; amount: number }[] | null;
+      cashierId?: string | null;
+      cashierSnapshotName?: string | null;
+      cancelReason?: string | null;
+      cancelledById?: string | null;
+      cancelledAt?: Date | null;
+      isSentToKitchen?: boolean;
+      linkedTables?: string[];
+      driverId?: string | null;
+      customerTendered?: number | null;
+      deliveryChange?: number | null;
+    },
+  ): Promise<OrderEntity>;
 
   updateItemsKitchenStatus(params: {
     orderId: string;
