@@ -16,6 +16,7 @@ import { OrderReferenceResolverService } from './services/order-reference-resolv
 import { OrderTableAssignmentsService } from './services/order-table-assignments.service';
 import { OrderCancellationAuthorizationService } from './services/order-cancellation-authorization.service';
 import { UsersModule } from '../users/users.module';
+import { OrdersGateway } from './gateways/orders.gateway';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { UsersModule } from '../users/users.module';
     OrderTableAssignmentsService,
     OrderCancellationAuthorizationService,
     OrderNotificationsListener,
+    OrdersGateway,
     {
       provide: ORDERS_REPOSITORY,
       useClass: PrismaOrdersRepository,

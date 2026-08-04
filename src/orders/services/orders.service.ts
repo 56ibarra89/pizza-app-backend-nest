@@ -27,6 +27,11 @@ import { HiddenKitchenTicketsService } from './hidden-kitchen-tickets.service';
 import { OrderReferenceResolverService } from './order-reference-resolver.service';
 import { OrderTableAssignmentsService } from './order-table-assignments.service';
 import { OrderCancellationAuthorizationService } from './order-cancellation-authorization.service';
+import {
+  ORDER_SYNCHRONIZED_EVENT,
+  type OrderSynchronizationMutation,
+} from '../events/order-synchronized.event';
+import type { OrderEntity } from '../entities/order.entity';
 
 @Injectable()
 export class OrdersService {
@@ -124,7 +129,7 @@ export class OrdersService {
 
     if (status === OrderStatusDto.paid) {
       try {
-        return await this.finalize(
+        const finalized = await this.finalize(
           created.id,
           {
             payments: dto.payments,
@@ -150,13 +155,17 @@ export class OrdersService {
             certificateSerials: dto.certificateSerials,
           },
           'system',
+          false,
         );
+        this.publishOrder(finalized, 'created');
+        return finalized;
       } catch (error) {
         await this.repo.delete(created.id);
         throw error;
       }
     }
 
+    this.publishOrder(created, 'created');
     return created;
   }
 
@@ -231,7 +240,11 @@ export class OrdersService {
           ? existing.status
           : derived;
       this.logger.debug(`Estado global derivado: ${nextGlobalStatus}`);
-      return this.repo.update(id, { status: nextGlobalStatus });
+      const updated = await this.repo.update(id, {
+        status: nextGlobalStatus,
+      });
+      this.publishOrder(updated, 'updated');
+      return updated;
     }
 
     if (isFinal) {
@@ -318,13 +331,17 @@ export class OrdersService {
       });
     }
 
-    return this.repo.update(id, updateData);
+    const updated = await this.repo.update(id, updateData);
+    this.publishOrder(updated, 'updated');
+    return updated;
   }
 
   async updateTables(id: string, tableIds: string[]) {
     await this.tableAssignments.replace(id, tableIds);
 
-    return this.getById(id);
+    const updated = await this.getById(id);
+    this.publishOrder(updated, 'updated');
+    return updated;
   }
 
   async updateItems(id: string, dto: UpdateOrderItemsDto) {
@@ -375,7 +392,7 @@ export class OrdersService {
     });
     const totals = await this.pricing.calculate(mappedItems, promotion);
 
-    return this.repo.update(id, {
+    const updated = await this.repo.update(id, {
       items: mappedItems,
       total: totals.total,
       subTotal: totals.subTotal,
@@ -388,18 +405,35 @@ export class OrdersService {
       status: nextStatus,
       isSentToKitchen: dto.isSentToKitchen,
     });
+    this.publishOrder(updated, 'updated');
+    return updated;
   }
 
   async finalize(
     id: string,
     dto: FinalizeOrderDto,
     user?: AuthenticatedUser | string,
+    publishEvent = true,
   ) {
     const existing = await this.getById(id);
     if (existing.status === OrderStatusDto.paid) return existing;
 
     await this.finalization.finalize(existing, dto, user);
-    return this.getById(id);
+    const finalized = await this.getById(id);
+    if (publishEvent) {
+      this.publishOrder(finalized, 'updated');
+    }
+    return finalized;
+  }
+
+  private publishOrder(
+    order: OrderEntity,
+    mutation: OrderSynchronizationMutation,
+  ): void {
+    this.eventEmitter.emit(ORDER_SYNCHRONIZED_EVENT, {
+      mutation,
+      order,
+    });
   }
 
   private deriveGlobalStatus(items: CartItemEntity[]): OrderStatusDto {
