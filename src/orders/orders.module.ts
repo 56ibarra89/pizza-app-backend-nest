@@ -17,6 +17,7 @@ import { OrderTableAssignmentsService } from './services/order-table-assignments
 import { OrderCancellationAuthorizationService } from './services/order-cancellation-authorization.service';
 import { UsersModule } from '../users/users.module';
 import { OrdersGateway } from './gateways/orders.gateway';
+import { KitchensModule } from '../kitchens/kitchens.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { OrdersGateway } from './gateways/orders.gateway';
     PromotionsModule,
     MailerModule,
     UsersModule,
+    KitchensModule,
   ],
   controllers: [OrdersController],
   providers: [

@@ -16,8 +16,12 @@ import {
   USERS_REPOSITORY,
   type IUsersRepository,
 } from '../../users/interfaces/users.repository';
+import { UserRoleDto } from '../../users/dto/user-role.dto';
+import { KitchensService } from '../../kitchens/kitchens.service';
+import { requiresKitchenPreparation } from '../validators/order-item-kind';
 
-const AUTHENTICATED_CLIENTS_ROOM = 'authenticated-orders-clients';
+const FULL_ORDERS_ROOM = 'authenticated-full-orders-clients';
+const kitchenRoom = (kitchenId: string) => `authenticated-kitchen:${kitchenId}`;
 
 const configuredOrigins = (process.env.CORS_ORIGINS ?? '')
   .split(',')
@@ -48,7 +52,7 @@ interface OrderSocketData {
   user?: {
     id: string;
     username: string;
-    role: string;
+    role: UserRoleDto;
   };
 }
 
@@ -80,6 +84,7 @@ export class OrdersGateway implements OnGatewayInit {
 
   constructor(
     private readonly jwtService: JwtService,
+    private readonly kitchens: KitchensService,
     @Inject(USERS_REPOSITORY)
     private readonly usersRepository: IUsersRepository,
   ) {}
@@ -88,7 +93,7 @@ export class OrdersGateway implements OnGatewayInit {
     server.use((socket, next) => {
       void this.authenticate(socket)
         .then(async () => {
-          await socket.join(AUTHENTICATED_CLIENTS_ROOM);
+          await this.joinAuthorizedRoom(socket);
           next();
         })
         .catch(() => {
@@ -99,11 +104,52 @@ export class OrdersGateway implements OnGatewayInit {
 
   @OnEvent(ORDER_SYNCHRONIZED_EVENT)
   handleOrderSynchronized(event: OrderSynchronizedEvent): void {
-    this.server.to(AUTHENTICATED_CLIENTS_ROOM).emit('orders:changed', {
+    const occurredAt = new Date().toISOString();
+    this.server.to(FULL_ORDERS_ROOM).emit('orders:changed', {
       mutation: event.mutation,
       order: toOrderResponseDto(event.order),
-      occurredAt: new Date().toISOString(),
+      occurredAt,
     });
+
+    const kitchenIds = new Set(
+      event.order.items.flatMap((item) =>
+        requiresKitchenPreparation(item) && item.kitchenId
+          ? [item.kitchenId]
+          : [],
+      ),
+    );
+
+    kitchenIds.forEach((kitchenId) => {
+      const scopedOrder = {
+        ...event.order,
+        items: event.order.items.filter(
+          (item) =>
+            !requiresKitchenPreparation(item) || item.kitchenId === kitchenId,
+        ),
+      };
+      this.server.to(kitchenRoom(kitchenId)).emit('orders:changed', {
+        mutation: event.mutation,
+        order: toOrderResponseDto(scopedOrder),
+        occurredAt,
+      });
+    });
+  }
+
+  private async joinAuthorizedRoom(socket: OrdersSocket): Promise<void> {
+    const user = socket.data.user;
+    if (!user) throw new Error('Usuario no autenticado');
+
+    if (user.role !== UserRoleDto.cocinero) {
+      await socket.join(FULL_ORDERS_ROOM);
+      return;
+    }
+
+    const assignedKitchenId = await this.kitchens.getAssignedKitchenIdForDate(
+      user.id,
+    );
+    if (assignedKitchenId) {
+      await socket.join(kitchenRoom(assignedKitchenId));
+    }
   }
 
   private async authenticate(socket: OrdersSocket): Promise<void> {

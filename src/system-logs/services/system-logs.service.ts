@@ -5,6 +5,7 @@ import {
 } from '../interfaces/system-logs.repository';
 import type { CreateSystemLogDto } from '../dto/create-system-log.dto';
 import type { GetSystemLogsQueryDto } from '../dto/get-system-logs-query.dto';
+import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 
 @Injectable()
 export class SystemLogsService {
@@ -13,11 +14,11 @@ export class SystemLogsService {
     private readonly repo: ISystemLogsRepository,
   ) {}
 
-  create(dto: CreateSystemLogDto) {
+  create(dto: CreateSystemLogDto, user: AuthenticatedUser) {
     return this.repo.create({
-      userId: dto.userId,
-      user: dto.user,
-      role: dto.role,
+      userId: user.id,
+      user: user.username,
+      role: user.role,
       action: dto.action,
       details: dto.details,
       level: dto.level,

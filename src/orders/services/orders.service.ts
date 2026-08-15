@@ -32,6 +32,8 @@ import {
   type OrderSynchronizationMutation,
 } from '../events/order-synchronized.event';
 import type { OrderEntity } from '../entities/order.entity';
+import { requiresKitchenPreparation } from '../validators/order-item-kind';
+import { KitchensService } from '../../kitchens/kitchens.service';
 
 @Injectable()
 export class OrdersService {
@@ -46,6 +48,7 @@ export class OrdersService {
     private readonly referenceResolver: OrderReferenceResolverService,
     private readonly tableAssignments: OrderTableAssignmentsService,
     private readonly cancellationAuthorization: OrderCancellationAuthorizationService,
+    private readonly kitchens: KitchensService,
   ) {}
 
   listTodayOrActive(now = new Date()) {
@@ -91,10 +94,21 @@ export class OrdersService {
 
     const { customerId, cashierId, shiftId } =
       await this.referenceResolver.resolve(dto);
-    const items = dto.items.map((item) => ({
-      ...item,
-      giftQuantity: item.giftQuantity ?? 0,
-    }));
+    const items = dto.items.map((item) => {
+      const mappedItem = {
+        ...item,
+        giftQuantity: item.giftQuantity ?? 0,
+      };
+
+      return requiresKitchenPreparation(mappedItem)
+        ? mappedItem
+        : {
+            ...mappedItem,
+            isSentToKitchen: false,
+            sentAt: undefined,
+            kitchenStatus: undefined,
+          };
+    });
     const promotion = await this.pricing.resolvePromotion(dto);
     const totals = await this.pricing.calculate(items, promotion);
 
@@ -187,6 +201,21 @@ export class OrdersService {
       ) {
         throw new ForbiddenException(
           'Los cocineros no tienen permiso para cobrar o cancelar órdenes.',
+        );
+      }
+
+      if (!dto.sentAt || !dto.kitchenId) {
+        throw new ForbiddenException(
+          'El cocinero debe actualizar un producto de su cocina asignada.',
+        );
+      }
+
+      const assignedKitchenId = await this.kitchens.getAssignedKitchenIdForDate(
+        user.id,
+      );
+      if (assignedKitchenId !== dto.kitchenId) {
+        throw new ForbiddenException(
+          'No tienes acceso a esta cocina en el día de hoy.',
         );
       }
     }
@@ -283,7 +312,11 @@ export class OrdersService {
     );
 
     const items = updateItemsKitchen
-      ? existing.items.map((i) => ({ ...i, kitchenStatus: updateItemsKitchen }))
+      ? existing.items.map((item) =>
+          requiresKitchenPreparation(item)
+            ? { ...item, kitchenStatus: updateItemsKitchen }
+            : item,
+        )
       : existing.items;
 
     const updateData: Parameters<IOrdersRepository['update']>[1] = {
@@ -350,10 +383,21 @@ export class OrdersService {
       existing.status === OrderStatusDto.paid ||
       existing.status === OrderStatusDto.cancelled;
 
-    const mappedItems: CartItemEntity[] = dto.items.map((item) => ({
-      ...item,
-      giftQuantity: item.giftQuantity ?? 0,
-    }));
+    const mappedItems: CartItemEntity[] = dto.items.map((item) => {
+      const mappedItem: CartItemEntity = {
+        ...item,
+        giftQuantity: item.giftQuantity ?? 0,
+      };
+
+      return requiresKitchenPreparation(mappedItem)
+        ? mappedItem
+        : {
+            ...mappedItem,
+            isSentToKitchen: false,
+            sentAt: undefined,
+            kitchenStatus: undefined,
+          };
+    });
     const nextStatus = isFinal
       ? existing.status
       : this.deriveGlobalStatus(mappedItems);
@@ -362,7 +406,10 @@ export class OrdersService {
     if (!isFinal) {
       for (let i = 0; i < mappedItems.length; i++) {
         const item = mappedItems[i];
-        if (item.kitchenStatus === KitchenStatusDto.delivered) {
+        if (
+          requiresKitchenPreparation(item) &&
+          item.kitchenStatus === KitchenStatusDto.delivered
+        ) {
           const existingItem = existing.items[i];
           if (
             existingItem &&
@@ -437,7 +484,9 @@ export class OrdersService {
   }
 
   private deriveGlobalStatus(items: CartItemEntity[]): OrderStatusDto {
-    const sentItems = items.filter((i) => i.isSentToKitchen);
+    const sentItems = items.filter(
+      (item) => requiresKitchenPreparation(item) && item.isSentToKitchen,
+    );
 
     if (sentItems.length === 0) {
       // If nothing is sent to kitchen, the status depends on whether there are items at all.
