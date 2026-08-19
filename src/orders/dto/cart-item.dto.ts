@@ -60,7 +60,7 @@ export class CartItemDto {
 
   @IsOptional()
   @IsNumber()
-  sentAt?: number; // epoch ms
+  sentAt?: number;
 
   @IsOptional()
   @IsString()
@@ -70,3 +70,4 @@ export class CartItemDto {
   @IsEnum(KitchenStatusDto)
   kitchenStatus?: KitchenStatusDto;
 }
+

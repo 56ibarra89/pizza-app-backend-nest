@@ -124,7 +124,7 @@ export class UsersService {
       (await this.repo.findByEmail(idLower));
 
     if (!user || !user.isActive) return { success: false };
-    
+
     this.lockoutService.assertCanAuthenticate(user);
 
     if (!user.passwordHash) return { success: false };
@@ -143,16 +143,9 @@ export class UsersService {
   async loginWithPin(pin: string): Promise<{ username: string; role: UserRoleDto; firstName: string; lastName: string; access_token: string; themePreference: string } | null> {
     const user = await this.repo.findByPin(pin);
     if (!user || !user.isActive) return null;
-    
+
     this.lockoutService.assertCanAuthenticate(user);
 
-    // Si llegó hasta aquí con findByPin, el PIN es correcto (ya que pin es único y se usó para buscarlo).
-    // NOTA: Si hubiera una manera de buscar el usuario sin el PIN (ej: por usuario) y luego validar el PIN, 
-    // ahí registraríamos el intento fallido. Pero como el POS manda solo el PIN y no sabemos QUIÉN es hasta 
-    // que el PIN coincide, si no coincide no podemos sumar intento a nadie. 
-    // Para resolver esto asumiendo el flujo de "login by pin" del cajero: 
-    // El frontend ya hace lockout temporal.
-    
     await this.repo.update(user.id, this.lockoutService.createSuccessfulAttemptUpdate());
     const access_token = this.jwtService.sign({ sub: user.id, tokenVersion: user.tokenVersion });
     return { username: user.username, role: user.role, firstName: user.firstName, lastName: user.lastName, access_token, themePreference: user.themePreference };
@@ -182,7 +175,6 @@ export class UsersService {
       throw new UnauthorizedException('El administrador no tiene un correo configurado.');
     }
 
-    // Generar token JWT seguro con el ID del usuario
     const token = this.jwtService.sign({ sub: user.id, tokenVersion: user.tokenVersion });
     const resetLink = `http://localhost:5173/#/reset-password?token=${token}`;
 
@@ -233,7 +225,7 @@ export class UsersService {
   async revokeAllTokens(userId: string) {
     const user = await this.repo.findById(userId);
     if (!user) throw new NotFoundException('Usuario no encontrado');
-    
+
     return await this.repo.update(userId, {
       tokenVersion: user.tokenVersion + 1,
     });

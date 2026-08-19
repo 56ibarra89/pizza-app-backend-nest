@@ -5,8 +5,17 @@ export const SHIFTS_REPOSITORY = Symbol('SHIFTS_REPOSITORY');
 
 export interface IShiftsRepository {
   findActive(): Promise<ShiftEntity | null>;
+  findActiveForCashier(params: {
+    cashierId: string;
+    cashierSnapshotName: string;
+  }): Promise<ShiftEntity | null>;
   findById(id: string): Promise<ShiftEntity | null>;
-  list(params: { limit: number; status?: ShiftStatus; from?: Date; to?: Date }): Promise<ShiftEntity[]>;
+  list(params: {
+    limit: number;
+    status?: ShiftStatus;
+    from?: Date;
+    to?: Date;
+  }): Promise<ShiftEntity[]>;
   open(params: {
     cashierId?: string;
     cashierSnapshotName: string;

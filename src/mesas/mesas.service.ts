@@ -48,7 +48,6 @@ export class MesasService implements OnModuleInit {
     const newFloorIds = floors.map(f => f.id);
     const removedFloors = oldConfig.filter(f => !newFloorIds.includes(f.id));
 
-    // Validar y borrar mesas de plantas eliminadas
     for (const removedFloor of removedFloors) {
       const mesas = await this.prisma.mesa.findMany({ where: { floor: removedFloor.id } });
       for (const t of mesas) {
@@ -65,10 +64,8 @@ export class MesasService implements OnModuleInit {
       }
     }
 
-    // Save to AppConfig
     await this.appConfigService.upsert(FLOORS_CONFIG_KEY, { data: floors });
 
-    // Sync Prisma Mesa table
     for (const floor of floors) {
       const existingMesas = await this.prisma.mesa.findMany({
         where: { floor: floor.id },
@@ -78,7 +75,7 @@ export class MesasService implements OnModuleInit {
       const currentCount = existingMesas.length;
 
       if (floor.tableCount > currentCount) {
-        // Create missing tables
+
         const toCreate: Prisma.MesaCreateManyInput[] = [];
         for (let i = currentCount + 1; i <= floor.tableCount; i++) {
           toCreate.push({
@@ -124,7 +121,7 @@ export class MesasService implements OnModuleInit {
   async updateStatus(id: string, estado: MesaEstado) {
     const mesa = await this.prisma.mesa.findUnique({ where: { id } });
     if (!mesa) throw new BadRequestException(`La mesa ${id} no existe.`);
-    
+
     return this.prisma.mesa.update({
       where: { id },
       data: { estado },
@@ -169,7 +166,7 @@ export class MesasService implements OnModuleInit {
   @Cron(CronExpression.EVERY_MINUTE)
   async handleExpiredReservations() {
     const now = new Date();
-    
+
     // Find reservations where the expiration time has passed and they are still reserved
     const expiredReservations = await this.prisma.mesa.findMany({
       where: {
@@ -188,3 +185,4 @@ export class MesasService implements OnModuleInit {
     }
   }
 }
+

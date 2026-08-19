@@ -622,6 +622,7 @@ model HiddenKitchenTicket {
 enum UserRole {
   ADMIN
   CAJERO
+  CAJERO_PRINCIPAL
   MESERO
   COCINERO
   MOTORIZADO

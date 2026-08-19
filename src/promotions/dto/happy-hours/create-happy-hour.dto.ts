@@ -37,7 +37,6 @@ export class CreateHappyHourDto {
   @IsIn(['2x1', 'porcentaje', 'monto_fijo'] satisfies HappyHourPromotionTypeDto[])
   promotionType!: HappyHourPromotionTypeDto;
 
-  /** Requerido cuando promotionType != '2x1'. Porcentaje máx 100. */
   @ValidateIf((o: CreateHappyHourDto) => o.promotionType !== '2x1')
   @IsNumber({ maxDecimalPlaces: 4 })
   @IsPositive()
@@ -45,19 +44,16 @@ export class CreateHappyHourDto {
   @Max(100)
   promotionValue?: number;
 
-  /** Texto libre descriptivo del ítem cuando promotionType = '2x1'. */
   @ValidateIf((o: CreateHappyHourDto) => o.promotionType === '2x1')
   @IsString()
   @IsNotEmpty()
   appliesTo?: string;
 
-  /** IDs de productos a los que aplica la promoción (N:M). */
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   productIds?: string[];
 
-  /** IDs de categorías a las que aplica la promoción (N:M). */
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
@@ -68,3 +64,4 @@ export class CreateHappyHourDto {
   @IsIn(['Activo', 'Inactivo'] satisfies PromoStatusDto[])
   status?: PromoStatusDto;
 }
+

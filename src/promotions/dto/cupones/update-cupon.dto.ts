@@ -27,7 +27,6 @@ export class UpdateCuponDto {
   @IsInt()
   currentUses?: number;
 
-  /** ISO 8601 date. Enviar null explícito para quitar el vencimiento. */
   @IsOptional()
   @IsISO8601({ strict: true })
   expiresDate?: string | null;
@@ -37,3 +36,4 @@ export class UpdateCuponDto {
   @IsIn(['Activo', 'Inactivo'] satisfies PromoStatusDto[])
   manualStatus?: PromoStatusDto;
 }
+

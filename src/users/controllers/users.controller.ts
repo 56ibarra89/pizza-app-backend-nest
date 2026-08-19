@@ -30,10 +30,11 @@ export class UsersController {
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
     UserRoleDto.mesero,
     UserRoleDto.cocinero,
-    UserRoleDto.motorizado,
     UserRoleDto.despachador,
+    UserRoleDto.motorizado,
   )
   async getAll() {
     const list = await this.users.getAll();
@@ -44,7 +45,9 @@ export class UsersController {
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
     UserRoleDto.despachador,
+    UserRoleDto.motorizado,
   )
   async getDeliveryStats(@Query('date') date: string) {
     if (!date) {
@@ -64,14 +67,16 @@ export class UsersController {
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
     UserRoleDto.mesero,
     UserRoleDto.cocinero,
-    UserRoleDto.motorizado,
     UserRoleDto.despachador,
+    UserRoleDto.motorizado,
   )
   async getByUsername(
     @Param('username') username: string,
-    @Request() req: { user: { role: UserRoleDto; username: string; id: string } },
+    @Request()
+    req: { user: { role: UserRoleDto; username: string; id: string } },
   ) {
     if (req.user.role !== UserRoleDto.admin && req.user.username !== username) {
       throw new ForbiddenException('No tienes permiso para ver este perfil.');
@@ -92,13 +97,13 @@ export class UsersController {
     UserRoleDto.cajero,
     UserRoleDto.mesero,
     UserRoleDto.cocinero,
-    UserRoleDto.motorizado,
     UserRoleDto.despachador,
   )
   async update(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateUserDto,
-    @Request() req: { user: { role: UserRoleDto; username: string; id: string } },
+    @Request()
+    req: { user: { role: UserRoleDto; username: string; id: string } },
   ) {
     if (req.user.role !== UserRoleDto.admin && req.user.id !== id) {
       throw new ForbiddenException(

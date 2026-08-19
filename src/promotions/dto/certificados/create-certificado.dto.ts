@@ -26,7 +26,6 @@ export class CreateCertificadoDto {
   @Min(0)
   amount?: number;
 
-  // Código de canje (si no se envía, se genera)
   @IsOptional()
   @IsString()
   @IsNotEmpty()
@@ -36,3 +35,4 @@ export class CreateCertificadoDto {
   @IsString()
   description?: string;
 }
+

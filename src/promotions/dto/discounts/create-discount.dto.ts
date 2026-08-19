@@ -21,15 +21,14 @@ export class CreateDiscountDto {
   @IsIn(['Activo', 'Inactivo'] satisfies PromoStatusDto[])
   status?: PromoStatusDto;
 
-  /** IDs de productos a los que aplica (N:M). */
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   productIds?: string[];
 
-  /** IDs de categorías a las que aplica (N:M). */
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   categoryIds?: string[];
 }
+

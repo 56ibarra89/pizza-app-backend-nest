@@ -430,8 +430,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     const whereClause: Prisma.OrderItemWhereInput = {
       orderId: params.orderId,
       isSentToKitchen: true,
-      // Se elimina la coincidencia exacta de sentAt para evitar fallos de precisión en BD
-      // y para asegurar que todo el ticket avance correctamente, a menos que se use kitchenId.
+
     };
 
     if (params.kitchenId) {
@@ -588,3 +587,4 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     };
   }
 }
+

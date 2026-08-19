@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Subject } from 'rxjs';
@@ -18,7 +18,6 @@ export interface NotificationEvent {
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  // Subject for SSE
   public readonly notificationStream = new Subject<NotificationEvent>();
 
   constructor(private readonly prisma: PrismaService) {}
@@ -32,6 +31,7 @@ export class NotificationsService {
     customerName?: string;
     orderType?: string;
     targetUsername?: string;
+    driverId?: string;
   }) {
     this.logger.log(`Received order.ready event for order: ${payload.orderId}`);
     const title = payload.isFullOrder ? '¡Orden Lista!' : '¡Producto Listo!';
@@ -93,6 +93,22 @@ export class NotificationsService {
     // Guardamos notificación para DESPACHADOR solo si es delivery
     if (payload.orderType === 'delivery') {
       await this.createNotification(title, message, 'DESPACHADOR');
+
+      if (payload.driverId) {
+        const driver = await this.prisma.user.findUnique({
+          where: { id: payload.driverId },
+          select: { username: true, role: true, isActive: true },
+        });
+
+        if (driver?.isActive && driver.role === UserRole.MOTORIZADO) {
+          await this.createNotification(
+            title,
+            message,
+            UserRole.MOTORIZADO,
+            driver.username,
+          );
+        }
+      }
     }
   }
 
@@ -119,7 +135,11 @@ export class NotificationsService {
     return this.prisma.notification.findMany({
       where: {
         role,
-        OR: [{ targetUsername: null }, { targetUsername: username }],
+        ...(role === UserRole.MOTORIZADO
+          ? { targetUsername: username ?? '' }
+          : {
+              OR: [{ targetUsername: null }, { targetUsername: username }],
+            }),
       },
       orderBy: {
         createdAt: 'desc',
@@ -128,16 +148,45 @@ export class NotificationsService {
     });
   }
 
-  async markAsRead(id: string) {
-    return this.prisma.notification.update({
-      where: { id },
+  async markAsReadForUser(id: string, role: UserRole, username: string) {
+    const result = await this.prisma.notification.updateMany({
+      where: this.buildAudienceFilter(id, role, username),
       data: { isRead: true },
     });
+
+    this.assertNotificationAccess(result.count);
+    return { success: true };
   }
 
-  async deleteNotification(id: string) {
-    return this.prisma.notification.delete({
-      where: { id },
+  async deleteNotificationForUser(
+    id: string,
+    role: UserRole,
+    username: string,
+  ) {
+    const result = await this.prisma.notification.deleteMany({
+      where: this.buildAudienceFilter(id, role, username),
     });
+
+    this.assertNotificationAccess(result.count);
+    return { success: true };
+  }
+
+  private buildAudienceFilter(id: string, role: UserRole, username: string) {
+    return {
+      id,
+      role,
+      ...(role === UserRole.MOTORIZADO
+        ? { targetUsername: username }
+        : {
+            OR: [{ targetUsername: null }, { targetUsername: username }],
+          }),
+    };
+  }
+
+  private assertNotificationAccess(affectedRows: number) {
+    if (affectedRows === 0) {
+      throw new NotFoundException('Notificación no encontrada.');
+    }
   }
 }
+

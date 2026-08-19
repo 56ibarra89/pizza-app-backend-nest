@@ -86,8 +86,8 @@ export class OrdersController {
     UserRoleDto.admin,
     UserRoleDto.cajero,
     UserRoleDto.mesero,
-    UserRoleDto.motorizado,
     UserRoleDto.despachador,
+    UserRoleDto.motorizado,
   )
   async getDriverTodayOrders(
     @Param('driverId') driverId: string,
@@ -149,6 +149,7 @@ export class OrdersController {
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
     UserRoleDto.mesero,
     UserRoleDto.despachador,
   )
@@ -161,9 +162,11 @@ export class OrdersController {
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
     UserRoleDto.mesero,
     UserRoleDto.cocinero,
     UserRoleDto.despachador,
+    UserRoleDto.motorizado,
   )
   async updateStatus(
     @Param('id') id: string,
@@ -178,6 +181,7 @@ export class OrdersController {
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
     UserRoleDto.mesero,
     UserRoleDto.despachador,
   )
@@ -190,6 +194,7 @@ export class OrdersController {
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
     UserRoleDto.mesero,
     UserRoleDto.despachador,
   )
@@ -205,8 +210,10 @@ export class OrdersController {
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
     UserRoleDto.mesero,
     UserRoleDto.despachador,
+    UserRoleDto.motorizado,
   )
   async finalize(
     @Param('id') id: string,

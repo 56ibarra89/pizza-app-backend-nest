@@ -20,6 +20,14 @@ export class SystemLogsController {
   }
 
   @Post()
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.mesero,
+    UserRoleDto.cocinero,
+    UserRoleDto.motorizado,
+    UserRoleDto.despachador,
+  )
   create(
     @Body() dto: CreateSystemLogDto,
     @CurrentUser() user: AuthenticatedUser,

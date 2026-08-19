@@ -20,7 +20,6 @@ export class CreateCuponDto {
   @IsOptional()
   maxUses?: number;
 
-  /** Fecha de vencimiento en formato ISO 8601 (YYYY-MM-DD). Omitir para cupones sin vencimiento. */
   @IsOptional()
   @IsISO8601({ strict: true })
   expiresDate?: string;
@@ -30,3 +29,4 @@ export class CreateCuponDto {
   @IsIn(['Activo', 'Inactivo'] satisfies PromoStatusDto[])
   manualStatus?: PromoStatusDto;
 }
+

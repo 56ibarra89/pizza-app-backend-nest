@@ -24,15 +24,14 @@ export class UpdateDiscountDto {
   @IsIn(['Activo', 'Inactivo'] satisfies PromoStatusDto[])
   status?: PromoStatusDto;
 
-  /** Reemplaza los productos asociados (N:M). */
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   productIds?: string[];
 
-  /** Reemplaza las categorías asociadas (N:M). */
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   categoryIds?: string[];
 }
+

@@ -17,7 +17,6 @@ export class AppConfigController {
     UserRoleDto.cajero,
     UserRoleDto.mesero,
     UserRoleDto.cocinero,
-    UserRoleDto.motorizado,
     UserRoleDto.despachador,
   )
   getById(@Param('id') id: string) {

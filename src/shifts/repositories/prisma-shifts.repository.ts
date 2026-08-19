@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PaymentMethod, Prisma, ShiftStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { IShiftsRepository } from '../interfaces/shifts.repository';
@@ -11,6 +15,26 @@ export class PrismaShiftsRepository implements IShiftsRepository {
   async findActive(): Promise<ShiftEntity | null> {
     const row = await this.prisma.shift.findFirst({
       where: { status: ShiftStatus.OPEN },
+      orderBy: { startTime: 'desc' },
+    });
+    return row ? this.map(row) : null;
+  }
+
+  async findActiveForCashier(params: {
+    cashierId: string;
+    cashierSnapshotName: string;
+  }): Promise<ShiftEntity | null> {
+    const row = await this.prisma.shift.findFirst({
+      where: {
+        status: ShiftStatus.OPEN,
+        OR: [
+          { cashierId: params.cashierId },
+          {
+            cashierId: null,
+            cashierSnapshotName: params.cashierSnapshotName,
+          },
+        ],
+      },
       orderBy: { startTime: 'desc' },
     });
     return row ? this.map(row) : null;

@@ -13,8 +13,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         ExtractJwt.fromUrlQueryParameter('token'),
       ]),
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' 
-        ? (() => { throw new Error('JWT_SECRET must be defined in production!'); })() 
+      secretOrKey: process.env.JWT_SECRET || (process.env.NODE_ENV === 'production'
+        ? (() => { throw new Error('JWT_SECRET must be defined in production!'); })()
         : 'pizza-secret-key-dev-only-change-me'),
     });
   }
@@ -29,7 +29,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (user.tokenVersion !== payload.tokenVersion) {
       throw new UnauthorizedException('La sesión ha expirado en este dispositivo.');
     }
-    // Este objeto se inyectará en req.user
+
     return { id: user.id, username: user.username, role: fromDbRole(user.role) };
   }
 }
+

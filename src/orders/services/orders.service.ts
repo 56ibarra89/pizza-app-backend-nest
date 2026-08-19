@@ -189,11 +189,11 @@ export class OrdersService {
     user?: AuthenticatedUser,
   ) {
     const existing = await this.getById(id);
+    const wasReadyForPickup = this.isReadyForPickup(existing.items);
     const isFinal =
       existing.status === OrderStatusDto.paid ||
       existing.status === OrderStatusDto.cancelled;
 
-    // Regla de Negocio: El COCINERO no puede cambiar estados financieros
     if (user?.role === UserRoleDto.cocinero) {
       if (
         dto.status === OrderStatusDto.paid ||
@@ -247,21 +247,6 @@ export class OrdersService {
 
       const reloaded = await this.getById(id);
 
-      if (dto.status === OrderStatusDto.delivered) {
-        // Find which table is assigned to this order, if any
-        const tableName = reloaded.linkedTables?.[0] || undefined;
-        const customerName = reloaded.customerSnapshotName || undefined;
-        const orderType = reloaded.orderType || undefined;
-        this.eventEmitter.emit('order.ready', {
-          orderId: id,
-          isFullOrder: true,
-          tableName,
-          customerName,
-          orderType,
-          targetUsername: reloaded.cashierSnapshotName,
-        });
-      }
-
       const derived = this.deriveGlobalStatus(reloaded.items);
       const nextGlobalStatus =
         existing.status === OrderStatusDto.paid ||
@@ -272,6 +257,9 @@ export class OrdersService {
       const updated = await this.repo.update(id, {
         status: nextGlobalStatus,
       });
+      if (!wasReadyForPickup && this.isReadyForPickup(reloaded.items)) {
+        this.emitOrderReady(updated);
+      }
       this.publishOrder(updated, 'updated');
       return updated;
     }
@@ -323,20 +311,8 @@ export class OrdersService {
       status: nextStatus,
       items,
     };
-
-    if (nextStatus === OrderStatusDto.delivered) {
-      const tableName = existing.linkedTables?.[0] || undefined;
-      const customerName = existing.customerSnapshotName || undefined;
-      const orderType = existing.orderType || undefined;
-      this.eventEmitter.emit('order.ready', {
-        orderId: id,
-        isFullOrder: true,
-        tableName,
-        customerName,
-        orderType,
-        targetUsername: existing.cashierSnapshotName,
-      });
-    }
+    const becameReadyForPickup =
+      !wasReadyForPickup && this.isReadyForPickup(items);
 
     if (authorizerAdmin) {
       updateData.cancelReason = dto.cancelReason;
@@ -365,6 +341,9 @@ export class OrdersService {
     }
 
     const updated = await this.repo.update(id, updateData);
+    if (becameReadyForPickup) {
+      this.emitOrderReady(updated);
+    }
     this.publishOrder(updated, 'updated');
     return updated;
   }
@@ -379,6 +358,7 @@ export class OrdersService {
 
   async updateItems(id: string, dto: UpdateOrderItemsDto) {
     const existing = await this.getById(id);
+    const wasReadyForPickup = this.isReadyForPickup(existing.items);
     const isFinal =
       existing.status === OrderStatusDto.paid ||
       existing.status === OrderStatusDto.cancelled;
@@ -402,35 +382,8 @@ export class OrdersService {
       ? existing.status
       : this.deriveGlobalStatus(mappedItems);
 
-    // Detect items that changed to DELIVERED
-    if (!isFinal) {
-      for (let i = 0; i < mappedItems.length; i++) {
-        const item = mappedItems[i];
-        if (
-          requiresKitchenPreparation(item) &&
-          item.kitchenStatus === KitchenStatusDto.delivered
-        ) {
-          const existingItem = existing.items[i];
-          if (
-            existingItem &&
-            existingItem.kitchenStatus !== KitchenStatusDto.delivered
-          ) {
-            const tableName = existing.linkedTables?.[0] || undefined;
-            const customerName = existing.customerSnapshotName || undefined;
-            const orderType = existing.orderType || undefined;
-            this.eventEmitter.emit('order.ready', {
-              orderId: id,
-              itemName: item.name,
-              isFullOrder: false,
-              tableName,
-              customerName,
-              orderType,
-              targetUsername: existing.cashierSnapshotName,
-            });
-          }
-        }
-      }
-    }
+    const becameReadyForPickup =
+      !isFinal && !wasReadyForPickup && this.isReadyForPickup(mappedItems);
 
     const promotion = await this.pricing.resolvePromotion(dto, {
       cuponId: existing.cuponId,
@@ -452,6 +405,9 @@ export class OrdersService {
       status: nextStatus,
       isSentToKitchen: dto.isSentToKitchen,
     });
+    if (becameReadyForPickup) {
+      this.emitOrderReady(updated);
+    }
     this.publishOrder(updated, 'updated');
     return updated;
   }
@@ -480,6 +436,33 @@ export class OrdersService {
     this.eventEmitter.emit(ORDER_SYNCHRONIZED_EVENT, {
       mutation,
       order,
+    });
+  }
+
+  private isReadyForPickup(items: CartItemEntity[]): boolean {
+    const sentKitchenItems = items.filter(
+      (item) => requiresKitchenPreparation(item) && item.isSentToKitchen,
+    );
+
+    return (
+      sentKitchenItems.length > 0 &&
+      sentKitchenItems.every(
+        (item) =>
+          item.kitchenStatus === KitchenStatusDto.ready ||
+          item.kitchenStatus === KitchenStatusDto.delivered,
+      )
+    );
+  }
+
+  private emitOrderReady(order: OrderEntity): void {
+    this.eventEmitter.emit('order.ready', {
+      orderId: order.id,
+      isFullOrder: true,
+      tableName: order.linkedTables?.[0],
+      customerName: order.customerSnapshotName,
+      orderType: order.orderType,
+      targetUsername: order.cashierSnapshotName,
+      driverId: order.driverId,
     });
   }
 
@@ -534,3 +517,4 @@ export class OrdersService {
     }
   }
 }
+

@@ -5,9 +5,10 @@ export class AuthLoginDto {
   @IsString()
   @IsNotEmpty()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  identifier!: string; // username o email
+  identifier!: string;
 
   @IsString()
   @IsNotEmpty()
   password!: string;
 }
+

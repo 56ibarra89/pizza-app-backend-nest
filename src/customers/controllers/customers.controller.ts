@@ -35,7 +35,12 @@ export class CustomersController {
   }
 
   @Post('upsert')
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.despachador)
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.despachador,
+  )
   async upsertCustomer(@Body() dto: UpsertCustomerDto) {
     const result = await this.customers.upsert(dto);
     return {
@@ -45,7 +50,12 @@ export class CustomersController {
   }
 
   @Patch(':id')
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.despachador)
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.despachador,
+  )
   async updateCustomer(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateCustomerDto,
@@ -55,7 +65,12 @@ export class CustomersController {
   }
 
   @Delete(':id')
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.despachador)
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.despachador,
+  )
   deleteCustomer(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.customers.deleteById(id);
   }

@@ -56,13 +56,11 @@ export class UpdateHappyHourDto {
   @IsNotEmpty()
   appliesTo?: string;
 
-  /** Reemplaza los productos asociados a esta promoción (N:M). */
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   productIds?: string[];
 
-  /** Reemplaza las categorías asociadas a esta promoción (N:M). */
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
@@ -73,3 +71,4 @@ export class UpdateHappyHourDto {
   @IsIn(['Activo', 'Inactivo'] satisfies PromoStatusDto[])
   status?: PromoStatusDto;
 }
+

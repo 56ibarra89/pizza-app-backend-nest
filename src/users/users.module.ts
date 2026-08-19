@@ -9,13 +9,19 @@ import { PasswordResetEmailService } from './services/password-reset-email.servi
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { UsersController } from './controllers/users.controller';
 import { AuthController } from './controllers/auth.controller';
+import { ShiftsModule } from '../shifts/shifts.module';
 
 @Module({
   imports: [
+    ShiftsModule,
     JwtModule.register({
-      secret: process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' 
-        ? (() => { throw new Error('JWT_SECRET must be defined in production!'); })() 
-        : 'pizza-secret-key-dev-only-change-me'),
+      secret:
+        process.env.JWT_SECRET ||
+        (process.env.NODE_ENV === 'production'
+          ? (() => {
+              throw new Error('JWT_SECRET must be defined in production!');
+            })()
+          : 'pizza-secret-key-dev-only-change-me'),
       signOptions: { expiresIn: '1h' },
     }),
   ],

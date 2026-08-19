@@ -73,9 +73,6 @@ export function fromDbCertificadoStatus(status: CertificadoStatus): CertificadoS
   }
 }
 
-/**
- * Convierte un Prisma.Decimal (o null) a number para la capa de presentación.
- */
 export function decimalToNumber(value: Prisma.Decimal | null | undefined): number {
   if (value === null || value === undefined) return 0;
   return value.toNumber();
@@ -179,3 +176,4 @@ export function generateCertificadoSerial(prefix = 'VC', existing?: Set<string>)
 
   return serial;
 }
+

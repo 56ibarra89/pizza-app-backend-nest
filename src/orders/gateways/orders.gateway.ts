@@ -139,6 +139,10 @@ export class OrdersGateway implements OnGatewayInit {
     const user = socket.data.user;
     if (!user) throw new Error('Usuario no autenticado');
 
+    if (user.role === UserRoleDto.motorizado) {
+      return;
+    }
+
     if (user.role !== UserRoleDto.cocinero) {
       await socket.join(FULL_ORDERS_ROOM);
       return;

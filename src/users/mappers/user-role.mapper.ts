@@ -7,6 +7,8 @@ export function toDbRole(role: UserRoleDto): DbUserRole {
       return DbUserRole.ADMIN;
     case UserRoleDto.cajero:
       return DbUserRole.CAJERO;
+    case UserRoleDto.cajero_principal:
+      return DbUserRole.CAJERO_PRINCIPAL;
     case UserRoleDto.mesero:
       return DbUserRole.MESERO;
     case UserRoleDto.cocinero:
@@ -26,6 +28,8 @@ export function fromDbRole(role: DbUserRole): UserRoleDto {
       return UserRoleDto.admin;
     case DbUserRole.CAJERO:
       return UserRoleDto.cajero;
+    case DbUserRole.CAJERO_PRINCIPAL:
+      return UserRoleDto.cajero_principal;
     case DbUserRole.MESERO:
       return UserRoleDto.mesero;
     case DbUserRole.COCINERO:

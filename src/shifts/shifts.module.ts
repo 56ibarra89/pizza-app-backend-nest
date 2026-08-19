@@ -13,5 +13,6 @@ import { PrismaShiftsRepository } from './repositories/prisma-shifts.repository'
       useClass: PrismaShiftsRepository,
     },
   ],
+  exports: [ShiftsService],
 })
 export class ShiftsModule {}
