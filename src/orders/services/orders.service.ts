@@ -34,6 +34,9 @@ import {
 import type { OrderEntity } from '../entities/order.entity';
 import { requiresKitchenPreparation } from '../validators/order-item-kind';
 import { KitchensService } from '../../kitchens/kitchens.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { InvoiceIssuingService } from './invoice-issuing.service';
+import { OrderTypeDto } from '../dto/order-type.dto';
 
 @Injectable()
 export class OrdersService {
@@ -49,6 +52,8 @@ export class OrdersService {
     private readonly tableAssignments: OrderTableAssignmentsService,
     private readonly cancellationAuthorization: OrderCancellationAuthorizationService,
     private readonly kitchens: KitchensService,
+    private readonly invoiceIssuing: InvoiceIssuingService,
+    private readonly prisma: PrismaService,
   ) {}
 
   listTodayOrActive(now = new Date()) {
@@ -85,9 +90,11 @@ export class OrdersService {
   }
 
   async create(dto: CreateOrderDto) {
-    const status =
-      dto.status ??
-      (dto.payments?.length ? OrderStatusDto.paid : OrderStatusDto.pending);
+    const isDelivery = dto.orderType === OrderTypeDto.delivery;
+    const status = isDelivery
+      ? OrderStatusDto.pending
+      : (dto.status ??
+        (dto.payments?.length ? OrderStatusDto.paid : OrderStatusDto.pending));
     const timestamp = dto.timestamp ?? new Date();
     const isSentToKitchen =
       dto.isSentToKitchen ?? !(dto.linkedTables && dto.linkedTables.length > 0);
@@ -123,7 +130,9 @@ export class OrdersService {
       total: totals.total,
       timestamp,
       status: status === OrderStatusDto.paid ? OrderStatusDto.pending : status,
-      customerSnapshotName: dto.customerSnapshotName,
+      customerSnapshotName:
+        dto.customerSnapshotName ||
+        (dto.customerPhone ? `Cliente ${dto.customerPhone}` : undefined),
       cashierId,
       cashierSnapshotName: dto.cashierSnapshotName,
       orderType: dto.orderType,
@@ -136,10 +145,32 @@ export class OrdersService {
       happyHourId:
         promotion.source === 'happy-hour' ? promotion.happyHourId : undefined,
       driverId: dto.driverId,
-      payments: status === OrderStatusDto.paid ? undefined : dto.payments,
+      payments: isDelivery || status === OrderStatusDto.paid ? undefined : dto.payments,
       customerTendered: dto.customerTendered,
       deliveryChange: dto.deliveryChange,
     });
+
+    if (isDelivery) {
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          await this.invoiceIssuing.issuePendingDeliveryInvoice(tx, {
+            orderId: created.id,
+            totals,
+            promotion,
+            customerSnapshotName: dto.customerSnapshotName,
+            customerAddress: dto.customerAddress,
+            orderType: dto.orderType,
+          });
+        });
+        const updated = await this.getById(created.id);
+        this.publishOrder(updated, 'created');
+        return updated;
+      } catch (error) {
+        this.logger.error(
+          `Error al generar factura para delivery ${created.id}: ${error?.message ?? error}`,
+        );
+      }
+    }
 
     if (status === OrderStatusDto.paid) {
       try {
@@ -247,7 +278,7 @@ export class OrdersService {
 
       const reloaded = await this.getById(id);
 
-      const derived = this.deriveGlobalStatus(reloaded.items);
+      const derived = this.deriveGlobalStatus(reloaded.items, reloaded.orderType);
       const nextGlobalStatus =
         existing.status === OrderStatusDto.paid ||
         existing.status === OrderStatusDto.cancelled
@@ -286,7 +317,15 @@ export class OrdersService {
       }
     }
 
-    const nextStatus = dto.status;
+    let nextStatus = dto.status;
+    if (
+      existing.orderType === OrderTypeDto.delivery &&
+      nextStatus === OrderStatusDto.delivered &&
+      user?.role === UserRoleDto.cocinero
+    ) {
+      nextStatus = OrderStatusDto.ready;
+    }
+
     if (
       nextStatus === OrderStatusDto.paid &&
       existing.status !== OrderStatusDto.paid
@@ -380,7 +419,7 @@ export class OrdersService {
     });
     const nextStatus = isFinal
       ? existing.status
-      : this.deriveGlobalStatus(mappedItems);
+      : this.deriveGlobalStatus(mappedItems, existing.orderType);
 
     const becameReadyForPickup =
       !isFinal && !wasReadyForPickup && this.isReadyForPickup(mappedItems);
@@ -440,17 +479,14 @@ export class OrdersService {
   }
 
   private isReadyForPickup(items: CartItemEntity[]): boolean {
-    const sentKitchenItems = items.filter(
+    const sentItems = items.filter(
       (item) => requiresKitchenPreparation(item) && item.isSentToKitchen,
     );
-
-    return (
-      sentKitchenItems.length > 0 &&
-      sentKitchenItems.every(
-        (item) =>
-          item.kitchenStatus === KitchenStatusDto.ready ||
-          item.kitchenStatus === KitchenStatusDto.delivered,
-      )
+    if (sentItems.length === 0) return false;
+    return sentItems.every(
+      (i) =>
+        i.kitchenStatus === KitchenStatusDto.ready ||
+        i.kitchenStatus === KitchenStatusDto.delivered,
     );
   }
 
@@ -466,14 +502,15 @@ export class OrdersService {
     });
   }
 
-  private deriveGlobalStatus(items: CartItemEntity[]): OrderStatusDto {
+  private deriveGlobalStatus(
+    items: CartItemEntity[],
+    orderType?: OrderTypeDto,
+  ): OrderStatusDto {
     const sentItems = items.filter(
       (item) => requiresKitchenPreparation(item) && item.isSentToKitchen,
     );
 
     if (sentItems.length === 0) {
-      // If nothing is sent to kitchen, the status depends on whether there are items at all.
-      // Usually, it stays as is, but we default to pending if recalculating from scratch.
       return OrderStatusDto.pending;
     }
 
@@ -490,7 +527,12 @@ export class OrdersService {
     const allDelivered = sentItems.every(
       (i) => i.kitchenStatus === KitchenStatusDto.delivered,
     );
-    if (allDelivered) return OrderStatusDto.delivered;
+    if (allDelivered) {
+      if (orderType === OrderTypeDto.delivery) {
+        return OrderStatusDto.ready;
+      }
+      return OrderStatusDto.delivered;
+    }
 
     const anyReady = sentItems.some(
       (i) => i.kitchenStatus === KitchenStatusDto.ready,

@@ -24,12 +24,6 @@ export class RolesGuard implements CanActivate {
       .getRequest<{ user?: AuthenticatedUser }>();
 
     if (!requiredRoles || requiredRoles.length === 0) {
-      if (user?.role?.toLowerCase() === UserRoleDto.motorizado) {
-        throw new ForbiddenException(
-          'El rol motorizado solo tiene acceso a sus notificaciones.',
-        );
-      }
-
       return true;
     }
 

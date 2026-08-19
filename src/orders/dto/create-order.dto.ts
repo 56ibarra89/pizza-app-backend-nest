@@ -82,6 +82,10 @@ export class CreateOrderDto {
   customerSnapshotName?: string;
 
   @IsOptional()
+  @IsString()
+  customerPhone?: string;
+
+  @IsOptional()
   @IsEnum(OrderTypeDto)
   orderType?: OrderTypeDto;
 

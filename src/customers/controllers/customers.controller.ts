@@ -40,6 +40,7 @@ export class CustomersController {
     UserRoleDto.cajero,
     UserRoleDto.cajero_principal,
     UserRoleDto.despachador,
+    UserRoleDto.motorizado,
   )
   async upsertCustomer(@Body() dto: UpsertCustomerDto) {
     const result = await this.customers.upsert(dto);
@@ -55,6 +56,7 @@ export class CustomersController {
     UserRoleDto.cajero,
     UserRoleDto.cajero_principal,
     UserRoleDto.despachador,
+    UserRoleDto.motorizado,
   )
   async updateCustomer(
     @Param('id', new ParseUUIDPipe()) id: string,

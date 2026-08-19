@@ -32,6 +32,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         ],
       },
       include: {
+        customer: { select: { id: true, name: true, phone: true } },
         payments: true,
         items: {
           include: { extras: true, product: { select: { categoryId: true } } },
@@ -48,6 +49,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
   async listAll(): Promise<OrderEntity[]> {
     const orders = await this.prisma.order.findMany({
       include: {
+        customer: { select: { id: true, name: true, phone: true } },
         payments: true,
         items: {
           include: { extras: true, product: { select: { categoryId: true } } },
@@ -69,6 +71,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         createdAt: { gte: startDate, lte: endDate },
       },
       include: {
+        customer: { select: { id: true, name: true, phone: true } },
         payments: true,
         items: {
           include: { extras: true, product: { select: { categoryId: true } } },
@@ -93,6 +96,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         createdAt: { gte: startDate, lte: endDate },
       },
       include: {
+        customer: { select: { id: true, name: true, phone: true } },
         payments: true,
         items: {
           include: { extras: true, product: { select: { categoryId: true } } },
@@ -109,6 +113,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     const found = await this.prisma.order.findUnique({
       where: { id },
       include: {
+        customer: { select: { id: true, name: true, phone: true } },
         payments: true,
         items: {
           include: { extras: true, product: { select: { categoryId: true } } },
@@ -465,6 +470,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     invoiceNumber: string | null;
     invoiceIssuedAt: Date | null;
     customerSnapshotName: string | null;
+    customerId?: string | null;
+    customer?: { id: string; name: string; phone: string | null } | null;
     customerAddress: string | null;
     orderType: import('@prisma/client').OrderType | null;
     driverId: string | null;
@@ -547,7 +554,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       total: o.total.toNumber(),
       status: fromDbOrderStatus(o.status),
       timestamp: o.timestamp,
-      customerSnapshotName: o.customerSnapshotName ?? undefined,
+      customerId: o.customerId ?? o.customer?.id ?? undefined,
+      customerSnapshotName:
+        o.customerSnapshotName ?? o.customer?.name ?? undefined,
+      customerPhone: o.customer?.phone ?? undefined,
       customerAddress: o.customerAddress ?? undefined,
       orderType: o.orderType ? fromDbOrderType(o.orderType) : undefined,
       driverId: o.driverId ?? undefined,

@@ -13,6 +13,7 @@ import {
   ShiftStatus,
 } from '@prisma/client';
 import type { FinalizeOrderDto } from '../dto/finalize-order.dto';
+import type { OrderTypeDto } from '../dto/order-type.dto';
 import { OrderStatusDto } from '../dto/order-status.dto';
 import {
   toDbOrderStatus,
@@ -301,6 +302,172 @@ export class InvoiceIssuingService {
         level: LogLevel.INFO,
       },
     });
+  }
+
+  async issuePendingDeliveryInvoice(
+    tx: Prisma.TransactionClient,
+    {
+      orderId,
+      totals,
+      promotion,
+      customerSnapshotName,
+      customerAddress,
+      orderType,
+    }: {
+      orderId: string;
+      totals: OrderTotals;
+      promotion: ResolvedOrderPromotion;
+      customerSnapshotName?: string;
+      customerAddress?: string;
+      orderType?: OrderTypeDto;
+    },
+  ): Promise<string> {
+    const cuponId =
+      promotion.source === 'coupon' ? promotion.cuponId : undefined;
+    const discountId =
+      promotion.source === 'discount' ? promotion.discountId : undefined;
+    const happyHourId =
+      promotion.source === 'happy-hour' ? promotion.happyHourId : undefined;
+
+    const lockedOrders = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id
+      FROM "Order"
+      WHERE id = ${orderId}
+      FOR UPDATE
+    `;
+    if (!lockedOrders[0]) {
+      throw new NotFoundException('Orden no encontrada');
+    }
+
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        status: true,
+        cashierId: true,
+        cashierSnapshotName: true,
+        shiftId: true,
+        invoiceNumber: true,
+      },
+    });
+
+    if (!order) throw new NotFoundException('Orden no encontrada');
+    if (order.invoiceNumber) return order.invoiceNumber;
+
+    const now = new Date();
+    const shiftId =
+      order.shiftId ??
+      (
+        await tx.shift.findFirst({
+          where: { status: ShiftStatus.OPEN },
+          select: { id: true },
+          orderBy: { startTime: 'desc' },
+        })
+      )?.id;
+
+    const lockedRows = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM "Correlativo"
+      WHERE "documentType" = 'FACTURA' AND "status" = 'ACTIVO'
+      LIMIT 1
+      FOR UPDATE
+    `;
+
+    let correlativoId = lockedRows[0]?.id;
+    if (!correlativoId) {
+      const prefix = this.buildMonthlyPrefix(now);
+      const dgiConfigRecord = await tx.appConfig.findUnique({
+        where: { id: 'dgi_resolution' },
+      });
+      const dgiConfig = readDgiConfig(dgiConfigRecord?.data ?? null);
+      const expirationDate = new Date(
+        now.getFullYear(),
+        now.getMonth() + 1,
+        0,
+        23,
+        59,
+        59,
+      );
+
+      const created = await tx.correlativo.create({
+        data: {
+          documentType: DocumentType.FACTURA,
+          resolutionNumber:
+            dgiConfig.resolutionNumber ?? `AUTO-${prefix.slice(0, -1)}`,
+          prefix,
+          startNumber: Number(dgiConfig.startNumber ?? 1),
+          endNumber: Number(dgiConfig.endNumber ?? 99999),
+          currentNumber: 1,
+          issueDate: now,
+          expirationDate,
+          status: CorrelativoStatus.ACTIVO,
+        },
+      });
+      correlativoId = created.id;
+    }
+
+    const correlativo = await tx.correlativo.findUnique({
+      where: { id: correlativoId },
+    });
+    if (!correlativo) {
+      throw new NotFoundException('No se pudo obtener el correlativo activo');
+    }
+
+    const issuedNumber = correlativo.currentNumber;
+    if (issuedNumber > correlativo.endNumber) {
+      await tx.correlativo.update({
+        where: { id: correlativo.id },
+        data: { status: CorrelativoStatus.AGOTADO },
+      });
+      throw new BadRequestException('El correlativo está AGOTADO');
+    }
+
+    const dynamicPrefix = this.buildMonthlyPrefix(now);
+    const cleanUserPrefix = (correlativo.prefix ?? '').replace(
+      /^[a-z]{3}\d{2}-/i,
+      '',
+    );
+    const width = String(correlativo.endNumber).length;
+    const paddedNumber = String(issuedNumber).padStart(width, '0');
+    const invoiceNumber = `${dynamicPrefix}${cleanUserPrefix}${paddedNumber}`;
+    const nextNumber = issuedNumber + 1;
+    const nextStatus =
+      nextNumber > correlativo.endNumber
+        ? CorrelativoStatus.AGOTADO
+        : correlativo.status;
+
+    await tx.correlativo.update({
+      where: { id: correlativo.id },
+      data: {
+        currentNumber: nextNumber,
+        status: nextStatus,
+      },
+    });
+
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        customerSnapshotName: customerSnapshotName ?? undefined,
+        customerAddress: customerAddress ?? undefined,
+        orderType: orderType ? toDbOrderType(orderType) : undefined,
+        total: totals.total,
+        subTotal: totals.subTotal,
+        discountAmount: totals.discountAmount,
+        taxAmount: totals.taxAmount,
+        cuponId,
+        discountId,
+        happyHourId,
+        shiftId: shiftId ?? null,
+        invoiceCorrelativoId: correlativo.id,
+        invoiceDocumentType: DocumentType.FACTURA,
+        invoiceResolutionNumber: correlativo.resolutionNumber,
+        invoicePrefix: correlativo.prefix ?? '',
+        invoiceIssuedNumber: issuedNumber,
+        invoiceNumber,
+        invoiceIssuedAt: now,
+      },
+    });
+
+    return invoiceNumber;
   }
 
   private async consumeCoupon(

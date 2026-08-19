@@ -30,6 +30,8 @@ export function toOrderResponseDto(order: OrderEntity) {
     customerTendered: order.customerTendered,
     deliveryChange: order.deliveryChange,
     customerSnapshotName: order.customerSnapshotName,
+    customerPhone: order.customerPhone,
+    customerId: order.customerId,
     orderType: order.orderType,
     customerAddress: order.customerAddress,
     cuponId: order.cuponId,

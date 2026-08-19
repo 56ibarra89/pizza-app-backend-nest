@@ -5,6 +5,8 @@ interface OrderReferenceInput {
   shiftId?: string;
   customerId?: string;
   customerSnapshotName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
   cashierId?: string;
   cashierSnapshotName?: string;
 }
@@ -25,7 +27,11 @@ export class OrderReferenceResolverService {
         input.shiftId ? undefined : this.findActiveShiftId(),
         input.customerId
           ? undefined
-          : this.findCustomerId(input.customerSnapshotName),
+          : this.findOrCreateCustomerId(
+              input.customerSnapshotName,
+              input.customerPhone,
+              input.customerAddress,
+            ),
         input.cashierId
           ? undefined
           : this.findCashierId(input.cashierSnapshotName),
@@ -48,18 +54,56 @@ export class OrderReferenceResolverService {
     return activeShift?.id;
   }
 
-  private async findCustomerId(
+  private async findOrCreateCustomerId(
     customerName?: string,
+    customerPhone?: string,
+    customerAddress?: string,
   ): Promise<string | undefined> {
+    const normalizedPhone = customerPhone?.trim();
     const normalizedName = customerName?.trim();
-    if (!normalizedName) return undefined;
+    const normalizedAddress = customerAddress?.trim();
 
-    const customer = await this.prisma.customer.findFirst({
-      where: { name: { equals: normalizedName, mode: 'insensitive' } },
-      select: { id: true },
-    });
+    if (normalizedPhone) {
+      const byPhone = await this.prisma.customer.findFirst({
+        where: { phone: normalizedPhone },
+        select: { id: true },
+      });
+      if (byPhone) return byPhone.id;
+    }
 
-    return customer?.id;
+    if (normalizedName) {
+      const byName = await this.prisma.customer.findFirst({
+        where: { name: { equals: normalizedName, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      if (byName) return byName.id;
+    }
+
+    if (normalizedName || normalizedPhone) {
+      try {
+        const name = normalizedName || `Cliente ${normalizedPhone}`;
+        const created = await this.prisma.customer.create({
+          data: {
+            name,
+            phone: normalizedPhone || null,
+            addresses: normalizedAddress
+              ? {
+                  create: {
+                    address: normalizedAddress,
+                    lastUsed: new Date(),
+                  },
+                }
+              : undefined,
+          },
+          select: { id: true },
+        });
+        return created.id;
+      } catch {
+        return undefined;
+      }
+    }
+
+    return undefined;
   }
 
   private async findCashierId(

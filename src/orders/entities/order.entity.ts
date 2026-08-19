@@ -26,6 +26,8 @@ export interface OrderEntity {
   timestamp: Date;
 
   customerSnapshotName?: string;
+  customerPhone?: string;
+  customerId?: string;
   customerAddress?: string;
   orderType?: OrderTypeDto;
   driverId?: string;
