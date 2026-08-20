@@ -21,6 +21,7 @@ import type { AuthenticatedUser } from '../../common/interfaces/authenticated-us
 @Roles(
   UserRoleDto.admin,
   UserRoleDto.cajero,
+  UserRoleDto.cajero_principal,
   UserRoleDto.mesero,
   UserRoleDto.motorizado,
   UserRoleDto.despachador,
@@ -32,16 +33,30 @@ export class NotificationsController {
   @UseGuards(JwtAuthGuard)
   @Sse('stream')
   stream(@CurrentUser() user: AuthenticatedUser): Observable<MessageEvent> {
-    const role = user.role.toUpperCase();
+    const role = user.role.toUpperCase() as UserRole;
     return this.notificationsService.notificationStream.asObservable().pipe(
-      filter(
-        (notification) =>
-          notification.role === role &&
-          (role === UserRole.MOTORIZADO
-            ? notification.targetUsername === user.username
-            : !notification.targetUsername ||
-              notification.targetUsername === user.username),
-      ),
+      filter((notification) => {
+        if (notification.role !== role) {
+          return false;
+        }
+
+        if (
+          role === UserRole.MOTORIZADO ||
+          role === UserRole.CAJERO ||
+          role === UserRole.MESERO
+        ) {
+          return (
+            notification.targetUsername?.toLowerCase() ===
+            user.username.toLowerCase()
+          );
+        }
+
+        return (
+          !notification.targetUsername ||
+          notification.targetUsername.toLowerCase() ===
+            user.username.toLowerCase()
+        );
+      }),
       map((notification) => ({
         data: notification,
       })),

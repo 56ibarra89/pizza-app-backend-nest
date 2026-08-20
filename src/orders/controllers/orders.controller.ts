@@ -153,8 +153,11 @@ export class OrdersController {
     UserRoleDto.mesero,
     UserRoleDto.despachador,
   )
-  async create(@Body() dto: CreateOrderDto) {
-    const created = await this.orders.create(dto);
+  async create(
+    @Body() dto: CreateOrderDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    const created = await this.orders.create(dto, user);
     return toOrderResponseDto(created);
   }
 

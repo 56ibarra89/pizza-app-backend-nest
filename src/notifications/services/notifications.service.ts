@@ -78,21 +78,28 @@ export class NotificationsService {
       ? `La orden de ${targetName} está lista para ser entregada.`
       : `El producto "${payload.itemName}" de ${targetName} está listo.`;
 
-    // Guardamos notificación para CAJERO
-    await this.createNotification(title, message, 'CAJERO');
+    // Guardamos notificación para CAJERO (dirigida al cajero que generó la orden)
+    await this.createNotification(
+      title,
+      message,
+      UserRole.CAJERO,
+      payload.targetUsername,
+    );
+    // Guardamos notificación para CAJERO_PRINCIPAL
+    await this.createNotification(title, message, UserRole.CAJERO_PRINCIPAL);
     // Guardamos notificación para ADMIN
-    await this.createNotification(title, message, 'ADMIN');
+    await this.createNotification(title, message, UserRole.ADMIN);
     // Guardamos notificación para MESERO (dirigida al usuario específico si existe)
     await this.createNotification(
       title,
       message,
-      'MESERO',
+      UserRole.MESERO,
       payload.targetUsername,
     );
 
     // Guardamos notificación para DESPACHADOR solo si es delivery
     if (payload.orderType === 'delivery') {
-      await this.createNotification(title, message, 'DESPACHADOR');
+      await this.createNotification(title, message, UserRole.DESPACHADOR);
 
       if (payload.driverId) {
         const driver = await this.prisma.user.findUnique({
@@ -132,14 +139,48 @@ export class NotificationsService {
   }
 
   async getRecentForRole(role: UserRole, username?: string) {
+    if (role === UserRole.CAJERO_PRINCIPAL) {
+      return this.prisma.notification.findMany({
+        where: {
+          role: UserRole.CAJERO_PRINCIPAL,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: 50,
+      });
+    }
+
+    if (
+      role === UserRole.MOTORIZADO ||
+      role === UserRole.CAJERO ||
+      role === UserRole.MESERO
+    ) {
+      return this.prisma.notification.findMany({
+        where: {
+          role,
+          ...(role === UserRole.CAJERO || role === UserRole.MESERO
+            ? {
+                OR: [
+                  { targetUsername: username },
+                  { targetUsername: username?.toLowerCase() },
+                ],
+              }
+            : {
+                targetUsername: username ?? '',
+              }),
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: 50,
+      });
+    }
+
     return this.prisma.notification.findMany({
       where: {
         role,
-        ...(role === UserRole.MOTORIZADO
-          ? { targetUsername: username ?? '' }
-          : {
-              OR: [{ targetUsername: null }, { targetUsername: username }],
-            }),
+        OR: [{ targetUsername: null }, { targetUsername: username }],
       },
       orderBy: {
         createdAt: 'desc',
@@ -172,11 +213,22 @@ export class NotificationsService {
   }
 
   private buildAudienceFilter(id: string, role: UserRole, username: string) {
+    if (role === UserRole.CAJERO_PRINCIPAL || role === UserRole.ADMIN) {
+      return { id };
+    }
+
     return {
       id,
       role,
-      ...(role === UserRole.MOTORIZADO
-        ? { targetUsername: username }
+      ...(role === UserRole.MOTORIZADO ||
+      role === UserRole.CAJERO ||
+      role === UserRole.MESERO
+        ? {
+            OR: [
+              { targetUsername: username },
+              { targetUsername: username.toLowerCase() },
+            ],
+          }
         : {
             OR: [{ targetUsername: null }, { targetUsername: username }],
           }),

@@ -89,7 +89,7 @@ export class OrdersService {
     return found;
   }
 
-  async create(dto: CreateOrderDto) {
+  async create(dto: CreateOrderDto, user?: AuthenticatedUser) {
     const isDelivery = dto.orderType === OrderTypeDto.delivery;
     const status = isDelivery
       ? OrderStatusDto.pending
@@ -99,8 +99,12 @@ export class OrdersService {
     const isSentToKitchen =
       dto.isSentToKitchen ?? !(dto.linkedTables && dto.linkedTables.length > 0);
 
+    const cashierSnapshotName = dto.cashierSnapshotName || user?.username;
     const { customerId, cashierId, shiftId } =
-      await this.referenceResolver.resolve(dto);
+      await this.referenceResolver.resolve({
+        ...dto,
+        cashierSnapshotName,
+      });
     const items = dto.items.map((item) => {
       const mappedItem = {
         ...item,
@@ -134,7 +138,7 @@ export class OrdersService {
         dto.customerSnapshotName ||
         (dto.customerPhone ? `Cliente ${dto.customerPhone}` : undefined),
       cashierId,
-      cashierSnapshotName: dto.cashierSnapshotName,
+      cashierSnapshotName,
       orderType: dto.orderType,
       customerAddress: dto.customerAddress,
       linkedTables: dto.linkedTables,
@@ -327,13 +331,36 @@ export class OrdersService {
     }
 
     if (
+      existing.orderType === OrderTypeDto.delivery &&
+      dto.status === OrderStatusDto.delivered &&
+      user?.role === UserRoleDto.motorizado
+    ) {
+      const hasKitchenItems = existing.items.some(
+        (item) => requiresKitchenPreparation(item) && item.isSentToKitchen,
+      );
+      if (
+        hasKitchenItems &&
+        !this.isReadyForPickup(existing.items) &&
+        existing.status !== OrderStatusDto.ready
+      ) {
+        throw new BadRequestException(
+          'El pedido aún no está listo en cocina para ser entregado.',
+        );
+      }
+    }
+
+    if (
       nextStatus === OrderStatusDto.paid &&
       existing.status !== OrderStatusDto.paid
     ) {
       assertPaymentsMatchTotal(existing.total, existing.payments);
     }
 
-    const updateItemsKitchen = this.asKitchenStatusOrUndefined(nextStatus);
+    const updateItemsKitchen =
+      existing.orderType === OrderTypeDto.delivery &&
+      (nextStatus === OrderStatusDto.delivered || nextStatus === OrderStatusDto.paid)
+        ? undefined
+        : this.asKitchenStatusOrUndefined(nextStatus);
     this.logger.debug(
       `Actualizando items a kitchenStatus=${updateItemsKitchen}`,
     );
