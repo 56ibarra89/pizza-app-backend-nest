@@ -169,9 +169,10 @@ export class OrdersService {
         const updated = await this.getById(created.id);
         this.publishOrder(updated, 'created');
         return updated;
-      } catch (error) {
+      } catch (error: unknown) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
         this.logger.error(
-          `Error al generar factura para delivery ${created.id}: ${error?.message ?? error}`,
+          `Error al generar factura para delivery ${created.id}: ${errorMsg}`,
         );
       }
     }
@@ -282,7 +283,10 @@ export class OrdersService {
 
       const reloaded = await this.getById(id);
 
-      const derived = this.deriveGlobalStatus(reloaded.items, reloaded.orderType);
+      const derived = this.deriveGlobalStatus(
+        reloaded.items,
+        reloaded.orderType,
+      );
       const nextGlobalStatus =
         existing.status === OrderStatusDto.paid ||
         existing.status === OrderStatusDto.cancelled
@@ -358,7 +362,8 @@ export class OrdersService {
 
     const updateItemsKitchen =
       existing.orderType === OrderTypeDto.delivery &&
-      (nextStatus === OrderStatusDto.delivered || nextStatus === OrderStatusDto.paid)
+      (nextStatus === OrderStatusDto.delivered ||
+        nextStatus === OrderStatusDto.paid)
         ? undefined
         : this.asKitchenStatusOrUndefined(nextStatus);
     this.logger.debug(
@@ -586,4 +591,3 @@ export class OrdersService {
     }
   }
 }
-
