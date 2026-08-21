@@ -149,7 +149,7 @@ export class OrdersService {
       happyHourId:
         promotion.source === 'happy-hour' ? promotion.happyHourId : undefined,
       driverId: dto.driverId,
-      payments: isDelivery || status === OrderStatusDto.paid ? undefined : dto.payments,
+      payments: dto.payments,
       customerTendered: dto.customerTendered,
       deliveryChange: dto.deliveryChange,
     });
