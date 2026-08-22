@@ -22,6 +22,7 @@ import { MesasModule } from './mesas/mesas.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { NotificationsModule } from './notifications/notifications.module';
 import { KitchensModule } from './kitchens/kitchens.module';
+import { CashExpensesModule } from './cash-expenses/cash-expenses.module';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { KitchensModule } from './kitchens/kitchens.module';
     EventEmitterModule.forRoot(),
     NotificationsModule,
     KitchensModule,
+    CashExpensesModule,
   ],
   controllers: [AppController],
   providers: [

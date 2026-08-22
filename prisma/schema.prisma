@@ -45,6 +45,7 @@ model User {
   createdProducts       Product[]               @relation("ProductCreatedBy")
   updatedProducts       Product[]               @relation("ProductUpdatedBy")
   cashierShifts         Shift[]                 @relation("ShiftCashier")
+  cashierExpenses       CashExpense[]           @relation("ExpenseCashier")
   systemLogs            SystemLog[]             @relation("SystemLogUser")
   extraDays             UserExtraDay[]          @relation("UserExtraDays")
   waiterZoneAssignments WaiterZoneAssignment[]  @relation("UserWaiterZones")
@@ -100,28 +101,38 @@ model Mesa {
 }
 
 model Shift {
-  id                       String      @id @default(uuid())
+  id                       String        @id @default(uuid())
   startTime                DateTime
   endTime                  DateTime?
-  openingAmount            Decimal     @db.Decimal(10, 2)
-  closingAmount            Decimal?    @db.Decimal(10, 2)
-  cashSales                Decimal     @default(0) @db.Decimal(12, 2)
-  cardSales                Decimal     @default(0) @db.Decimal(12, 2)
-  appSales                 Decimal     @default(0) @db.Decimal(12, 2)
-  totalSales               Decimal     @default(0) @db.Decimal(12, 2)
+  openingAmount            Decimal       @db.Decimal(10, 2)
+  closingAmount            Decimal?      @db.Decimal(10, 2)
+  cashSales                Decimal       @default(0) @db.Decimal(12, 2)
+  cardSales                Decimal       @default(0) @db.Decimal(12, 2)
+  appSales                 Decimal       @default(0) @db.Decimal(12, 2)
+  totalSales               Decimal       @default(0) @db.Decimal(12, 2)
+  expectedCash             Decimal?      @db.Decimal(12, 2)
+  totalExpensesSnapshot    Decimal?      @db.Decimal(12, 2)
+  cashDifference           Decimal?      @db.Decimal(12, 2)
+  discrepancyReason        String?
+  authorizedById           String?
+  authorizedBySnapshotName String?
+  authorizedByRole         String?
+  denominationBreakdown    Json?
   status                   ShiftStatus
   notes                    String?
-  createdAt                DateTime    @default(now())
-  updatedAt                DateTime    @updatedAt
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
   cashierId                String?
   cashRegisterSnapshotName String?
   cashierSnapshotName      String
   orders                   Order[]
-  cashier                  User?       @relation("ShiftCashier", fields: [cashierId], references: [id])
+  expenses                 CashExpense[]
+  cashier                  User?         @relation("ShiftCashier", fields: [cashierId], references: [id])
 
   @@index([cashierSnapshotName])
   @@index([cashRegisterSnapshotName])
   @@index([cashierId])
+  @@index([authorizedById])
   @@index([startTime])
   @@index([status])
 }
@@ -617,6 +628,37 @@ model HiddenKitchenTicket {
   ticketId String   @unique
   hiddenAt DateTime @default(now())
   hiddenBy String?
+}
+
+model CashExpense {
+  id                  String              @id @default(uuid())
+  shiftId             String
+  amount              Decimal             @db.Decimal(12, 2)
+  category            CashExpenseCategory @default(OTROS)
+  reason              String
+  voucherNumber       String?
+  notes               String?
+  cashierId           String?
+  cashierSnapshotName String
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  shift               Shift               @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  cashier             User?               @relation("ExpenseCashier", fields: [cashierId], references: [id])
+
+  @@index([shiftId])
+  @@index([createdAt])
+  @@index([category])
+  @@index([cashierId])
+}
+
+enum CashExpenseCategory {
+  SERVICIOS_BASICOS
+  INSUMOS_URGENTES
+  LIMPIEZA_MANTENIMIENTO
+  PAGO_PROVEEDOR
+  ADELANTO_SUELDO
+  TRANSPORTE_FLETE
+  OTROS
 }
 
 enum UserRole {

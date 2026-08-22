@@ -8,6 +8,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRoleDto } from '../../users/dto/user-role.dto';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
+import { CloseShiftPreviewQueryDto } from '../dto/close-shift-preview-query.dto';
 
 @ApiTags('shifts')
 @Controller('shifts')
@@ -27,6 +28,16 @@ export class ShiftsController {
   @Get(':id')
   getById(@Param('id') id: string) {
     return this.service.getById(id);
+  }
+
+  @Get(':id/close-preview')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero_principal)
+  getClosePreview(
+    @Param('id') id: string,
+    @Query() query: CloseShiftPreviewQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.service.getClosePreview(id, user, query.countedCash);
   }
 
   @Post('open')
