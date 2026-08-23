@@ -112,10 +112,21 @@ export class InvoiceIssuingService {
 
     const status = toDbOrderStatus(OrderStatusDto.paid);
     if (order.invoiceNumber) {
+      const shiftId =
+        order.shiftId ??
+        (
+          await tx.shift.findFirst({
+            where: { status: ShiftStatus.OPEN },
+            select: { id: true },
+            orderBy: { startTime: 'desc' },
+          })
+        )?.id;
+
       await tx.order.update({
         where: { id: orderId },
         data: {
           status,
+          shiftId: shiftId ?? null,
           ...(dto.payments !== undefined
             ? {
                 payments: {
