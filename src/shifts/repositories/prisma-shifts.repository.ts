@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -29,6 +28,7 @@ type ShiftWithExpenses = Prisma.ShiftGetPayload<{
 }>;
 
 const FINAL_ORDER_STATUSES = [OrderStatus.PAID, OrderStatus.CANCELLED];
+const DEFAULT_DISCREPANCY_THRESHOLD = 0;
 
 @Injectable()
 export class PrismaShiftsRepository implements IShiftsRepository {
@@ -72,17 +72,14 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     return row ? this.map(row) : null;
   }
 
-  async getClosePreview(params: {
-    id: string;
-    discrepancyThreshold: number;
-  }): Promise<ShiftClosePreview> {
+  async getClosePreview(params: { id: string }): Promise<ShiftClosePreview> {
     return this.prisma.$transaction(async (tx) => {
       const shift = await tx.shift.findUnique({
         where: { id: params.id },
         include: { expenses: true },
       });
       if (!shift) throw new NotFoundException('Turno no encontrado');
-      return this.buildClosePreview(tx, shift, params.discrepancyThreshold);
+      return this.buildClosePreview(tx, shift);
     });
   }
 
@@ -139,7 +136,6 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     discrepancyReason?: string;
     authorizationPin?: string;
     denominationBreakdown?: CashDenominationCount[];
-    discrepancyThreshold: number;
     actor: { id: string; username: string; role: string };
   }): Promise<ShiftEntity> {
     return this.prisma.$transaction(
@@ -153,11 +149,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
           throw new BadRequestException('El turno ya está cerrado');
         }
 
-        const preview = await this.buildClosePreview(
-          tx,
-          existing,
-          params.discrepancyThreshold,
-        );
+        const preview = await this.buildClosePreview(tx, existing);
         if (!preview.canClose) {
           throw new ConflictException({
             code: 'SHIFT_HAS_PENDING_OPERATIONS',
@@ -179,22 +171,20 @@ export class PrismaShiftsRepository implements IShiftsRepository {
         );
         const requiresAuthorization = cashDifference
           .abs()
-          .greaterThan(params.discrepancyThreshold);
+          .greaterThan(DEFAULT_DISCREPANCY_THRESHOLD);
         let authorizer:
           | { id: string; username: string; role: UserRole }
           | undefined;
 
         if (requiresAuthorization) {
           const reason = params.discrepancyReason?.trim();
-          if (!reason) {
-            throw new BadRequestException(
-              'Debes justificar el descuadre antes de cerrar la caja.',
-            );
-          }
-          if (!params.authorizationPin) {
-            throw new ForbiddenException(
-              'El descuadre requiere autorización con PIN de administrador o cajero principal.',
-            );
+          const authorizationError = `El turno presenta un descuadre de C$ ${cashDifference
+            .abs()
+            .toFixed(
+              2,
+            )} y requiere autorización con PIN de Administrador y justificación.`;
+          if (!reason || reason.length < 5 || !params.authorizationPin) {
+            throw new BadRequestException(authorizationError);
           }
 
           const user = await tx.user.findUnique({
@@ -207,9 +197,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
             (user.role !== UserRole.ADMIN &&
               user.role !== UserRole.CAJERO_PRINCIPAL)
           ) {
-            throw new ForbiddenException(
-              'PIN inválido o el usuario no puede autorizar descuadres.',
-            );
+            throw new BadRequestException(authorizationError);
           }
           authorizer = user;
         }
@@ -226,7 +214,9 @@ export class PrismaShiftsRepository implements IShiftsRepository {
             expectedCash,
             totalExpensesSnapshot: preview.totalExpenses,
             cashDifference,
-            discrepancyReason: params.discrepancyReason?.trim() || null,
+            discrepancyReason: requiresAuthorization
+              ? params.discrepancyReason?.trim()
+              : null,
             authorizedById: authorizer?.id,
             authorizedBySnapshotName: authorizer?.username,
             authorizedByRole: authorizer?.role,
@@ -244,7 +234,9 @@ export class PrismaShiftsRepository implements IShiftsRepository {
             userId: params.actor.id,
             user: params.actor.username,
             role: params.actor.role,
-            action: 'SHIFT_CLOSED',
+            action: requiresAuthorization
+              ? 'SHIFT_CLOSED_WITH_DISCREPANCY'
+              : 'SHIFT_CLOSED',
             level: requiresAuthorization ? LogLevel.WARN : LogLevel.INFO,
             details: JSON.stringify({
               shiftId: existing.id,
@@ -255,9 +247,13 @@ export class PrismaShiftsRepository implements IShiftsRepository {
               expectedCash: preview.expectedCash,
               countedCash: params.closingAmount,
               difference: cashDifference.toNumber(),
-              discrepancyThreshold: params.discrepancyThreshold,
-              discrepancyReason: params.discrepancyReason?.trim() || null,
+              discrepancyThreshold: DEFAULT_DISCREPANCY_THRESHOLD,
+              discrepancyReason: requiresAuthorization
+                ? params.discrepancyReason?.trim()
+                : null,
+              authorizedById: authorizer?.id ?? null,
               authorizedBy: authorizer?.username ?? null,
+              authorizedByRole: authorizer?.role ?? null,
             }),
           },
         });
@@ -272,7 +268,6 @@ export class PrismaShiftsRepository implements IShiftsRepository {
   private async buildClosePreview(
     tx: Prisma.TransactionClient,
     shift: ShiftWithExpenses,
-    discrepancyThreshold: number,
   ): Promise<ShiftClosePreview> {
     const [payments, pendingOrders] = await Promise.all([
       tx.payment.findMany({
@@ -361,7 +356,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       expenses,
       totalExpenses: totalExpenses.toNumber(),
       expectedCash: expectedCash.toNumber(),
-      discrepancyThreshold,
+      discrepancyThreshold: DEFAULT_DISCREPANCY_THRESHOLD,
       blockingOrders,
       blockingTables,
       canClose: blockingOrders.length === 0 && blockingTables.length === 0,

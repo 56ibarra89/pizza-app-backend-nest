@@ -10,7 +10,6 @@ import {
   Matches,
   MaxLength,
   Min,
-  MinLength,
   ValidateNested,
 } from 'class-validator';
 
@@ -43,7 +42,6 @@ export class CloseShiftDto {
 
   @IsOptional()
   @IsString()
-  @MinLength(3)
   @MaxLength(500)
   discrepancyReason?: string;
 

@@ -15,15 +15,13 @@ import type { CloseShiftDto } from '../dto/close-shift.dto';
 import type { ListShiftsQueryDto } from '../dto/list-shifts-query.dto';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { UserRoleDto } from '../../users/dto/user-role.dto';
-import { AppConfigService } from '../../app-config/services/app-config.service';
 
-const DEFAULT_DISCREPANCY_THRESHOLD = 100;
+const DEFAULT_DISCREPANCY_THRESHOLD = 0;
 
 @Injectable()
 export class ShiftsService {
   constructor(
     @Inject(SHIFTS_REPOSITORY) private readonly repo: IShiftsRepository,
-    private readonly appConfigService: AppConfigService,
   ) {}
 
   async getActive() {
@@ -62,7 +60,6 @@ export class ShiftsService {
   async close(id: string, dto: CloseShiftDto, user: AuthenticatedUser) {
     const shift = await this.getById(id);
     this.assertCanCloseShift(shift, user);
-    const { discrepancyThreshold } = await this.getCloseSettings();
 
     return this.repo.close({
       id,
@@ -72,7 +69,6 @@ export class ShiftsService {
       discrepancyReason: dto.discrepancyReason?.trim() || undefined,
       authorizationPin: dto.authorizationPin,
       denominationBreakdown: dto.denominationBreakdown,
-      discrepancyThreshold,
       actor: {
         id: user.id,
         username: user.username,
@@ -88,24 +84,20 @@ export class ShiftsService {
   ) {
     const shift = await this.getById(id);
     this.assertCanCloseShift(shift, user);
-    const { blindCashCount, discrepancyThreshold } =
-      await this.getCloseSettings();
-    const preview = await this.repo.getClosePreview({
-      id,
-      discrepancyThreshold,
-    });
+    const preview = await this.repo.getClosePreview({ id });
+    const requiresAuthorization =
+      countedCash === undefined
+        ? undefined
+        : Math.round(Math.abs(countedCash - preview.expectedCash) * 100) > 0;
 
-    if (blindCashCount && countedCash === undefined) {
-      return {
-        shiftId: preview.shiftId,
-        discrepancyThreshold: preview.discrepancyThreshold,
-        blockingOrders: preview.blockingOrders,
-        blockingTables: preview.blockingTables,
-        canClose: preview.canClose,
-        financialsRevealed: false,
-      };
-    }
-    return { ...preview, financialsRevealed: true };
+    return {
+      shiftId: preview.shiftId,
+      discrepancyThreshold: DEFAULT_DISCREPANCY_THRESHOLD,
+      blockingOrders: preview.blockingOrders,
+      blockingTables: preview.blockingTables,
+      canClose: preview.canClose,
+      requiresAuthorization,
+    };
   }
 
   async assertCanTerminateSession(user: AuthenticatedUser): Promise<void> {
@@ -139,30 +131,5 @@ export class ShiftsService {
         'No puedes cerrar un turno que fue abierto por otro cajero',
       );
     }
-  }
-
-  private async getCloseSettings(): Promise<{
-    blindCashCount: boolean;
-    discrepancyThreshold: number;
-  }> {
-    const config =
-      await this.appConfigService.getByIdOrDefault('general_config');
-    if (typeof config.data !== 'object' || config.data === null) {
-      return {
-        blindCashCount: false,
-        discrepancyThreshold: DEFAULT_DISCREPANCY_THRESHOLD,
-      };
-    }
-    const data = config.data as Record<string, unknown>;
-    const threshold = data['cashDiscrepancyThreshold'];
-    return {
-      blindCashCount: data['blindCashCount'] === true,
-      discrepancyThreshold:
-        typeof threshold === 'number' &&
-        Number.isFinite(threshold) &&
-        threshold >= 0
-          ? threshold
-          : DEFAULT_DISCREPANCY_THRESHOLD,
-    };
   }
 }

@@ -14,10 +14,7 @@ export interface IShiftsRepository {
     cashierSnapshotName: string;
   }): Promise<ShiftEntity | null>;
   findById(id: string): Promise<ShiftEntity | null>;
-  getClosePreview(params: {
-    id: string;
-    discrepancyThreshold: number;
-  }): Promise<ShiftClosePreview>;
+  getClosePreview(params: { id: string }): Promise<ShiftClosePreview>;
   list(params: {
     limit: number;
     status?: ShiftStatus;
@@ -40,7 +37,6 @@ export interface IShiftsRepository {
     discrepancyReason?: string;
     authorizationPin?: string;
     denominationBreakdown?: CashDenominationCount[];
-    discrepancyThreshold: number;
     actor: {
       id: string;
       username: string;

@@ -15,9 +15,6 @@ describe('ShiftsService', () => {
     open: jest.fn(),
     close: jest.fn(),
   };
-  const appConfigService = {
-    getByIdOrDefault: jest.fn(),
-  };
   const user: AuthenticatedUser = {
     id: '2f2ec17b-c8e2-4108-a76c-b72be5f80437',
     username: 'principal',
@@ -44,12 +41,7 @@ describe('ShiftsService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    appConfigService.getByIdOrDefault.mockResolvedValue({
-      id: 'general_config',
-      data: { cashDiscrepancyThreshold: 100 },
-      updatedAt: new Date(0),
-    });
-    service = new ShiftsService(repo, appConfigService as never);
+    service = new ShiftsService(repo);
   });
 
   afterEach(() => jest.useRealTimers());
@@ -98,25 +90,29 @@ describe('ShiftsService', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('obtiene la validación previa con el umbral configurado', async () => {
+  it('aplica cero tolerancia en la validación previa', async () => {
     repo.findById.mockResolvedValue(activeShift);
-    repo.getClosePreview.mockResolvedValue({ canClose: true });
-
-    await service.getClosePreview(activeShift.id, user);
-
-    expect(repo.getClosePreview).toHaveBeenCalledWith({
-      id: activeShift.id,
-      discrepancyThreshold: 100,
+    repo.getClosePreview.mockResolvedValue({
+      shiftId: activeShift.id,
+      expectedCash: 2000,
+      blockingOrders: [],
+      blockingTables: [],
+      canClose: true,
     });
+
+    const result = await service.getClosePreview(activeShift.id, user, 2000);
+
+    expect(repo.getClosePreview).toHaveBeenCalledWith({ id: activeShift.id });
+    expect(result).toEqual(
+      expect.objectContaining({
+        discrepancyThreshold: 0,
+        requiresAuthorization: false,
+      }),
+    );
   });
 
-  it('no expone los montos del arqueo ciego antes de confirmar el conteo', async () => {
+  it('no expone los montos del arqueo ciego ni después de contar', async () => {
     repo.findById.mockResolvedValue(activeShift);
-    appConfigService.getByIdOrDefault.mockResolvedValue({
-      id: 'general_config',
-      data: { blindCashCount: true, cashDiscrepancyThreshold: 100 },
-      updatedAt: new Date(0),
-    });
     repo.getClosePreview.mockResolvedValue({
       shiftId: activeShift.id,
       openingAmount: 2000,
@@ -124,7 +120,7 @@ describe('ShiftsService', () => {
       expenses: [],
       totalExpenses: 0,
       expectedCash: 2500,
-      discrepancyThreshold: 100,
+      discrepancyThreshold: 0,
       blockingOrders: [],
       blockingTables: [],
       canClose: true,
@@ -133,14 +129,17 @@ describe('ShiftsService', () => {
     const hidden = await service.getClosePreview(activeShift.id, user);
     const revealed = await service.getClosePreview(activeShift.id, user, 2400);
 
-    expect(hidden).toEqual(
-      expect.objectContaining({ financialsRevealed: false, canClose: true }),
-    );
+    expect(hidden).toEqual(expect.objectContaining({ canClose: true }));
     expect(hidden).not.toHaveProperty('expectedCash');
     expect(hidden).not.toHaveProperty('sales');
     expect(revealed).toEqual(
-      expect.objectContaining({ financialsRevealed: true, expectedCash: 2500 }),
+      expect.objectContaining({
+        discrepancyThreshold: 0,
+        requiresAuthorization: true,
+      }),
     );
+    expect(revealed).not.toHaveProperty('expectedCash');
+    expect(revealed).not.toHaveProperty('sales');
   });
 
   it('envía los datos antifraude al cierre autoritativo', async () => {
@@ -165,7 +164,6 @@ describe('ShiftsService', () => {
       expect.objectContaining({
         id: activeShift.id,
         closingAmount: 1800,
-        discrepancyThreshold: 100,
         discrepancyReason: 'Faltante validado por supervisión',
         authorizationPin: '1234',
         actor: {
