@@ -146,7 +146,7 @@ describe('PrismaShiftsRepository.close', () => {
       }),
     ).rejects.toThrow(
       new BadRequestException(
-        'El turno presenta un descuadre de C$ 0.01 y requiere autorización con PIN de Administrador y justificación.',
+        'El turno presenta un descuadre (Efectivo: C$ -0.01) y requiere autorización con PIN de Administrador y justificación.',
       ),
     );
     expect(shiftUpdate).not.toHaveBeenCalled();
@@ -164,7 +164,7 @@ describe('PrismaShiftsRepository.close', () => {
       }),
     ).rejects.toThrow(
       new BadRequestException(
-        'El turno presenta un descuadre de C$ 1.00 y requiere autorización con PIN de Administrador y justificación.',
+        'El turno presenta un descuadre (Efectivo: C$ -1.00) y requiere autorización con PIN de Administrador y justificación.',
       ),
     );
     expect(shiftUpdate).not.toHaveBeenCalled();

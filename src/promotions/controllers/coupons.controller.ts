@@ -45,7 +45,12 @@ export class CouponsController {
   }
 
   @Post('redeem')
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero)
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.despachador,
+  )
   redeem(@Body() dto: RedeemCuponDto) {
     return this.coupons.redeem(dto);
   }

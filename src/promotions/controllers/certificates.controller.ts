@@ -36,7 +36,12 @@ export class CertificatesController {
   }
 
   @Post(':id/deliver')
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero)
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.despachador,
+  )
   markDelivered(@Param('id', ParseIntPipe) id: number) {
     return this.certificates.markDelivered(id);
   }
@@ -54,7 +59,12 @@ export class CertificatesController {
   }
 
   @Post('redeem')
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero)
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.despachador,
+  )
   redeem(@Body() dto: RedeemCertificadoDto) {
     return this.certificates.redeem(dto);
   }

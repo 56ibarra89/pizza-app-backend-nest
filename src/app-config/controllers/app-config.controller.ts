@@ -15,9 +15,11 @@ export class AppConfigController {
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
     UserRoleDto.mesero,
     UserRoleDto.cocinero,
     UserRoleDto.despachador,
+    UserRoleDto.motorizado,
   )
   getById(@Param('id') id: string) {
     return this.service.getByIdOrDefault(id);

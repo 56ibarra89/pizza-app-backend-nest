@@ -85,6 +85,7 @@ export class OrdersController {
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
     UserRoleDto.mesero,
     UserRoleDto.despachador,
     UserRoleDto.motorizado,
@@ -114,6 +115,7 @@ export class OrdersController {
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
     UserRoleDto.cocinero,
     UserRoleDto.despachador,
   )
@@ -125,6 +127,7 @@ export class OrdersController {
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
     UserRoleDto.cocinero,
     UserRoleDto.despachador,
   )

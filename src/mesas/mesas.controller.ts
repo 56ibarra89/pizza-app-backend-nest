@@ -30,7 +30,13 @@ export class MesasController {
   }
 
   @Patch(':id/status')
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero)
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.mesero,
+    UserRoleDto.despachador,
+  )
   updateStatus(
     @Param('id') id: string,
     @Body() dto: UpdateMesaStatusDto,
@@ -39,7 +45,13 @@ export class MesasController {
   }
 
   @Patch(':id/reserve')
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero)
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.mesero,
+    UserRoleDto.despachador,
+  )
   reserveMesa(
     @Param('id') id: string,
     @Body() dto: ReserveMesaDto,
@@ -48,7 +60,13 @@ export class MesasController {
   }
 
   @Patch(':id/release')
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero, UserRoleDto.mesero)
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.mesero,
+    UserRoleDto.despachador,
+  )
   releaseMesa(@Param('id') id: string) {
     return this.mesasService.releaseMesa(id);
   }
