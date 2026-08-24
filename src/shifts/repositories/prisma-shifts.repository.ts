@@ -132,6 +132,8 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     id: string;
     endTime: Date;
     closingAmount: number;
+    declaredCardAmount?: number;
+    declaredAppAmount?: number;
     notes?: string;
     discrepancyReason?: string;
     authorizationPin?: string;
@@ -165,24 +167,55 @@ export class PrismaShiftsRepository implements IShiftsRepository {
           params.denominationBreakdown,
         );
 
+        const closingCash = new Prisma.Decimal(params.closingAmount);
+        const declaredCard = new Prisma.Decimal(params.declaredCardAmount ?? 0);
+        const declaredApp = new Prisma.Decimal(params.declaredAppAmount ?? 0);
+
         const expectedCash = new Prisma.Decimal(preview.expectedCash);
-        const cashDifference = new Prisma.Decimal(params.closingAmount).sub(
-          expectedCash,
-        );
-        const requiresAuthorization = cashDifference
-          .abs()
-          .greaterThan(DEFAULT_DISCREPANCY_THRESHOLD);
+        const expectedCard = new Prisma.Decimal(preview.sales.card);
+        const expectedApp = new Prisma.Decimal(preview.sales.app);
+
+        const cashDifference = closingCash.sub(expectedCash);
+        const cardDifference = declaredCard.sub(expectedCard);
+        const appDifference = declaredApp.sub(expectedApp);
+
+        const totalDeclaredAmount = closingCash
+          .add(declaredCard)
+          .add(declaredApp);
+        const totalDifference = cashDifference
+          .add(cardDifference)
+          .add(appDifference);
+
+        const requiresAuthorization =
+          cashDifference.abs().greaterThan(DEFAULT_DISCREPANCY_THRESHOLD) ||
+          cardDifference.abs().greaterThan(DEFAULT_DISCREPANCY_THRESHOLD) ||
+          appDifference.abs().greaterThan(DEFAULT_DISCREPANCY_THRESHOLD);
         let authorizer:
           | { id: string; username: string; role: UserRole }
           | undefined;
 
         if (requiresAuthorization) {
           const reason = params.discrepancyReason?.trim();
-          const authorizationError = `El turno presenta un descuadre de C$ ${cashDifference
-            .abs()
-            .toFixed(
-              2,
-            )} y requiere autorización con PIN de Administrador y justificación.`;
+          const reasons: string[] = [];
+          if (!cashDifference.isZero()) {
+            reasons.push(
+              `Efectivo: ${cashDifference.greaterThan(0) ? '+' : ''}C$ ${cashDifference.toFixed(2)}`,
+            );
+          }
+          if (!cardDifference.isZero()) {
+            reasons.push(
+              `Tarjeta: ${cardDifference.greaterThan(0) ? '+' : ''}C$ ${cardDifference.toFixed(2)}`,
+            );
+          }
+          if (!appDifference.isZero()) {
+            reasons.push(
+              `App: ${appDifference.greaterThan(0) ? '+' : ''}C$ ${appDifference.toFixed(2)}`,
+            );
+          }
+
+          const authorizationError = `El turno presenta un descuadre (${reasons.join(
+            ', ',
+          )}) y requiere autorización con PIN de Administrador y justificación.`;
           if (!reason || reason.length < 5 || !params.authorizationPin) {
             throw new BadRequestException(authorizationError);
           }
@@ -214,6 +247,12 @@ export class PrismaShiftsRepository implements IShiftsRepository {
             expectedCash,
             totalExpensesSnapshot: preview.totalExpenses,
             cashDifference,
+            declaredCardAmount: declaredCard,
+            cardDifference,
+            declaredAppAmount: declaredApp,
+            appDifference,
+            totalDeclaredAmount,
+            totalDifference,
             discrepancyReason: requiresAuthorization
               ? params.discrepancyReason?.trim()
               : null,
@@ -243,10 +282,18 @@ export class PrismaShiftsRepository implements IShiftsRepository {
               cashier: existing.cashierSnapshotName,
               openingAmount: existing.openingAmount.toNumber(),
               cashSales: preview.sales.cash,
+              cardSales: preview.sales.card,
+              appSales: preview.sales.app,
               totalExpenses: preview.totalExpenses,
               expectedCash: preview.expectedCash,
               countedCash: params.closingAmount,
-              difference: cashDifference.toNumber(),
+              declaredCard: declaredCard.toNumber(),
+              declaredApp: declaredApp.toNumber(),
+              cashDifference: cashDifference.toNumber(),
+              cardDifference: cardDifference.toNumber(),
+              appDifference: appDifference.toNumber(),
+              totalDeclaredAmount: totalDeclaredAmount.toNumber(),
+              totalDifference: totalDifference.toNumber(),
               discrepancyThreshold: DEFAULT_DISCREPANCY_THRESHOLD,
               discrepancyReason: requiresAuthorization
                 ? params.discrepancyReason?.trim()
@@ -429,6 +476,12 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       expectedCash,
       totalExpensesSnapshot: row.totalExpensesSnapshot?.toNumber() ?? undefined,
       cashDifference,
+      declaredCardAmount: row.declaredCardAmount?.toNumber() ?? undefined,
+      cardDifference: row.cardDifference?.toNumber() ?? undefined,
+      declaredAppAmount: row.declaredAppAmount?.toNumber() ?? undefined,
+      appDifference: row.appDifference?.toNumber() ?? undefined,
+      totalDeclaredAmount: row.totalDeclaredAmount?.toNumber() ?? undefined,
+      totalDifference: row.totalDifference?.toNumber() ?? undefined,
       discrepancyReason: row.discrepancyReason ?? undefined,
       authorizedById: row.authorizedById ?? undefined,
       authorizedBySnapshotName: row.authorizedBySnapshotName ?? undefined,

@@ -95,12 +95,15 @@ describe('ShiftsService', () => {
     repo.getClosePreview.mockResolvedValue({
       shiftId: activeShift.id,
       expectedCash: 2000,
+      sales: { cash: 0, card: 0, app: 0, total: 0 },
       blockingOrders: [],
       blockingTables: [],
       canClose: true,
     });
 
-    const result = await service.getClosePreview(activeShift.id, user, 2000);
+    const result = await service.getClosePreview(activeShift.id, user, {
+      countedCash: 2000,
+    });
 
     expect(repo.getClosePreview).toHaveBeenCalledWith({ id: activeShift.id });
     expect(result).toEqual(
@@ -116,7 +119,7 @@ describe('ShiftsService', () => {
     repo.getClosePreview.mockResolvedValue({
       shiftId: activeShift.id,
       openingAmount: 2000,
-      sales: { cash: 500, card: 0, app: 0, total: 500 },
+      sales: { cash: 500, card: 300, app: 200, total: 1000 },
       expenses: [],
       totalExpenses: 0,
       expectedCash: 2500,
@@ -127,7 +130,11 @@ describe('ShiftsService', () => {
     });
 
     const hidden = await service.getClosePreview(activeShift.id, user);
-    const revealed = await service.getClosePreview(activeShift.id, user, 2400);
+    const revealed = await service.getClosePreview(activeShift.id, user, {
+      countedCash: 2400,
+      countedCard: 300,
+      countedApp: 200,
+    });
 
     expect(hidden).toEqual(expect.objectContaining({ canClose: true }));
     expect(hidden).not.toHaveProperty('expectedCash');
@@ -142,7 +149,31 @@ describe('ShiftsService', () => {
     expect(revealed).not.toHaveProperty('sales');
   });
 
-  it('envía los datos antifraude al cierre autoritativo', async () => {
+  it('detecta descuadre si hay diferencia en tarjeta o app', async () => {
+    repo.findById.mockResolvedValue(activeShift);
+    repo.getClosePreview.mockResolvedValue({
+      shiftId: activeShift.id,
+      sales: { cash: 500, card: 300, app: 200, total: 1000 },
+      expectedCash: 2500,
+      blockingOrders: [],
+      blockingTables: [],
+      canClose: true,
+    });
+
+    const cardDiscrepancy = await service.getClosePreview(
+      activeShift.id,
+      user,
+      {
+        countedCash: 2500,
+        countedCard: 250, // Faltan 50 en vouchers
+        countedApp: 200,
+      },
+    );
+
+    expect(cardDiscrepancy.requiresAuthorization).toBe(true);
+  });
+
+  it('envía los datos antifraude y multi-método al cierre autoritativo', async () => {
     repo.findById.mockResolvedValue(activeShift);
     repo.close.mockResolvedValue({
       ...activeShift,
@@ -153,6 +184,8 @@ describe('ShiftsService', () => {
       activeShift.id,
       {
         closingAmount: 1800,
+        declaredCardAmount: 300,
+        declaredAppAmount: 200,
         discrepancyReason: 'Faltante validado por supervisión',
         authorizationPin: '1234',
         denominationBreakdown: [{ denomination: 500, quantity: 3 }],
@@ -164,6 +197,8 @@ describe('ShiftsService', () => {
       expect.objectContaining({
         id: activeShift.id,
         closingAmount: 1800,
+        declaredCardAmount: 300,
+        declaredAppAmount: 200,
         discrepancyReason: 'Faltante validado por supervisión',
         authorizationPin: '1234',
         actor: {

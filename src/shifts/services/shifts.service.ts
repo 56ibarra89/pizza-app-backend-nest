@@ -65,6 +65,8 @@ export class ShiftsService {
       id,
       endTime: new Date(),
       closingAmount: dto.closingAmount,
+      declaredCardAmount: dto.declaredCardAmount,
+      declaredAppAmount: dto.declaredAppAmount,
       notes: dto.notes?.trim() || undefined,
       discrepancyReason: dto.discrepancyReason?.trim() || undefined,
       authorizationPin: dto.authorizationPin,
@@ -80,15 +82,37 @@ export class ShiftsService {
   async getClosePreview(
     id: string,
     user: AuthenticatedUser,
-    countedCash?: number,
+    query?: {
+      countedCash?: number;
+      countedCard?: number;
+      countedApp?: number;
+    },
   ) {
     const shift = await this.getById(id);
     this.assertCanCloseShift(shift, user);
     const preview = await this.repo.getClosePreview({ id });
-    const requiresAuthorization =
-      countedCash === undefined
-        ? undefined
-        : Math.round(Math.abs(countedCash - preview.expectedCash) * 100) > 0;
+
+    let requiresAuthorization: boolean | undefined = undefined;
+    if (
+      query?.countedCash !== undefined ||
+      query?.countedCard !== undefined ||
+      query?.countedApp !== undefined
+    ) {
+      const cashDiff =
+        query.countedCash !== undefined
+          ? Math.round(Math.abs(query.countedCash - preview.expectedCash) * 100)
+          : 0;
+      const cardDiff =
+        query.countedCard !== undefined
+          ? Math.round(Math.abs(query.countedCard - preview.sales.card) * 100)
+          : 0;
+      const appDiff =
+        query.countedApp !== undefined
+          ? Math.round(Math.abs(query.countedApp - preview.sales.app) * 100)
+          : 0;
+
+      requiresAuthorization = cashDiff > 0 || cardDiff > 0 || appDiff > 0;
+    }
 
     return {
       shiftId: preview.shiftId,

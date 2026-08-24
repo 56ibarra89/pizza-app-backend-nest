@@ -37,7 +37,7 @@ export class ShiftsController {
     @Query() query: CloseShiftPreviewQueryDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.service.getClosePreview(id, user, query.countedCash);
+    return this.service.getClosePreview(id, user, query);
   }
 
   @Post('open')

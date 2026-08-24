@@ -113,6 +113,12 @@ model Shift {
   expectedCash             Decimal?      @db.Decimal(12, 2)
   totalExpensesSnapshot    Decimal?      @db.Decimal(12, 2)
   cashDifference           Decimal?      @db.Decimal(12, 2)
+  declaredCardAmount       Decimal?      @db.Decimal(12, 2)
+  cardDifference           Decimal?      @db.Decimal(12, 2)
+  declaredAppAmount        Decimal?      @db.Decimal(12, 2)
+  appDifference            Decimal?      @db.Decimal(12, 2)
+  totalDeclaredAmount      Decimal?      @db.Decimal(12, 2)
+  totalDifference          Decimal?      @db.Decimal(12, 2)
   discrepancyReason        String?
   authorizedById           String?
   authorizedBySnapshotName String?

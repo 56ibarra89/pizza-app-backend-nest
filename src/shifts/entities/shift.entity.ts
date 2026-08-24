@@ -18,6 +18,12 @@ export type ShiftEntity = {
   expectedCash?: number;
   totalExpensesSnapshot?: number;
   cashDifference?: number;
+  declaredCardAmount?: number;
+  cardDifference?: number;
+  declaredAppAmount?: number;
+  appDifference?: number;
+  totalDeclaredAmount?: number;
+  totalDifference?: number;
   discrepancyReason?: string;
   authorizedById?: string;
   authorizedBySnapshotName?: string;

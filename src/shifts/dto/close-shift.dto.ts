@@ -35,6 +35,18 @@ export class CloseShiftDto {
   @Min(0)
   closingAmount!: number;
 
+  @Type(() => Number)
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  declaredCardAmount?: number;
+
+  @Type(() => Number)
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  declaredAppAmount?: number;
+
   @IsOptional()
   @IsString()
   @MaxLength(1000)

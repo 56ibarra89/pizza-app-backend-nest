@@ -33,6 +33,8 @@ export interface IShiftsRepository {
     id: string;
     endTime: Date;
     closingAmount: number;
+    declaredCardAmount?: number;
+    declaredAppAmount?: number;
     notes?: string;
     discrepancyReason?: string;
     authorizationPin?: string;
