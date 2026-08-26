@@ -23,6 +23,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { NotificationsModule } from './notifications/notifications.module';
 import { KitchensModule } from './kitchens/kitchens.module';
 import { CashExpensesModule } from './cash-expenses/cash-expenses.module';
+import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { CashExpensesModule } from './cash-expenses/cash-expenses.module';
     NotificationsModule,
     KitchensModule,
     CashExpensesModule,
+    AdminDashboardModule,
   ],
   controllers: [AppController],
   providers: [
