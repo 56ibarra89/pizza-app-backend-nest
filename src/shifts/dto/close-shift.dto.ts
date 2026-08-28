@@ -68,4 +68,9 @@ export class CloseShiftDto {
   @ValidateNested({ each: true })
   @Type(() => CashDenominationCountDto)
   denominationBreakdown?: CashDenominationCountDto[];
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['HANDOVER', 'END_OF_DAY'])
+  closeType?: 'HANDOVER' | 'END_OF_DAY';
 }

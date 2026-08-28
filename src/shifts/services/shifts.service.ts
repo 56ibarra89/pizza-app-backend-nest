@@ -24,7 +24,7 @@ export class ShiftsService {
     @Inject(SHIFTS_REPOSITORY) private readonly repo: IShiftsRepository,
   ) {}
 
-  async getActive() {
+  async getActive(user?: AuthenticatedUser) {
     return this.repo.findActive();
   }
 
@@ -44,7 +44,7 @@ export class ShiftsService {
   async open(dto: OpenShiftDto, user: AuthenticatedUser) {
     const existing = await this.repo.findActive();
     if (existing) {
-      throw new BadRequestException('Ya existe un turno abierto');
+      throw new BadRequestException('Ya existe un turno de caja abierto en el sistema.');
     }
 
     return this.repo.open({
@@ -71,6 +71,7 @@ export class ShiftsService {
       discrepancyReason: dto.discrepancyReason?.trim() || undefined,
       authorizationPin: dto.authorizationPin,
       denominationBreakdown: dto.denominationBreakdown,
+      closeType: dto.closeType,
       actor: {
         id: user.id,
         username: user.username,
@@ -86,11 +87,15 @@ export class ShiftsService {
       countedCash?: number;
       countedCard?: number;
       countedApp?: number;
+      closeType?: 'HANDOVER' | 'END_OF_DAY';
     },
   ) {
     const shift = await this.getById(id);
     this.assertCanCloseShift(shift, user);
-    const preview = await this.repo.getClosePreview({ id });
+    const preview = await this.repo.getClosePreview({
+      id,
+      closeType: query?.closeType,
+    });
 
     let requiresAuthorization: boolean | undefined = undefined;
     if (

@@ -131,7 +131,7 @@ describe('PrismaShiftsRepository.close', () => {
 
     expect(result.cashDifference).toBe(0);
     const logged = systemLogCreate.mock.calls[0]?.[0];
-    expect(logged?.data.action).toBe('SHIFT_CLOSED');
+    expect(logged?.data.action).toBe('SHIFT_CLOSED_HANDOVER');
     expect(logged?.data.level).toBe(LogLevel.INFO);
   });
 
@@ -188,7 +188,7 @@ describe('PrismaShiftsRepository.close', () => {
     expect(result.cashDifference).toBe(-1);
     expect(result.authorizedBySnapshotName).toBe('supervisor');
     const logged = systemLogCreate.mock.calls[0]?.[0];
-    expect(logged?.data.action).toBe('SHIFT_CLOSED_WITH_DISCREPANCY');
+    expect(logged?.data.action).toBe('SHIFT_CLOSED_HANDOVER_WITH_DISCREPANCY');
     expect(logged?.data.level).toBe(LogLevel.WARN);
   });
 });

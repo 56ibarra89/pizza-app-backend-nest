@@ -22,7 +22,7 @@ import { ShiftsModule } from '../shifts/shifts.module';
               throw new Error('JWT_SECRET must be defined in production!');
             })()
           : 'pizza-secret-key-dev-only-change-me'),
-      signOptions: { expiresIn: '1h' },
+      signOptions: { expiresIn: (process.env.JWT_EXPIRES_IN as any) || '24h' },
     }),
   ],
   controllers: [UsersController, AuthController],

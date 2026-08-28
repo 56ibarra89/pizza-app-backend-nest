@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsNumber, IsOptional, Min } from 'class-validator';
+import { IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 export class CloseShiftPreviewQueryDto {
   @IsOptional()
@@ -19,4 +19,9 @@ export class CloseShiftPreviewQueryDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   countedApp?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['HANDOVER', 'END_OF_DAY'])
+  closeType?: 'HANDOVER' | 'END_OF_DAY';
 }

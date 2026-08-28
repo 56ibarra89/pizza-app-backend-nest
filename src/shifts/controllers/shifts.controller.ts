@@ -16,8 +16,8 @@ export class ShiftsController {
   constructor(private readonly service: ShiftsService) {}
 
   @Get('active')
-  getActive() {
-    return this.service.getActive();
+  getActive(@CurrentUser() user?: AuthenticatedUser) {
+    return this.service.getActive(user);
   }
 
   @Get()
@@ -31,7 +31,12 @@ export class ShiftsController {
   }
 
   @Get(':id/close-preview')
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero_principal)
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.cajero,
+    UserRoleDto.despachador,
+  )
   getClosePreview(
     @Param('id') id: string,
     @Query() query: CloseShiftPreviewQueryDto,
@@ -41,13 +46,23 @@ export class ShiftsController {
   }
 
   @Post('open')
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero_principal)
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.cajero,
+    UserRoleDto.despachador,
+  )
   open(@Body() dto: OpenShiftDto, @CurrentUser() user: AuthenticatedUser) {
     return this.service.open(dto, user);
   }
 
   @Post(':id/close')
-  @Roles(UserRoleDto.admin, UserRoleDto.cajero_principal)
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.cajero,
+    UserRoleDto.despachador,
+  )
   close(
     @Param('id') id: string,
     @Body() dto: CloseShiftDto,

@@ -39,7 +39,7 @@ describe('AdminDashboardService', () => {
     expect(service).toBeDefined();
   });
 
-  it('returns active cash registers with proper payment sum', async () => {
+  it('returns active cash registers with breakdown per collaborator', async () => {
     prisma.shift.findMany.mockResolvedValue([
       {
         id: 'shift-1',
@@ -57,6 +57,7 @@ describe('AdminDashboardService', () => {
         orders: [
           {
             id: 'ord-1',
+            cashierId: 'user-1',
             status: 'PAID',
             total: 1000,
             payments: [
@@ -66,6 +67,13 @@ describe('AdminDashboardService', () => {
           },
           {
             id: 'ord-2',
+            cashierId: 'user-2',
+            cashier: {
+              firstName: 'Sidney',
+              lastName: 'Barquero',
+              username: 'sidneyb',
+              role: 'CAJERO',
+            },
             status: 'PAID',
             total: 300,
             payments: [{ method: 'APP', amount: 300 }],
@@ -76,13 +84,27 @@ describe('AdminDashboardService', () => {
 
     const result = await service.getActiveCashRegisters();
 
-    expect(result).toHaveLength(1);
+    expect(result).toHaveLength(2);
+
+    // 1. Cajero Principal con fondo inicial
+    expect(result[0].cashier).toBe('Juan Perez');
+    expect(result[0].cashierRole).toBe('CAJERO_PRINCIPAL');
+    expect(result[0].openingAmount).toBe(500);
     expect(result[0].revenueCash).toBe(600);
     expect(result[0].revenueCard).toBe(400);
-    expect(result[0].revenueApp).toBe(300);
-    expect(result[0].revenueTotal).toBe(1300);
-    expect(result[0].transactionsCompleted).toBe(2);
-    expect(result[0].cashier).toBe('Juan Perez');
+    expect(result[0].revenueApp).toBe(0);
+    expect(result[0].revenueTotal).toBe(1000);
+    expect(result[0].transactionsCompleted).toBe(1);
+
+    // 2. Colaborador Secundario (Sidney) sin fondo inicial
+    expect(result[1].cashier).toBe('Sidney Barquero');
+    expect(result[1].cashierRole).toBe('CAJERO');
+    expect(result[1].openingAmount).toBe(0);
+    expect(result[1].revenueCash).toBe(0);
+    expect(result[1].revenueCard).toBe(0);
+    expect(result[1].revenueApp).toBe(300);
+    expect(result[1].revenueTotal).toBe(300);
+    expect(result[1].transactionsCompleted).toBe(1);
   });
 
   it('returns live KPIs correctly unifying occupied tables and active order tables', async () => {

@@ -72,14 +72,17 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     return row ? this.map(row) : null;
   }
 
-  async getClosePreview(params: { id: string }): Promise<ShiftClosePreview> {
+  async getClosePreview(params: {
+    id: string;
+    closeType?: 'HANDOVER' | 'END_OF_DAY';
+  }): Promise<ShiftClosePreview> {
     return this.prisma.$transaction(async (tx) => {
       const shift = await tx.shift.findUnique({
         where: { id: params.id },
         include: { expenses: true },
       });
       if (!shift) throw new NotFoundException('Turno no encontrado');
-      return this.buildClosePreview(tx, shift);
+      return this.buildClosePreview(tx, shift, params.closeType);
     });
   }
 
@@ -138,6 +141,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     discrepancyReason?: string;
     authorizationPin?: string;
     denominationBreakdown?: CashDenominationCount[];
+    closeType?: 'HANDOVER' | 'END_OF_DAY';
     actor: { id: string; username: string; role: string };
   }): Promise<ShiftEntity> {
     return this.prisma.$transaction(
@@ -151,12 +155,16 @@ export class PrismaShiftsRepository implements IShiftsRepository {
           throw new BadRequestException('El turno ya está cerrado');
         }
 
-        const preview = await this.buildClosePreview(tx, existing);
+        const preview = await this.buildClosePreview(
+          tx,
+          existing,
+          params.closeType,
+        );
         if (!preview.canClose) {
           throw new ConflictException({
             code: 'SHIFT_HAS_PENDING_OPERATIONS',
             message:
-              'No se puede cerrar la caja mientras existan órdenes pendientes o mesas ocupadas sin cobrar.',
+              'No se puede realizar el cierre final del día mientras existan órdenes pendientes o mesas ocupadas sin cobrar.',
             blockingOrders: preview.blockingOrders,
             blockingTables: preview.blockingTables,
           });
@@ -268,16 +276,25 @@ export class PrismaShiftsRepository implements IShiftsRepository {
           include: { expenses: { orderBy: { createdAt: 'desc' } } },
         });
 
+        const isEndOfDay = params.closeType === 'END_OF_DAY';
+        const action = requiresAuthorization
+          ? isEndOfDay
+            ? 'SHIFT_CLOSED_END_OF_DAY_WITH_DISCREPANCY'
+            : 'SHIFT_CLOSED_HANDOVER_WITH_DISCREPANCY'
+          : isEndOfDay
+            ? 'SHIFT_CLOSED_END_OF_DAY'
+            : 'SHIFT_CLOSED_HANDOVER';
+
         await tx.systemLog.create({
           data: {
             userId: params.actor.id,
             user: params.actor.username,
             role: params.actor.role,
-            action: requiresAuthorization
-              ? 'SHIFT_CLOSED_WITH_DISCREPANCY'
-              : 'SHIFT_CLOSED',
+            action,
             level: requiresAuthorization ? LogLevel.WARN : LogLevel.INFO,
             details: JSON.stringify({
+              closeType: params.closeType ?? 'HANDOVER',
+              closeTypeLabel: isEndOfDay ? 'CIERRE_FINAL_DIA' : 'RELEVO_TURNO',
               shiftId: existing.id,
               cashier: existing.cashierSnapshotName,
               openingAmount: existing.openingAmount.toNumber(),
@@ -315,6 +332,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
   private async buildClosePreview(
     tx: Prisma.TransactionClient,
     shift: ShiftWithExpenses,
+    closeType: 'HANDOVER' | 'END_OF_DAY' = 'HANDOVER',
   ): Promise<ShiftClosePreview> {
     const [payments, pendingOrders] = await Promise.all([
       tx.payment.findMany({
@@ -391,6 +409,11 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       orderIds: Array.from(table.orderIds),
     }));
 
+    const canClose =
+      closeType === 'HANDOVER'
+        ? true
+        : blockingOrders.length === 0 && blockingTables.length === 0;
+
     return {
       shiftId: shift.id,
       openingAmount: shift.openingAmount.toNumber(),
@@ -406,7 +429,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       discrepancyThreshold: DEFAULT_DISCREPANCY_THRESHOLD,
       blockingOrders,
       blockingTables,
-      canClose: blockingOrders.length === 0 && blockingTables.length === 0,
+      canClose,
     };
   }
 
