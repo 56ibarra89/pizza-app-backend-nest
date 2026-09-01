@@ -48,6 +48,32 @@ export class PrismaCustomersRepository implements ICustomersRepository {
     return found ? this.mapCustomer(found) : null;
   }
 
+  async create(params: {
+    name: string;
+    phone?: string;
+    address?: string;
+  }): Promise<CustomerEntity> {
+    const cleanName = params.name.trim();
+    const phone = params.phone?.trim() || undefined;
+    const address = params.address?.trim() || undefined;
+    const now = new Date();
+
+    const created = await this.prisma.customer.create({
+      data: {
+        name: cleanName,
+        phone: phone || null,
+        addresses: address
+          ? {
+              create: [{ address, lastUsed: now }],
+            }
+          : undefined,
+      },
+      include: { addresses: { orderBy: { lastUsed: 'desc' } } },
+    });
+
+    return this.mapCustomer(created);
+  }
+
   async upsertByName(params: {
     name: string;
     phone?: string;
@@ -60,10 +86,21 @@ export class PrismaCustomersRepository implements ICustomersRepository {
     const address = params.address?.trim() || undefined;
 
     return this.prisma.$transaction(async (tx) => {
-      const existing = await tx.customer.findFirst({
-        where: { name: { equals: nameLower, mode: 'insensitive' } },
-        include: { addresses: true },
-      });
+      // Priorizar búsqueda por teléfono si existe para evitar mezclar homónimos
+      let existing = phone
+        ? await tx.customer.findFirst({
+            where: { phone },
+            include: { addresses: true },
+          })
+        : null;
+
+      // Si no se encontró por teléfono y no se dio teléfono, buscar por nombre exacto
+      if (!existing && !phone) {
+        existing = await tx.customer.findFirst({
+          where: { name: { equals: nameLower, mode: 'insensitive' } },
+          include: { addresses: true },
+        });
+      }
 
       const isNew = !existing;
 
@@ -71,7 +108,7 @@ export class PrismaCustomersRepository implements ICustomersRepository {
         const created = await tx.customer.create({
           data: {
             name: cleanName,
-            phone,
+            phone: phone || null,
             addresses: address
               ? {
                   create: [{ address, lastUsed: now }],
@@ -87,18 +124,13 @@ export class PrismaCustomersRepository implements ICustomersRepository {
       const updatedCustomer = await tx.customer.update({
         where: { id: existing.id },
         data: {
+          name: cleanName,
           phone: phone ?? existing.phone,
         },
       });
 
       if (address) {
         const addrLower = address.toLowerCase();
-        const existingAddr = await tx.customerAddress.findFirst({
-          where: {
-            customerId: existing.id,
-          },
-        });
-
         const matched = existing.addresses.find(
           (a) => a.address.toLowerCase() === addrLower,
         );
@@ -113,8 +145,6 @@ export class PrismaCustomersRepository implements ICustomersRepository {
             data: { customerId: existing.id, address, lastUsed: now },
           });
         }
-
-        void existingAddr;
       }
 
       const reloaded = await tx.customer.findUniqueOrThrow({
@@ -128,7 +158,7 @@ export class PrismaCustomersRepository implements ICustomersRepository {
 
   async updateById(
     id: string,
-    dto: { name?: string; phone?: string },
+    dto: { name?: string; phone?: string; address?: string },
   ): Promise<CustomerEntity> {
     const data: { name?: string; phone?: string | null } = {};
 
@@ -140,13 +170,44 @@ export class PrismaCustomersRepository implements ICustomersRepository {
       data.phone = dto.phone.trim() || null;
     }
 
-    const updated = await this.prisma.customer.update({
-      where: { id },
-      data,
-      include: { addresses: { orderBy: { lastUsed: 'desc' } } },
-    });
+    const now = new Date();
+    const address = dto.address?.trim();
 
-    return this.mapCustomer(updated);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.customer.update({
+        where: { id },
+        data,
+      });
+
+      if (address) {
+        const addrLower = address.toLowerCase();
+        const existingAddresses = await tx.customerAddress.findMany({
+          where: { customerId: id },
+        });
+
+        const matched = existingAddresses.find(
+          (a) => a.address.toLowerCase() === addrLower,
+        );
+
+        if (matched) {
+          await tx.customerAddress.update({
+            where: { id: matched.id },
+            data: { lastUsed: now },
+          });
+        } else {
+          await tx.customerAddress.create({
+            data: { customerId: id, address, lastUsed: now },
+          });
+        }
+      }
+
+      const reloaded = await tx.customer.findUniqueOrThrow({
+        where: { id },
+        include: { addresses: { orderBy: { lastUsed: 'desc' } } },
+      });
+
+      return this.mapCustomer(reloaded);
+    });
   }
 
   async deleteById(id: string): Promise<void> {

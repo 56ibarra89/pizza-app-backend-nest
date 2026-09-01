@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { CUSTOMERS_REPOSITORY, type ICustomersRepository } from '../interfaces/customers.repository';
+import type { CreateCustomerDto } from '../dto/create-customer.dto';
 import type { UpsertCustomerDto } from '../dto/upsert-customer.dto';
 import type { UpdateCustomerDto } from '../dto/update-customer.dto';
 
@@ -21,6 +22,14 @@ export class CustomersService {
     const found = await this.repo.findById(id);
     if (!found) throw new NotFoundException('Cliente no encontrado');
     return found;
+  }
+
+  create(dto: CreateCustomerDto) {
+    return this.repo.create({
+      name: dto.name,
+      phone: dto.phone,
+      address: dto.address,
+    });
   }
 
   upsert(dto: UpsertCustomerDto) {

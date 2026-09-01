@@ -63,6 +63,7 @@ export class OrderReferenceResolverService {
     const normalizedName = customerName?.trim();
     const normalizedAddress = customerAddress?.trim();
 
+    // 1. Si se proporciona teléfono, buscar estrictamente por teléfono para no cruzar homónimos
     if (normalizedPhone) {
       const byPhone = await this.prisma.customer.findFirst({
         where: { phone: normalizedPhone },
@@ -71,7 +72,8 @@ export class OrderReferenceResolverService {
       if (byPhone) return byPhone.id;
     }
 
-    if (normalizedName) {
+    // 2. Si NO viene teléfono (solo nombre), buscar por coincidencia de nombre
+    if (!normalizedPhone && normalizedName) {
       const byName = await this.prisma.customer.findFirst({
         where: { name: { equals: normalizedName, mode: 'insensitive' } },
         select: { id: true },
@@ -79,6 +81,7 @@ export class OrderReferenceResolverService {
       if (byName) return byName.id;
     }
 
+    // 3. Si no existe, crear un nuevo cliente independiente con su propio UUID
     if (normalizedName || normalizedPhone) {
       try {
         const name = normalizedName || `Cliente ${normalizedPhone}`;

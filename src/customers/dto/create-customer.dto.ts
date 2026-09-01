@@ -1,11 +1,11 @@
-import { IsOptional, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { Transform } from 'class-transformer';
 
-export class UpdateCustomerDto {
-  @IsOptional()
+export class CreateCustomerDto {
   @IsString()
+  @IsNotEmpty()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  name?: string;
+  name!: string;
 
   @IsOptional()
   @IsString()

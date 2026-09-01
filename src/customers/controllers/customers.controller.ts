@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { CustomersService } from '../services/customers.service';
+import { CreateCustomerDto } from '../dto/create-customer.dto';
 import { UpsertCustomerDto } from '../dto/upsert-customer.dto';
 import { UpdateCustomerDto } from '../dto/update-customer.dto';
 import { toCustomerResponseDto } from '../mappers/customers.mapper';
@@ -32,6 +33,19 @@ export class CustomersController {
   async getCustomerById(@Param('id', new ParseUUIDPipe()) id: string) {
     const customer = await this.customers.getById(id);
     return toCustomerResponseDto(customer);
+  }
+
+  @Post()
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.despachador,
+    UserRoleDto.motorizado,
+  )
+  async createCustomer(@Body() dto: CreateCustomerDto) {
+    const created = await this.customers.create(dto);
+    return toCustomerResponseDto(created);
   }
 
   @Post('upsert')

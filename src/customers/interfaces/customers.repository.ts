@@ -7,11 +7,19 @@ export interface ICustomersRepository {
   search(query: string): Promise<CustomerEntity[]>;
   findById(id: string): Promise<CustomerEntity | null>;
   findByNameLower(nameLower: string): Promise<CustomerEntity | null>;
+  create(params: {
+    name: string;
+    phone?: string;
+    address?: string;
+  }): Promise<CustomerEntity>;
   upsertByName(params: {
     name: string;
     phone?: string;
     address?: string;
   }): Promise<{ customer: CustomerEntity; isNew: boolean }>;
-  updateById(id: string, dto: { name?: string; phone?: string }): Promise<CustomerEntity>;
+  updateById(
+    id: string,
+    dto: { name?: string; phone?: string; address?: string },
+  ): Promise<CustomerEntity>;
   deleteById(id: string): Promise<void>;
 }
