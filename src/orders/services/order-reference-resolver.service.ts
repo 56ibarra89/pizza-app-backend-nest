@@ -26,7 +26,11 @@ export class OrderReferenceResolverService {
       await Promise.all([
         input.shiftId ? undefined : this.findActiveShiftId(),
         input.customerId
-          ? undefined
+          ? this.attachPhoneToExistingCustomer(
+              input.customerId,
+              input.customerPhone,
+              input.customerAddress,
+            )
           : this.findOrCreateCustomerId(
               input.customerSnapshotName,
               input.customerPhone,
@@ -54,6 +58,66 @@ export class OrderReferenceResolverService {
     return activeShift?.id;
   }
 
+  private async attachPhoneToExistingCustomer(
+    customerId: string,
+    customerPhone?: string,
+    customerAddress?: string,
+  ): Promise<undefined> {
+    const phone = customerPhone?.trim();
+    const address = customerAddress?.trim();
+    const now = new Date();
+
+    if (phone) {
+      try {
+        const existingPhone = await this.prisma.customerPhone.findFirst({
+          where: { customerId, phone },
+        });
+        if (existingPhone) {
+          await this.prisma.customerPhone.update({
+            where: { id: existingPhone.id },
+            data: { lastUsed: now },
+          });
+        } else {
+          await this.prisma.customerPhone.create({
+            data: { customerId, phone, lastUsed: now },
+          });
+          await this.prisma.customer.update({
+            where: { id: customerId },
+            data: { phone },
+          });
+        }
+      } catch {
+        // Ignorar error secundario
+      }
+    }
+
+    if (address) {
+      try {
+        const addrLower = address.toLowerCase();
+        const existingAddresses = await this.prisma.customerAddress.findMany({
+          where: { customerId },
+        });
+        const matched = existingAddresses.find(
+          (a) => a.address.toLowerCase() === addrLower,
+        );
+        if (matched) {
+          await this.prisma.customerAddress.update({
+            where: { id: matched.id },
+            data: { lastUsed: now },
+          });
+        } else {
+          await this.prisma.customerAddress.create({
+            data: { customerId, address, lastUsed: now },
+          });
+        }
+      } catch {
+        // Ignorar error secundario
+      }
+    }
+
+    return undefined;
+  }
+
   private async findOrCreateCustomerId(
     customerName?: string,
     customerPhone?: string,
@@ -62,23 +126,35 @@ export class OrderReferenceResolverService {
     const normalizedPhone = customerPhone?.trim();
     const normalizedName = customerName?.trim();
     const normalizedAddress = customerAddress?.trim();
+    const now = new Date();
 
-    // 1. Si se proporciona teléfono, buscar estrictamente por teléfono para no cruzar homónimos
+    // 1. Si se proporciona teléfono, buscar en Customer o CustomerPhone
     if (normalizedPhone) {
       const byPhone = await this.prisma.customer.findFirst({
-        where: { phone: normalizedPhone },
+        where: {
+          OR: [
+            { phone: normalizedPhone },
+            { phones: { some: { phone: normalizedPhone } } },
+          ],
+        },
         select: { id: true },
       });
-      if (byPhone) return byPhone.id;
+      if (byPhone) {
+        await this.attachPhoneToExistingCustomer(byPhone.id, normalizedPhone, normalizedAddress);
+        return byPhone.id;
+      }
     }
 
-    // 2. Si NO viene teléfono (solo nombre), buscar por coincidencia de nombre
-    if (!normalizedPhone && normalizedName) {
+    // 2. Si no se encontró por teléfono pero se dio un nombre, buscar por nombre
+    if (normalizedName) {
       const byName = await this.prisma.customer.findFirst({
         where: { name: { equals: normalizedName, mode: 'insensitive' } },
         select: { id: true },
       });
-      if (byName) return byName.id;
+      if (byName) {
+        await this.attachPhoneToExistingCustomer(byName.id, normalizedPhone, normalizedAddress);
+        return byName.id;
+      }
     }
 
     // 3. Si no existe, crear un nuevo cliente independiente con su propio UUID
@@ -89,11 +165,19 @@ export class OrderReferenceResolverService {
           data: {
             name,
             phone: normalizedPhone || null,
+            phones: normalizedPhone
+              ? {
+                  create: {
+                    phone: normalizedPhone,
+                    lastUsed: now,
+                  },
+                }
+              : undefined,
             addresses: normalizedAddress
               ? {
                   create: {
                     address: normalizedAddress,
-                    lastUsed: new Date(),
+                    lastUsed: now,
                   },
                 }
               : undefined,

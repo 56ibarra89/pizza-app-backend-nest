@@ -61,6 +61,7 @@ model Customer {
   phone     String?
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
+  phones    CustomerPhone[]
   addresses CustomerAddress[]
   orders    Order[]
 
@@ -68,11 +69,28 @@ model Customer {
   @@index([phone])
 }
 
+model CustomerPhone {
+  id         String   @id @default(uuid())
+  customerId String
+  phone      String
+  isDefault  Boolean  @default(false)
+  lastUsed   DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, phone])
+  @@index([customerId])
+  @@index([phone])
+  @@index([lastUsed])
+}
+
 model CustomerAddress {
   id         String   @id @default(uuid())
   customerId String
   address    String
-  lastUsed   DateTime
+  isDefault  Boolean  @default(false)
+  lastUsed   DateTime @default(now())
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
