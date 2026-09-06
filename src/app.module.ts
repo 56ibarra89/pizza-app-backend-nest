@@ -25,6 +25,7 @@ import { KitchensModule } from './kitchens/kitchens.module';
 import { CashExpensesModule } from './cash-expenses/cash-expenses.module';
 import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
 import { DevicesModule } from './devices/devices.module';
+import { BackupsModule } from './backups/backups.module';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { DevicesModule } from './devices/devices.module';
     CashExpensesModule,
     AdminDashboardModule,
     DevicesModule,
+    BackupsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -14,6 +14,7 @@ import type { OpenShiftDto } from '../dto/open-shift.dto';
 import type { CloseShiftDto } from '../dto/close-shift.dto';
 import type { ListShiftsQueryDto } from '../dto/list-shifts-query.dto';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { UserRoleDto } from '../../users/dto/user-role.dto';
 
 const DEFAULT_DISCREPANCY_THRESHOLD = 0;
@@ -22,6 +23,7 @@ const DEFAULT_DISCREPANCY_THRESHOLD = 0;
 export class ShiftsService {
   constructor(
     @Inject(SHIFTS_REPOSITORY) private readonly repo: IShiftsRepository,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async getActive(user?: AuthenticatedUser) {
@@ -61,7 +63,7 @@ export class ShiftsService {
     const shift = await this.getById(id);
     this.assertCanCloseShift(shift, user);
 
-    return this.repo.close({
+    const closed = await this.repo.close({
       id,
       endTime: new Date(),
       closingAmount: dto.closingAmount,
@@ -78,6 +80,14 @@ export class ShiftsService {
         role: user.role,
       },
     });
+
+    this.eventEmitter.emit('shift.closed', {
+      shiftId: id,
+      closeType: dto.closeType,
+      user,
+    });
+
+    return closed;
   }
 
   async getClosePreview(
