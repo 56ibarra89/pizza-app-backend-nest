@@ -24,6 +24,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { KitchensModule } from './kitchens/kitchens.module';
 import { CashExpensesModule } from './cash-expenses/cash-expenses.module';
 import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
+import { DevicesModule } from './devices/devices.module';
 
 @Module({
   imports: [
@@ -64,6 +65,7 @@ import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
     KitchensModule,
     CashExpensesModule,
     AdminDashboardModule,
+    DevicesModule,
   ],
   controllers: [AppController],
   providers: [
