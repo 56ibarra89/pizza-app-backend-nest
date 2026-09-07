@@ -22,7 +22,7 @@ import { OrderPricingService } from './order-pricing.service';
 import { OrderFinalizationService } from './order-finalization.service';
 import { assertPaymentsMatchTotal } from '../validators/order-payments.validator';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
-import { UserRoleDto } from '../../users/dto/user-role.dto';
+import { UserRoleDto } from '../../common';
 import { HiddenKitchenTicketsService } from './hidden-kitchen-tickets.service';
 import { OrderReferenceResolverService } from './order-reference-resolver.service';
 import { OrderTableAssignmentsService } from './order-table-assignments.service';

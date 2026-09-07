@@ -4,7 +4,7 @@ import { SystemLogsService } from '../services/system-logs.service';
 import { CreateSystemLogDto } from '../dto/create-system-log.dto';
 import { GetSystemLogsQueryDto } from '../dto/get-system-logs-query.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRoleDto } from '../../users/dto/user-role.dto';
+import { UserRoleDto } from '../../common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 

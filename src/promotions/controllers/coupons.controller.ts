@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRoleDto } from '../../users/dto/user-role.dto';
+import { UserRoleDto } from '../../common';
 import { CreateCuponDto } from '../dto/cupones/create-cupon.dto';
 import { RedeemCuponDto } from '../dto/cupones/redeem-cupon.dto';
 import { UpdateCuponDto } from '../dto/cupones/update-cupon.dto';

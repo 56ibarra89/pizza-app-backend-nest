@@ -16,7 +16,7 @@ import { UpsertCustomerDto } from '../dto/upsert-customer.dto';
 import { UpdateCustomerDto } from '../dto/update-customer.dto';
 import { toCustomerResponseDto } from '../mappers/customers.mapper';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRoleDto } from '../../users/dto/user-role.dto';
+import { UserRoleDto } from '../../common';
 
 @ApiTags('customers')
 @Controller('customers')

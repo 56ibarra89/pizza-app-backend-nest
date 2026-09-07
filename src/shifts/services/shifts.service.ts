@@ -15,7 +15,7 @@ import type { CloseShiftDto } from '../dto/close-shift.dto';
 import type { ListShiftsQueryDto } from '../dto/list-shifts-query.dto';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { UserRoleDto } from '../../users/dto/user-role.dto';
+import { UserRoleDto } from '../../common';
 
 const DEFAULT_DISCREPANCY_THRESHOLD = 0;
 

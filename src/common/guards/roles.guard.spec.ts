@@ -19,7 +19,7 @@ describe('RolesGuard', () => {
   beforeEach(() => jest.clearAllMocks());
 
   it('deniega al motorizado los endpoints sin permiso explícito', () => {
-    getAllAndOverride.mockReturnValue(undefined);
+    getAllAndOverride.mockReturnValue([UserRoleDto.admin]);
 
     expect(() => guard.canActivate(contextFor(UserRoleDto.motorizado))).toThrow(
       ForbiddenException,

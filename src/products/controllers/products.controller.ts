@@ -16,7 +16,7 @@ import { UpdateCategoryDto } from '../dto/update-category.dto';
 import { CreateProductDto } from '../dto/create-product.dto';
 import { UpdateProductDto } from '../dto/update-product.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRoleDto } from '../../users/dto/user-role.dto';
+import { UserRoleDto } from '../../common';
 
 @ApiTags('products')
 @Controller('products')

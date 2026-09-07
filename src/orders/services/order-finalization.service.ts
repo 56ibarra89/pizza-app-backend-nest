@@ -3,7 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import type { FinalizeOrderDto } from '../dto/finalize-order.dto';
 import type { OrderEntity } from '../entities/order.entity';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
-import { UserRoleDto } from '../../users/dto/user-role.dto';
+import { UserRoleDto } from '../../common';
 import { assertPaymentsMatchTotal } from '../validators/order-payments.validator';
 import { InvoiceIssuingService } from './invoice-issuing.service';
 import { OrderPricingService } from './order-pricing.service';

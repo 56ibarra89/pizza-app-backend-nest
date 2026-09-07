@@ -10,7 +10,7 @@ import { ApiTags } from '@nestjs/swagger';
 import { DevicesService } from './devices.service';
 import { PrinterConfigDto } from './dto/printer-config.dto';
 import { Roles } from '../common/decorators/roles.decorator';
-import { UserRoleDto } from '../users/dto/user-role.dto';
+import { UserRoleDto } from '../common';
 
 @ApiTags('devices')
 @Controller('devices')

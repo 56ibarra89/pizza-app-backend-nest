@@ -15,7 +15,7 @@ import { map, filter } from 'rxjs/operators';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRoleDto } from '../../users/dto/user-role.dto';
+import { UserRoleDto } from '../../common';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 
 @Roles(

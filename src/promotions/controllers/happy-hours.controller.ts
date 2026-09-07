@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRoleDto } from '../../users/dto/user-role.dto';
+import { UserRoleDto } from '../../common';
 import { CreateHappyHourDto } from '../dto/happy-hours/create-happy-hour.dto';
 import { UpdateHappyHourDto } from '../dto/happy-hours/update-happy-hour.dto';
 import { CommercialPromotionsService } from '../services/commercial-promotions.service';

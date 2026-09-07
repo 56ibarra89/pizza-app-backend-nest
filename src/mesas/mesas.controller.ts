@@ -4,7 +4,7 @@ import { UpdateFloorDto } from './dto/update-floor.dto';
 import { UpdateMesaStatusDto } from './dto/update-mesa-status.dto';
 import { ReserveMesaDto } from './dto/reserve-mesa.dto';
 import { Roles } from '../common/decorators/roles.decorator';
-import { UserRoleDto } from '../users/dto/user-role.dto';
+import { UserRoleDto } from '../common';
 
 @Controller('mesas')
 export class MesasController {

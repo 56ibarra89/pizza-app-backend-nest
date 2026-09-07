@@ -1,4 +1,4 @@
-import type { UserRoleDto } from '../../users/dto/user-role.dto';
+import type { UserRoleDto } from '../enums/user-role.enum';
 
 export interface AuthenticatedUser {
   id: string;

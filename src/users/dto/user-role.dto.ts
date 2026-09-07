@@ -1,9 +1,1 @@
-export enum UserRoleDto {
-  admin = 'admin',
-  cajero = 'cajero',
-  cajero_principal = 'cajero_principal',
-  mesero = 'mesero',
-  cocinero = 'cocinero',
-  motorizado = 'motorizado',
-  despachador = 'despachador',
-}
+export { UserRoleDto } from '../../common/enums/user-role.enum';

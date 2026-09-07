@@ -3,7 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 import { AppConfigService } from '../services/app-config.service';
 import { UpdateAppConfigDto } from '../dto/update-app-config.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRoleDto } from '../../users/dto/user-role.dto';
+import { UserRoleDto } from '../../common';
 
 @ApiTags('config')
 @Roles(UserRoleDto.admin)

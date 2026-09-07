@@ -13,7 +13,7 @@ import { UpdateKitchenDto } from './dto/update-kitchen.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
-import { UserRoleDto } from '../users/dto/user-role.dto';
+import { UserRoleDto } from '../common';
 import type { WeekDay } from '@prisma/client';
 
 @Controller('kitchens')

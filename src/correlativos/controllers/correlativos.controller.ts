@@ -6,7 +6,7 @@ import { ConsumeCorrelativoDto } from '../dto/consume-correlativo.dto';
 import { GetActiveCorrelativoQueryDto } from '../dto/get-active-correlativo-query.dto';
 import { UpdateCorrelativoDto } from '../dto/update-correlativo.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRoleDto } from '../../users/dto/user-role.dto';
+import { UserRoleDto } from '../../common';
 
 @ApiTags('correlativos')
 @Roles(UserRoleDto.admin)

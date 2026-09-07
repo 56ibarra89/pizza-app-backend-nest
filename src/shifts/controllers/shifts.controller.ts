@@ -6,7 +6,7 @@ import { CloseShiftDto } from '../dto/close-shift.dto';
 import { ListShiftsQueryDto } from '../dto/list-shifts-query.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { UserRoleDto } from '../../users/dto/user-role.dto';
+import { UserRoleDto } from '../../common';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { CloseShiftPreviewQueryDto } from '../dto/close-shift-preview-query.dto';
 

@@ -16,7 +16,7 @@ import {
   USERS_REPOSITORY,
   type IUsersRepository,
 } from '../../users/interfaces/users.repository';
-import { UserRoleDto } from '../../users/dto/user-role.dto';
+import { UserRoleDto } from '../../common';
 import { KitchensService } from '../../kitchens/kitchens.service';
 import { requiresKitchenPreparation } from '../validators/order-item-kind';
 

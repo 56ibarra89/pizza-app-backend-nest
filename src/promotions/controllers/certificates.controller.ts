@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRoleDto } from '../../users/dto/user-role.dto';
+import { UserRoleDto } from '../../common';
 import { CreateCertificadoDto } from '../dto/certificados/create-certificado.dto';
 import { RedeemCertificadoDto } from '../dto/certificados/redeem-certificado.dto';
 import { CertificatePromotionsService } from '../services/certificate-promotions.service';

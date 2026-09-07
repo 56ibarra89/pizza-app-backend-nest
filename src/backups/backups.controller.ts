@@ -18,7 +18,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { Roles } from '../common/decorators/roles.decorator';
-import { UserRoleDto } from '../users/dto/user-role.dto';
+import { UserRoleDto } from '../common';
 import { BackupsService } from './backups.service';
 import { BackupConfigDto, UpdateBackupConfigDto } from './dto/backup-config.dto';
 import { BackupItemDto } from './dto/backup-item.dto';

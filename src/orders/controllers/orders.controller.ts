@@ -17,7 +17,7 @@ import { FinalizeOrderDto } from '../dto/finalize-order.dto';
 import { toOrderResponseDto } from '../mappers/orders.mapper';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { UserRoleDto } from '../../users/dto/user-role.dto';
+import { UserRoleDto } from '../../common';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { KitchensService } from '../../kitchens/kitchens.service';
 import type { OrderEntity } from '../entities/order.entity';
