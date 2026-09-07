@@ -30,8 +30,12 @@ export class SystemLogsService {
     return this.repo.findMany({
       limit,
       user: query.user,
+      role: query.role,
       action: query.action,
       level: query.level,
+      startDate: query.startDate,
+      endDate: query.endDate,
+      search: query.search,
     });
   }
 }

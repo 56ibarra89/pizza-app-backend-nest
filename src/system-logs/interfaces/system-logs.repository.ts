@@ -16,7 +16,11 @@ export interface ISystemLogsRepository {
   findMany(params: {
     limit: number;
     user?: string;
+    role?: string;
     action?: string;
     level?: LogLevel;
+    startDate?: string;
+    endDate?: string;
+    search?: string;
   }): Promise<SystemLogEntity[]>;
 }

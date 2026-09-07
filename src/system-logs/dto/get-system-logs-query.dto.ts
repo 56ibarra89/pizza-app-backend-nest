@@ -21,4 +21,20 @@ export class GetSystemLogsQueryDto {
   @IsOptional()
   @IsEnum(LogLevel)
   level?: LogLevel;
+
+  @IsOptional()
+  @IsString()
+  role?: string;
+
+  @IsOptional()
+  @IsString()
+  startDate?: string;
+
+  @IsOptional()
+  @IsString()
+  endDate?: string;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
 }
