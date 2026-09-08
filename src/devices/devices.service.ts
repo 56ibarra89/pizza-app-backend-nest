@@ -96,15 +96,6 @@ export class DevicesService {
       isDefault: p.role === 'cashier' || p.role === 'both',
     }));
 
-    devices.push({
-      id: 'drawer-primary',
-      name: 'Gaveta de Dinero (RJ11)',
-      type: 'drawer',
-      status: 'connected',
-      details: 'Conectada al puerto RJ11 de la impresora de facturación',
-      isDefault: true,
-    });
-
     return devices;
   }
 }

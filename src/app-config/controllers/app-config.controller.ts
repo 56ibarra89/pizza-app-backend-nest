@@ -26,6 +26,7 @@ export class AppConfigController {
   }
 
   @Put(':id')
+  @Roles(UserRoleDto.admin, UserRoleDto.cajero_principal, UserRoleDto.cajero)
   upsert(@Param('id') id: string, @Body() dto: UpdateAppConfigDto) {
     return this.service.upsert(id, dto);
   }
