@@ -65,7 +65,13 @@ export class OrdersController {
     return responses.flatMap((order) => {
       const hasAssignedKitchenItem = order.items.some(
         (item) =>
-          requiresKitchenPreparation(item) && item.kitchenId === kitchenId,
+          requiresKitchenPreparation(item) &&
+          (item.kitchenId === kitchenId ||
+            (item.isCombo &&
+              Array.isArray(item.comboSelections) &&
+              item.comboSelections.some(
+                (sel: any) => sel.kitchenId === kitchenId,
+              ))),
       );
       if (!hasAssignedKitchenItem) return [];
 
@@ -74,7 +80,13 @@ export class OrdersController {
           ...order,
           items: order.items.filter(
             (item) =>
-              !requiresKitchenPreparation(item) || item.kitchenId === kitchenId,
+              !requiresKitchenPreparation(item) ||
+              item.kitchenId === kitchenId ||
+              (item.isCombo &&
+                Array.isArray(item.comboSelections) &&
+                item.comboSelections.some(
+                  (sel: any) => sel.kitchenId === kitchenId,
+                )),
           ),
         },
       ];

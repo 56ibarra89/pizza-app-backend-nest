@@ -69,5 +69,13 @@ export class CartItemDto {
   @IsOptional()
   @IsEnum(KitchenStatusDto)
   kitchenStatus?: KitchenStatusDto;
+
+  @IsOptional()
+  @IsBoolean()
+  isCombo?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  comboSelections?: any[];
 }
 

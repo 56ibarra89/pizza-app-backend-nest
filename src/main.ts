@@ -7,6 +7,7 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Initialize NestJS app
   const isProd = process.env.NODE_ENV === 'production';
 
   if (isProd) {

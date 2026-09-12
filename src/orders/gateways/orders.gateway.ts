@@ -112,11 +112,17 @@ export class OrdersGateway implements OnGatewayInit {
     });
 
     const kitchenIds = new Set(
-      event.order.items.flatMap((item) =>
-        requiresKitchenPreparation(item) && item.kitchenId
-          ? [item.kitchenId]
-          : [],
-      ),
+      event.order.items.flatMap((item) => {
+        if (!requiresKitchenPreparation(item)) return [];
+        const ids: string[] = [];
+        if (item.kitchenId) ids.push(item.kitchenId);
+        if (item.isCombo && Array.isArray(item.comboSelections)) {
+          item.comboSelections.forEach((sel: any) => {
+            if (sel.kitchenId) ids.push(sel.kitchenId);
+          });
+        }
+        return ids;
+      }),
     );
 
     kitchenIds.forEach((kitchenId) => {
@@ -124,7 +130,11 @@ export class OrdersGateway implements OnGatewayInit {
         ...event.order,
         items: event.order.items.filter(
           (item) =>
-            !requiresKitchenPreparation(item) || item.kitchenId === kitchenId,
+            !requiresKitchenPreparation(item) ||
+            item.kitchenId === kitchenId ||
+            (item.isCombo &&
+              Array.isArray(item.comboSelections) &&
+              item.comboSelections.some((sel: any) => sel.kitchenId === kitchenId)),
         ),
       };
       this.server.to(kitchenRoom(kitchenId)).emit('orders:changed', {

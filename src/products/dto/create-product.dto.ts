@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import { ExtraIngredientDto } from './extra-ingredient.dto';
 import { ProductPriceDto } from './product-price.dto';
+import { ComboGroupDto } from './combo-group.dto';
 
 export class CreateProductDto {
   @IsUUID()
@@ -32,6 +33,14 @@ export class CreateProductDto {
   @IsBoolean()
   hasMultipleSizes?: boolean;
 
+  @IsOptional()
+  @IsBoolean()
+  isCombo?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  comboPrice?: number;
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
@@ -43,4 +52,10 @@ export class CreateProductDto {
   @ValidateNested({ each: true })
   @Type(() => ExtraIngredientDto)
   extras?: ExtraIngredientDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ComboGroupDto)
+  comboGroups?: ComboGroupDto[];
 }

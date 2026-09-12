@@ -8,6 +8,20 @@ import type { UpdateCategoryDto } from '../dto/update-category.dto';
 import type { CreateProductDto } from '../dto/create-product.dto';
 import type { UpdateProductDto } from '../dto/update-product.dto';
 
+const PRODUCT_INCLUDE = {
+  prices: { orderBy: { size: 'asc' as const } },
+  extras: { include: { prices: { orderBy: { size: 'asc' as const } } } },
+  comboGroups: {
+    include: {
+      options: {
+        include: {
+          itemProduct: { select: { id: true, name: true } },
+        },
+      },
+    },
+  },
+};
+
 @Injectable()
 export class PrismaProductsRepository implements IProductsRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -20,10 +34,7 @@ export class PrismaProductsRepository implements IProductsRepository {
         products: {
           where: { deletedAt: null },
           orderBy: { name: 'asc' },
-          include: {
-            prices: { orderBy: { size: 'asc' } },
-            extras: { include: { prices: { orderBy: { size: 'asc' } } } },
-          },
+          include: PRODUCT_INCLUDE,
         },
       },
     });
@@ -33,7 +44,7 @@ export class PrismaProductsRepository implements IProductsRepository {
       label: c.label,
       icon: c.icon ?? undefined,
       kitchenId: c.kitchenId ?? undefined,
-      items: c.products.map((p) => this.mapProduct(p)),
+      items: c.products.map((p) => this.mapProduct(p as any)),
     }));
   }
 
@@ -54,10 +65,7 @@ export class PrismaProductsRepository implements IProductsRepository {
         products: {
           where: { deletedAt: null },
           orderBy: { name: 'asc' },
-          include: {
-            prices: { orderBy: { size: 'asc' } },
-            extras: { include: { prices: { orderBy: { size: 'asc' } } } },
-          },
+          include: PRODUCT_INCLUDE,
         },
       },
     });
@@ -87,24 +95,18 @@ export class PrismaProductsRepository implements IProductsRepository {
         ...(params?.categoryId ? { categoryId: params.categoryId } : {}),
       },
       orderBy: { name: 'asc' },
-      include: {
-        prices: { orderBy: { size: 'asc' } },
-        extras: { include: { prices: { orderBy: { size: 'asc' } } } },
-      },
+      include: PRODUCT_INCLUDE,
     });
 
-    return products.map((p) => this.mapProduct(p));
+    return products.map((p) => this.mapProduct(p as any));
   }
 
   async getProductById(id: string): Promise<ProductEntity | null> {
     const product = await this.prisma.product.findFirst({
       where: { id, deletedAt: null, category: { deletedAt: null } },
-      include: {
-        prices: { orderBy: { size: 'asc' } },
-        extras: { include: { prices: { orderBy: { size: 'asc' } } } },
-      },
+      include: PRODUCT_INCLUDE,
     });
-    return product ? this.mapProduct(product) : null;
+    return product ? this.mapProduct(product as any) : null;
   }
 
   async createProduct(dto: CreateProductDto): Promise<ProductEntity> {
@@ -115,6 +117,8 @@ export class PrismaProductsRepository implements IProductsRepository {
         description: dto.description,
         isActive: dto.isActive ?? true,
         hasMultipleSizes: dto.hasMultipleSizes ?? false,
+        isCombo: dto.isCombo ?? false,
+        comboPrice: dto.comboPrice ?? null,
         prices: {
           create: dto.prices.map((p) => ({ size: p.size, price: p.price })),
         },
@@ -126,14 +130,26 @@ export class PrismaProductsRepository implements IProductsRepository {
               })),
             }
           : undefined,
+        comboGroups: dto.comboGroups?.length
+          ? {
+              create: dto.comboGroups.map((g) => ({
+                name: g.name,
+                requiredCount: g.requiredCount,
+                options: {
+                  create: g.options.map((o) => ({
+                    itemProductId: o.itemProductId,
+                    size: o.size || null,
+                    extraPrice: o.extraPrice ?? 0,
+                  })),
+                },
+              })),
+            }
+          : undefined,
       },
-      include: {
-        prices: { orderBy: { size: 'asc' } },
-        extras: { include: { prices: { orderBy: { size: 'asc' } } } },
-      },
+      include: PRODUCT_INCLUDE,
     });
 
-    return this.mapProduct(created);
+    return this.mapProduct(created as any);
   }
 
   async updateProduct(id: string, dto: UpdateProductDto): Promise<ProductEntity> {
@@ -144,6 +160,9 @@ export class PrismaProductsRepository implements IProductsRepository {
       if (dto.extras) {
         await tx.extraIngredient.deleteMany({ where: { productId: id } });
       }
+      if (dto.comboGroups) {
+        await tx.comboGroup.deleteMany({ where: { productId: id } });
+      }
 
       return tx.product.update({
         where: { id },
@@ -153,6 +172,8 @@ export class PrismaProductsRepository implements IProductsRepository {
           description: dto.description,
           isActive: dto.isActive,
           hasMultipleSizes: dto.hasMultipleSizes,
+          isCombo: dto.isCombo,
+          comboPrice: dto.comboPrice,
           prices: dto.prices
             ? {
                 create: dto.prices.map((p) => ({ size: p.size, price: p.price })),
@@ -168,15 +189,29 @@ export class PrismaProductsRepository implements IProductsRepository {
                 }
               : undefined
             : undefined,
+          comboGroups: dto.comboGroups
+            ? dto.comboGroups.length
+              ? {
+                  create: dto.comboGroups.map((g) => ({
+                    name: g.name,
+                    requiredCount: g.requiredCount,
+                    options: {
+                      create: g.options.map((o) => ({
+                        itemProductId: o.itemProductId,
+                        size: o.size || null,
+                        extraPrice: o.extraPrice ?? 0,
+                      })),
+                    },
+                  })),
+                }
+              : undefined
+            : undefined,
         },
-        include: {
-          prices: { orderBy: { size: 'asc' } },
-          extras: { include: { prices: { orderBy: { size: 'asc' } } } },
-        },
+        include: PRODUCT_INCLUDE,
       });
     });
 
-    return this.mapProduct(updated);
+    return this.mapProduct(updated as any);
   }
 
   async deleteProduct(id: string): Promise<void> {
@@ -190,11 +225,25 @@ export class PrismaProductsRepository implements IProductsRepository {
     description: string | null;
     isActive: boolean;
     hasMultipleSizes: boolean;
+    isCombo?: boolean;
+    comboPrice?: unknown;
     prices: { size: string; price: unknown }[];
     extras: {
       name: string;
       prices: { size: string; price: unknown }[];
     }[];
+    comboGroups?: Array<{
+      id: string;
+      name: string;
+      requiredCount: number;
+      options: Array<{
+        id: string;
+        itemProductId: string;
+        size: string | null;
+        extraPrice: unknown;
+        itemProduct?: { id: string; name: string } | null;
+      }>;
+    }>;
   }): ProductEntity {
     const prices = p.prices.map((pp) => ({
       size: pp.size,
@@ -208,6 +257,21 @@ export class PrismaProductsRepository implements IProductsRepository {
         }))
       : undefined;
 
+    const comboGroups = p.comboGroups?.length
+      ? p.comboGroups.map((g) => ({
+          id: g.id,
+          name: g.name,
+          requiredCount: g.requiredCount,
+          options: g.options.map((o) => ({
+            id: o.id,
+            itemProductId: o.itemProductId,
+            itemProductName: o.itemProduct?.name,
+            size: o.size ?? undefined,
+            extraPrice: Number(o.extraPrice || 0),
+          })),
+        }))
+      : undefined;
+
     return {
       id: p.id,
       categoryId: p.categoryId,
@@ -215,8 +279,14 @@ export class PrismaProductsRepository implements IProductsRepository {
       description: p.description ?? undefined,
       isActive: p.isActive,
       hasMultipleSizes: p.hasMultipleSizes,
+      isCombo: p.isCombo ?? false,
+      comboPrice:
+        p.comboPrice !== null && p.comboPrice !== undefined
+          ? Number(p.comboPrice)
+          : undefined,
       prices,
       extras,
+      comboGroups,
     };
   }
 }

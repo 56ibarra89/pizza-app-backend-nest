@@ -37,6 +37,13 @@ function validatePricesForMode(
 }
 
 export function validateCreateProduct(dto: CreateProductDto): void {
+  if (dto.isCombo) {
+    dto.hasMultipleSizes = false;
+    if ((!dto.prices || dto.prices.length === 0) && dto.comboPrice !== undefined) {
+      dto.prices = [{ size: 'único', price: dto.comboPrice }];
+    }
+  }
+
   const hasMultipleSizes = dto.hasMultipleSizes ?? false;
   validatePricesForMode(hasMultipleSizes, dto.prices, 'Producto');
 

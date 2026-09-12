@@ -273,6 +273,8 @@ model OrderItem {
   kitchenId       String?
   kitchen         Kitchen?         @relation(fields: [kitchenId], references: [id])
   order           Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  isCombo         Boolean          @default(false)
+  comboSelections Json?
   product         Product?         @relation(fields: [productId], references: [id])
   extras          OrderItemExtra[]
 
@@ -555,6 +557,8 @@ model Product {
   name             String
   description      String?
   hasMultipleSizes Boolean            @default(false)
+  isCombo          Boolean            @default(false)
+  comboPrice       Decimal?           @db.Decimal(10, 2)
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
   createdById      String?
@@ -570,6 +574,8 @@ model Product {
   createdBy        User?              @relation("ProductCreatedBy", fields: [createdById], references: [id])
   updatedBy        User?              @relation("ProductUpdatedBy", fields: [updatedById], references: [id])
   prices           ProductPrice[]
+  comboGroups      ComboGroup[]       @relation("ComboToGroups")
+  asComboOptions   ComboGroupOption[] @relation("ComboOptionProduct")
 
   @@unique([categoryId, name])
   @@index([deletedAt])
@@ -605,6 +611,34 @@ model ExtraPrice {
   extra   ExtraIngredient @relation(fields: [extraId], references: [id], onDelete: Cascade)
 
   @@unique([extraId, size])
+}
+
+model ComboGroup {
+  id            String             @id @default(uuid())
+  productId     String
+  name          String
+  requiredCount Int                @default(1)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  product       Product            @relation("ComboToGroups", fields: [productId], references: [id], onDelete: Cascade)
+  options       ComboGroupOption[]
+
+  @@index([productId])
+}
+
+model ComboGroupOption {
+  id            String     @id @default(uuid())
+  groupId       String
+  itemProductId String
+  size          String?
+  extraPrice    Decimal    @default(0) @db.Decimal(10, 2)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  group         ComboGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  itemProduct   Product    @relation("ComboOptionProduct", fields: [itemProductId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+  @@index([itemProductId])
 }
 
 model Notification {

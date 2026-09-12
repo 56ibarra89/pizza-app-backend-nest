@@ -21,4 +21,6 @@ export interface CartItemEntity {
   sentAt?: number;
   kitchenStatus?: KitchenStatusDto;
   kitchenId?: string;
+  isCombo?: boolean;
+  comboSelections?: any[];
 }

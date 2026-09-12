@@ -19,6 +19,8 @@ export function toOrderResponseDto(order: OrderEntity) {
       sentAt: i.sentAt,
       kitchenStatus: i.kitchenStatus,
       kitchenId: i.kitchenId,
+      isCombo: Boolean(i.isCombo),
+      comboSelections: i.comboSelections,
     })),
     subTotal: order.subTotal,
     discountAmount: order.discountAmount,

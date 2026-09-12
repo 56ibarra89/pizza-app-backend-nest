@@ -220,6 +220,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
               ? toDbKitchenStatus(i.kitchenStatus)
               : undefined,
             kitchenId: i.kitchenId,
+            isCombo: i.isCombo ?? false,
+            comboSelections: i.comboSelections ?? undefined,
             extras: {
               create: i.extras.map((e) => ({ name: e.name, price: e.price })),
             },
@@ -402,6 +404,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
             ? toDbKitchenStatus(i.kitchenStatus)
             : undefined,
           kitchenId: i.kitchenId,
+          isCombo: i.isCombo ?? false,
+          comboSelections: i.comboSelections ?? undefined,
           extras: {
             create: i.extras.map((e) => ({ name: e.name, price: e.price })),
           },
@@ -438,20 +442,59 @@ export class PrismaOrdersRepository implements IOrdersRepository {
 
     };
 
-    if (params.kitchenId) {
+    if (params.itemId !== undefined) {
+      whereClause.id = params.itemId;
+    } else if (params.kitchenId) {
       whereClause.kitchenId = params.kitchenId;
     }
 
-    if (params.itemId !== undefined) {
-      whereClause.id = params.itemId;
-    }
-
-    await this.prisma.orderItem.updateMany({
+    const items = await this.prisma.orderItem.findMany({
       where: whereClause,
-      data: {
-        kitchenStatus: toDbKitchenStatus(params.kitchenStatus),
-      },
     });
+
+    for (const item of items) {
+      if (item.isCombo && Array.isArray(item.comboSelections)) {
+        const updatedSelections = (item.comboSelections as any[]).map((sel) => {
+          if (!params.kitchenId || sel.kitchenId === params.kitchenId) {
+            return {
+              ...sel,
+              kitchenStatus: params.kitchenStatus,
+            };
+          }
+          return sel;
+        });
+
+        const allDelivered = updatedSelections.every(
+          (s) => s.kitchenStatus === 'delivered',
+        );
+        const allReadyOrDelivered = updatedSelections.every(
+          (s) => s.kitchenStatus === 'ready' || s.kitchenStatus === 'delivered',
+        );
+        const anyPreparingOrReady = updatedSelections.some(
+          (s) => s.kitchenStatus === 'preparing' || s.kitchenStatus === 'ready',
+        );
+
+        let overallStatus: KitchenStatusDto = 'pending' as KitchenStatusDto;
+        if (allDelivered) overallStatus = 'delivered' as KitchenStatusDto;
+        else if (allReadyOrDelivered) overallStatus = 'ready' as KitchenStatusDto;
+        else if (anyPreparingOrReady) overallStatus = 'preparing' as KitchenStatusDto;
+
+        await this.prisma.orderItem.update({
+          where: { id: item.id },
+          data: {
+            kitchenStatus: toDbKitchenStatus(overallStatus),
+            comboSelections: updatedSelections,
+          },
+        });
+      } else {
+        await this.prisma.orderItem.update({
+          where: { id: item.id },
+          data: {
+            kitchenStatus: toDbKitchenStatus(params.kitchenStatus),
+          },
+        });
+      }
+    }
   }
 
   private mapOrder(o: {
@@ -507,6 +550,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       sentAt: Date | null;
       kitchenStatus: KitchenStatus | null;
       kitchenId: string | null;
+      isCombo?: boolean | null;
+      comboSelections?: any;
       product: { categoryId: string } | null;
       extras: Array<{ id: number; name: string; price: Prisma.Decimal }>;
     }>;
@@ -545,6 +590,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           ? fromDbKitchenStatus(i.kitchenStatus)
           : undefined,
         kitchenId: i.kitchenId ?? undefined,
+        isCombo: Boolean(i.isCombo),
+        comboSelections: (i.comboSelections as any) ?? undefined,
       })),
       subTotal: o.subTotal ? o.subTotal.toNumber() : undefined,
       discountAmount: o.discountAmount
