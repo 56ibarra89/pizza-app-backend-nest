@@ -3,23 +3,50 @@ import { PassportStrategy } from '@nestjs/passport';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { fromDbRole } from '../mappers/user-role.mapper';
+import { ConfigService } from '@nestjs/config';
+import {
+  getJwtAudience,
+  getJwtIssuer,
+  requireSecuritySecret,
+} from '../../common/security/security-config';
+
+interface AccessJwtPayload {
+  sub: string;
+  tokenVersion: number;
+  type: 'access';
+}
+
+function isAccessJwtPayload(payload: unknown): payload is AccessJwtPayload {
+  if (typeof payload !== 'object' || payload === null) return false;
+  const candidate = payload as Record<string, unknown>;
+  return (
+    candidate.type === 'access' &&
+    typeof candidate.sub === 'string' &&
+    Number.isInteger(candidate.tokenVersion)
+  );
+}
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(private prisma: PrismaService) {
+  constructor(
+    private prisma: PrismaService,
+    config: ConfigService,
+  ) {
     super({
-      jwtFromRequest: ExtractJwt.fromExtractors([
-        ExtractJwt.fromAuthHeaderAsBearerToken(),
-        ExtractJwt.fromUrlQueryParameter('token'),
-      ]),
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET || (process.env.NODE_ENV === 'production'
-        ? (() => { throw new Error('JWT_SECRET must be defined in production!'); })()
-        : 'pizza-secret-key-dev-only-change-me'),
+      secretOrKey: requireSecuritySecret(config, 'JWT_SECRET'),
+      algorithms: ['HS256'],
+      issuer: getJwtIssuer(config),
+      audience: getJwtAudience(config),
     });
   }
 
-  async validate(payload: any) {
+  async validate(payload: unknown) {
+    if (!isAccessJwtPayload(payload)) {
+      throw new UnauthorizedException('Token no válido para acceder a la API');
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
     });
@@ -27,10 +54,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Usuario inactivo o no existe');
     }
     if (user.tokenVersion !== payload.tokenVersion) {
-      throw new UnauthorizedException('La sesión ha expirado en este dispositivo.');
+      throw new UnauthorizedException(
+        'La sesión ha expirado en este dispositivo.',
+      );
     }
 
-    return { id: user.id, username: user.username, role: fromDbRole(user.role) };
+    return {
+      id: user.id,
+      username: user.username,
+      role: fromDbRole(user.role),
+    };
   }
 }
-

@@ -26,10 +26,12 @@ import { CashExpensesModule } from './cash-expenses/cash-expenses.module';
 import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
 import { DevicesModule } from './devices/devices.module';
 import { BackupsModule } from './backups/backups.module';
+import { SecurityModule } from './common/security/security.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    SecurityModule,
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([
       {

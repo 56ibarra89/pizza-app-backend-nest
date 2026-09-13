@@ -24,6 +24,11 @@ cp .env.example .env
 ```
 Luego, abre el archivo `.env` y define tu cadena de conexión a PostgreSQL en la variable `DATABASE_URL`.
 
+Para la instalación local de Electron conserva `API_HOST=127.0.0.1`. Así, el
+inicio de sesión por PIN solo puede invocarse desde la misma computadora. Swagger
+permanece desactivado salvo que se configure explícitamente
+`SWAGGER_ENABLED=true`.
+
 ### 2. Ejecutar comandos de inicialización
 Ejecuta los siguientes comandos en tu terminal para configurar y levantar la aplicación:
 
@@ -75,6 +80,25 @@ Este proyecto ya incluye lo necesario para Heroku:
 
 - `DATABASE_URL`: lo crea automáticamente el addon de Heroku Postgres.
 - `PORT`: lo asigna Heroku automáticamente (el backend ya lo usa).
+- `JWT_SECRET`: valor aleatorio exclusivo de al menos 32 bytes.
+- `PIN_PEPPER`: otro valor aleatorio, distinto de `JWT_SECRET`, de al menos 32 bytes.
+- `JWT_ISSUER` y `JWT_AUDIENCE`: deben coincidir con la configuración esperada por la aplicación.
+- `API_HOST=0.0.0.0`: necesario únicamente cuando el proveedor debe exponer el proceso.
+- `CORS_ORIGINS`: lista exacta de frontends HTTPS permitidos, separada por comas.
+- `TRUST_PROXY_HOPS=1`: solo cuando existe exactamente un proxy confiable delante del API.
+
+La aplicación falla de forma segura al iniciar si faltan `JWT_SECRET` o
+`PIN_PEPPER`. Genere los secretos con un generador criptográfico y configúrelos
+directamente en el proveedor; nunca los guarde en Git.
+
+### Migración de PIN segura
+
+La migración `20260913000000_secure_auth_credentials` elimina todos los PIN en
+texto plano. Después de desplegarla, inicie sesión con contraseña y asigne a
+cada usuario un nuevo PIN de exactamente seis dígitos. Para crear o rotar el
+administrador inicial con `npm run db:setup`, configure también
+`SEED_ADMIN_PASSWORD` y `SEED_ADMIN_PIN`; el seed ya no contiene credenciales
+predeterminadas.
 
 Nota: si tu instancia de Postgres requiere SSL y tu `DATABASE_URL` no trae `sslmode=require`, agrégalo en la config de Heroku.
 
@@ -84,7 +108,8 @@ Nota: si tu instancia de Postgres requiere SSL y tu `DATABASE_URL` no trae `sslm
 2. Configurar variables (si aplica)
 3. Deploy
 
-Después, abre `https://<tu-app>.herokuapp.com/docs` para ver Swagger.
+Swagger no se publica por defecto. Habilítalo temporalmente solo si necesitas
+consultar `https://<tu-app>.herokuapp.com/docs` y vuelve a desactivarlo después.
 
 ---
 

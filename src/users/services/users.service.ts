@@ -5,7 +5,6 @@ import {
   NotFoundException,
   UnauthorizedException,
   HttpException,
-  HttpStatus,
 } from '@nestjs/common';
 import { MailerService } from '@nestjs-modules/mailer';
 import { JwtService } from '@nestjs/jwt';
@@ -21,6 +20,40 @@ import { PasswordHasherService } from './password-hasher.service';
 import type { UserRoleDto } from '../dto/user-role.dto';
 import { UserLockoutService } from './user-lockout.service';
 import { PasswordResetEmailService } from './password-reset-email.service';
+import { PinHasherService } from '../../common/security/pin-hasher.service';
+import type { UpdateOwnProfileDto } from '../dto/update-own-profile.dto';
+import { PinAttemptService } from '../../common/security/pin-attempt.service';
+import { createHash } from 'node:crypto';
+
+interface PasswordResetJwtPayload {
+  sub: string;
+  tokenVersion: number;
+  type: 'password_reset';
+}
+
+function isPasswordResetJwtPayload(
+  payload: unknown,
+): payload is PasswordResetJwtPayload {
+  if (typeof payload !== 'object' || payload === null) return false;
+  const candidate = payload as Record<string, unknown>;
+  return (
+    candidate.type === 'password_reset' &&
+    typeof candidate.sub === 'string' &&
+    Number.isInteger(candidate.tokenVersion)
+  );
+}
+
+function securityScope(kind: string, source: string): string {
+  const digest = createHash('sha256').update(source).digest('hex');
+  return `${kind}:${digest}`;
+}
+
+async function waitForMinimumDuration(startedAt: number, minimumMs = 300) {
+  const remaining = minimumMs - (Date.now() - startedAt);
+  if (remaining > 0) {
+    await new Promise((resolve) => setTimeout(resolve, remaining));
+  }
+}
 
 @Injectable()
 export class UsersService {
@@ -32,6 +65,8 @@ export class UsersService {
     private readonly mailerService: MailerService,
     private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
+    private readonly pinHasher: PinHasherService,
+    private readonly authAttempts: PinAttemptService,
   ) {}
 
   getAll() {
@@ -51,21 +86,30 @@ export class UsersService {
   }
 
   async create(dto: CreateUserDto) {
-    const passwordHash = dto.password ? await this.hasher.hash(dto.password) : undefined;
+    const [passwordHash, pinHash] = await Promise.all([
+      dto.password
+        ? this.hasher.hash(dto.password)
+        : Promise.resolve(undefined),
+      this.pinHasher.hash(dto.pin),
+    ]);
     try {
-        return await this.repo.create({
-          username: dto.username.toLowerCase(),
-          email: dto.email ? dto.email.toLowerCase() : undefined,
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          pin: dto.pin,
-          passwordHash,
-          role: dto.role,
-          isActive: dto.isActive ?? true,
-          workDays: dto.workDays as any,
-        });
+      return await this.repo.create({
+        username: dto.username.toLowerCase(),
+        email: dto.email ? dto.email.toLowerCase() : undefined,
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        pinHash,
+        pinLookup: this.pinHasher.lookup(dto.pin),
+        passwordHash,
+        role: dto.role,
+        isActive: dto.isActive ?? true,
+        workDays: dto.workDays as any,
+      });
     } catch (e) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === 'P2002'
+      ) {
         throw new ConflictException('Usuario/email/pin ya existe');
       }
       throw e;
@@ -73,27 +117,106 @@ export class UsersService {
   }
 
   async update(id: string, dto: UpdateUserDto) {
-    const passwordHash =
-      dto.password !== undefined ? await this.hasher.hash(dto.password) : undefined;
+    const current = await this.repo.findById(id);
+    if (!current) throw new NotFoundException('Usuario no encontrado');
+    const [passwordHash, pinHash] = await Promise.all([
+      dto.password !== undefined
+        ? this.hasher.hash(dto.password)
+        : Promise.resolve(undefined),
+      dto.pin !== undefined
+        ? this.pinHasher.hash(dto.pin)
+        : Promise.resolve(undefined),
+    ]);
+    const revokesSessions =
+      dto.password !== undefined ||
+      dto.pin !== undefined ||
+      dto.role !== undefined ||
+      dto.isActive === false;
 
     try {
-        return await this.repo.update(id, {
-          username: dto.username ? dto.username.toLowerCase() : undefined,
-          email: dto.email === undefined ? undefined : (dto.email ? dto.email.toLowerCase() : null),
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          pin: dto.pin,
-          passwordHash: passwordHash !== undefined ? passwordHash : undefined,
-          role: dto.role,
-          isActive: dto.isActive,
-          themePreference: dto.themePreference,
-          workDays: dto.workDays as any,
-        });
+      return await this.repo.update(id, {
+        username: dto.username ? dto.username.toLowerCase() : undefined,
+        email:
+          dto.email === undefined
+            ? undefined
+            : dto.email
+              ? dto.email.toLowerCase()
+              : null,
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        pinHash,
+        pinLookup: dto.pin ? this.pinHasher.lookup(dto.pin) : undefined,
+        passwordHash: passwordHash !== undefined ? passwordHash : undefined,
+        role: dto.role,
+        isActive: dto.isActive,
+        themePreference: dto.themePreference,
+        workDays: dto.workDays as any,
+        tokenVersion: revokesSessions ? current.tokenVersion + 1 : undefined,
+      });
     } catch (e) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === 'P2002'
+      ) {
         throw new ConflictException('Usuario/email/pin ya existe');
       }
       throw e;
+    }
+  }
+
+  async updateOwnProfile(id: string, dto: UpdateOwnProfileDto) {
+    const current = await this.repo.findById(id);
+    if (!current) throw new NotFoundException('Usuario no encontrado');
+
+    const changesCredential =
+      dto.password !== undefined || dto.pin !== undefined;
+    if (changesCredential) {
+      if (!dto.currentPassword || !current.passwordHash) {
+        throw new UnauthorizedException(
+          'La contraseña actual es obligatoria para cambiar credenciales.',
+        );
+      }
+      const validPassword = await this.hasher.verify(
+        dto.currentPassword,
+        current.passwordHash,
+      );
+      if (!validPassword) {
+        throw new UnauthorizedException('La contraseña actual es incorrecta.');
+      }
+    }
+
+    const [passwordHash, pinHash] = await Promise.all([
+      dto.password
+        ? this.hasher.hash(dto.password)
+        : Promise.resolve(undefined),
+      dto.pin ? this.pinHasher.hash(dto.pin) : Promise.resolve(undefined),
+    ]);
+
+    try {
+      return await this.repo.update(id, {
+        username: dto.username?.toLowerCase(),
+        email:
+          dto.email === undefined
+            ? undefined
+            : dto.email
+              ? dto.email.toLowerCase()
+              : null,
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        themePreference: dto.themePreference,
+        passwordHash,
+        pinHash,
+        pinLookup: dto.pin ? this.pinHasher.lookup(dto.pin) : undefined,
+        tokenVersion: changesCredential ? current.tokenVersion + 1 : undefined,
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException('Usuario/email/pin ya existe');
+      }
+      throw error;
     }
   }
 
@@ -116,109 +239,213 @@ export class UsersService {
   async loginWithPassword(params: {
     identifier: string;
     password: string;
-  }): Promise<{ success: boolean; username?: string; role?: UserRoleDto; email?: string; firstName?: string; lastName?: string; access_token?: string; themePreference?: string }> {
+    source?: string;
+  }): Promise<{
+    success: boolean;
+    username?: string;
+    role?: UserRoleDto;
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    access_token?: string;
+    themePreference?: string;
+  }> {
     const idLower = params.identifier.toLowerCase();
+    const sourceScope = securityScope(
+      'password-source',
+      params.source || 'unknown',
+    );
+    await this.authAttempts.assertAllowed(sourceScope);
 
-    const user =
-      (await this.repo.findByUsername(idLower)) ??
-      (await this.repo.findByEmail(idLower));
+    const user = await this.repo.findByIdentifier(idLower);
 
-    if (!user || !user.isActive) return { success: false };
-
-    this.lockoutService.assertCanAuthenticate(user);
-
-    if (!user.passwordHash) return { success: false };
-
-    const ok = await this.hasher.verify(params.password, user.passwordHash);
-    if (!ok) {
-      await this.repo.update(user.id, this.lockoutService.createFailedAttemptUpdate(user));
+    if (!user || !user.isActive) {
+      await this.hasher.hash(params.password);
+      await this.authAttempts.registerFailure(sourceScope);
       return { success: false };
     }
 
-    await this.repo.update(user.id, this.lockoutService.createSuccessfulAttemptUpdate());
-    const access_token = this.jwtService.sign({ sub: user.id, tokenVersion: user.tokenVersion });
-    return { success: true, username: user.username, role: user.role, email: user.email ?? undefined, firstName: user.firstName, lastName: user.lastName, access_token, themePreference: user.themePreference };
+    this.lockoutService.assertCanAuthenticate(user);
+
+    if (!user.passwordHash) {
+      await this.hasher.hash(params.password);
+      await this.authAttempts.registerFailure(sourceScope);
+      return { success: false };
+    }
+
+    const ok = await this.hasher.verify(params.password, user.passwordHash);
+    if (!ok) {
+      await Promise.all([
+        this.repo.registerFailedLoginAttempt(user.id),
+        this.authAttempts.registerFailure(sourceScope),
+      ]);
+      return { success: false };
+    }
+
+    await Promise.all([
+      this.repo.registerSuccessfulLogin(user.id),
+      this.authAttempts.registerSuccess(sourceScope),
+    ]);
+    const access_token = this.jwtService.sign({
+      sub: user.id,
+      tokenVersion: user.tokenVersion,
+      type: 'access',
+    });
+    return {
+      success: true,
+      username: user.username,
+      role: user.role,
+      email: user.email ?? undefined,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      access_token,
+      themePreference: user.themePreference,
+    };
   }
 
-  async loginWithPin(pin: string): Promise<{ username: string; role: UserRoleDto; firstName: string; lastName: string; access_token: string; themePreference: string } | null> {
-    const user = await this.repo.findByPin(pin);
-    if (!user || !user.isActive) return null;
+  async loginWithPin(
+    pin: string,
+    source = 'unknown',
+  ): Promise<{
+    username: string;
+    role: UserRoleDto;
+    firstName: string;
+    lastName: string;
+    access_token: string;
+    themePreference: string;
+  } | null> {
+    const user = await this.repo.findByPin(pin, {
+      attemptScopes: [securityScope('pin-source-v2', source)],
+      exposeLockout: true,
+    });
+    if (!user) return null;
 
     this.lockoutService.assertCanAuthenticate(user);
 
-    await this.repo.update(user.id, this.lockoutService.createSuccessfulAttemptUpdate());
-    const access_token = this.jwtService.sign({ sub: user.id, tokenVersion: user.tokenVersion });
-    return { username: user.username, role: user.role, firstName: user.firstName, lastName: user.lastName, access_token, themePreference: user.themePreference };
+    await this.repo.registerSuccessfulLogin(user.id);
+    const access_token = this.jwtService.sign({
+      sub: user.id,
+      tokenVersion: user.tokenVersion,
+      type: 'access',
+    });
+    return {
+      username: user.username,
+      role: user.role,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      access_token,
+      themePreference: user.themePreference,
+    };
   }
 
-  async requireValidPin(pin: string): Promise<{ username: string; role: UserRoleDto }> {
+  async requireValidPin(
+    pin: string,
+  ): Promise<{ username: string; role: UserRoleDto }> {
     const result = await this.loginWithPin(pin);
     if (!result) throw new UnauthorizedException('PIN inválido');
     return result;
   }
 
-  async requestPasswordReset(identifier: string) {
+  async requestPasswordReset(identifier: string, source = 'unknown') {
+    const startedAt = Date.now();
+    const genericResponse = {
+      success: true,
+      message:
+        'Si el usuario o correo es válido y cumple los requisitos, se enviarán las instrucciones.',
+    };
+    const sourceScope = securityScope('reset-source', source);
+    await this.authAttempts.assertAllowed(sourceScope);
+    await this.authAttempts.registerFailure(sourceScope);
+
     const idLower = identifier.toLowerCase();
-    const user =
-      (await this.repo.findByUsername(idLower)) ??
-      (await this.repo.findByEmail(idLower));
+    const user = await this.repo.findByIdentifier(idLower);
 
-    if (!user || !user.isActive) {
-      throw new NotFoundException('Usuario no encontrado o inactivo');
+    if (!user || !user.isActive || user.role !== 'admin' || !user.email) {
+      await waitForMinimumDuration(startedAt);
+      return genericResponse;
     }
 
-    if (user.role !== 'admin') {
-      throw new UnauthorizedException('Solo los administradores pueden usar esta función. Contacte a su supervisor.');
+    const resetWindowStart = new Date(Date.now() - 15 * 60_000);
+    const reservation = await this.prisma.user.updateMany({
+      where: {
+        id: user.id,
+        OR: [
+          { passwordResetRequestedAt: null },
+          { passwordResetRequestedAt: { lte: resetWindowStart } },
+        ],
+      },
+      data: { passwordResetRequestedAt: new Date() },
+    });
+    if (reservation.count !== 1) {
+      await waitForMinimumDuration(startedAt);
+      return genericResponse;
     }
 
-    if (!user.email) {
-      throw new UnauthorizedException('El administrador no tiene un correo configurado.');
-    }
+    const token = this.jwtService.sign(
+      { sub: user.id, tokenVersion: user.tokenVersion, type: 'password_reset' },
+      { expiresIn: '15m' },
+    );
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const resetLink = `${frontendUrl}/#/reset-password?token=${token}`;
 
-    const token = this.jwtService.sign({ sub: user.id, tokenVersion: user.tokenVersion });
-    const resetLink = `http://localhost:5173/#/reset-password?token=${token}`;
+    const email = this.passwordResetEmailService.buildResetMail(
+      user.firstName,
+      resetLink,
+    );
 
-    const email = this.passwordResetEmailService.buildResetMail(user.firstName, resetLink);
-
-    try {
-      await this.mailerService.sendMail({
+    void this.mailerService
+      .sendMail({
         to: user.email,
         subject: email.subject,
         text: email.text,
         html: email.html,
+      })
+      .catch((error: unknown) => {
+        console.error('Error enviando correo de recuperación:', error);
       });
-      return { success: true, message: 'Correo enviado' };
-    } catch (error: any) {
-      console.error("Error enviando correo:", error);
-      throw new HttpException(
-        `Error enviando correo: ${error.message || 'Desconocido'}`,
-        HttpStatus.INTERNAL_SERVER_ERROR
-      );
-    }
+    await waitForMinimumDuration(startedAt);
+    return genericResponse;
   }
 
   async resetPassword(token: string, newPassword: string) {
     try {
       // Verificar el token
-      const payload = this.jwtService.verify(token);
+      const payload: unknown = this.jwtService.verify(token);
+      if (!isPasswordResetJwtPayload(payload)) {
+        throw new UnauthorizedException(
+          'Token no válido para restablecimiento de contraseña.',
+        );
+      }
       const userId = payload.sub;
 
-      const user = await this.repo.findById(userId);
-      if (!user) {
-        throw new NotFoundException('Usuario no encontrado');
+      const hashedPassword = await this.hasher.hash(newPassword);
+      const consumed = await this.prisma.user.updateMany({
+        where: {
+          id: userId,
+          isActive: true,
+          tokenVersion: payload.tokenVersion,
+        },
+        data: {
+          passwordHash: hashedPassword,
+          tokenVersion: { increment: 1 },
+          failedLoginAttempts: 0,
+          lockoutLevel: 0,
+          lockedUntil: null,
+          passwordResetRequestedAt: null,
+        },
+      });
+      if (consumed.count !== 1) {
+        throw new UnauthorizedException(
+          'El enlace de restablecimiento ya fue utilizado o dejó de ser válido.',
+        );
       }
 
-      // Encriptar nueva contraseña
-      const hashedPassword = await this.hasher.hash(newPassword);
-
-      // Actualizar en la DB
-      await this.repo.update(userId, {
-        passwordHash: hashedPassword,
-      });
-
       return { success: true, message: 'Contraseña actualizada exitosamente' };
-    } catch (error) {
-      throw new UnauthorizedException('Enlace inválido o expirado. Solicita uno nuevo.');
+    } catch (error: unknown) {
+      if (error instanceof HttpException) throw error;
+      throw new UnauthorizedException(
+        'Enlace inválido o expirado. Solicita uno nuevo.',
+      );
     }
   }
 
@@ -226,9 +453,7 @@ export class UsersService {
     const user = await this.repo.findById(userId);
     if (!user) throw new NotFoundException('Usuario no encontrado');
 
-    return await this.repo.update(userId, {
-      tokenVersion: user.tokenVersion + 1,
-    });
+    return await this.repo.incrementTokenVersion(userId);
   }
 
   async addExtraDay(userId: string, date: string, notes?: string) {
@@ -309,10 +534,13 @@ export class UsersService {
     const assignments = await this.prisma.waiterZoneAssignment.findMany({
       where: { userId },
     });
-    return assignments.map(a => ({ day: a.day, floor: a.floor }));
+    return assignments.map((a) => ({ day: a.day, floor: a.floor }));
   }
 
-  async updateWaiterZones(userId: string, zones: { day: string, floor: number }[]) {
+  async updateWaiterZones(
+    userId: string,
+    zones: { day: string; floor: number }[],
+  ) {
     // We can delete all and recreate, or upsert. Delete + Create is easier.
     await this.prisma.$transaction(async (tx) => {
       await tx.waiterZoneAssignment.deleteMany({
@@ -320,7 +548,7 @@ export class UsersService {
       });
       if (zones.length > 0) {
         await tx.waiterZoneAssignment.createMany({
-          data: zones.map(z => ({
+          data: zones.map((z) => ({
             userId,
             day: z.day as any,
             floor: z.floor,
@@ -331,4 +559,3 @@ export class UsersService {
     return { success: true };
   }
 }
-

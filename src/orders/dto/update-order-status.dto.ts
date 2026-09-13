@@ -1,4 +1,4 @@
-import { IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, IsString, Matches } from 'class-validator';
 import { OrderStatusDto } from './order-status.dto';
 
 export class UpdateOrderStatusDto {
@@ -19,6 +19,7 @@ export class UpdateOrderStatusDto {
 
   @IsOptional()
   @IsString()
+  @Matches(/^\d{6}$/)
   adminPin?: string;
 
   @IsOptional()

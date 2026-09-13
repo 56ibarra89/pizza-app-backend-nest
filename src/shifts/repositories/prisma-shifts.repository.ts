@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -22,6 +23,12 @@ import type {
   ShiftEntity,
 } from '../entities/shift.entity';
 import type { IShiftsRepository } from '../interfaces/shifts.repository';
+import {
+  USERS_REPOSITORY,
+  type IUsersRepository,
+} from '../../users/interfaces/users.repository';
+import { UserRoleDto } from '../../users/dto/user-role.dto';
+import { toDbRole } from '../../users/mappers/user-role.mapper';
 
 type ShiftWithExpenses = Prisma.ShiftGetPayload<{
   include: { expenses: true };
@@ -32,7 +39,11 @@ const DEFAULT_DISCREPANCY_THRESHOLD = 0;
 
 @Injectable()
 export class PrismaShiftsRepository implements IShiftsRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(USERS_REPOSITORY)
+    private readonly usersRepository: IUsersRepository,
+  ) {}
 
   async findActive(): Promise<ShiftEntity | null> {
     const row = await this.prisma.shift.findFirst({
@@ -228,19 +239,21 @@ export class PrismaShiftsRepository implements IShiftsRepository {
             throw new BadRequestException(authorizationError);
           }
 
-          const user = await tx.user.findUnique({
-            where: { pin: params.authorizationPin },
-            select: { id: true, username: true, role: true, isActive: true },
-          });
-          if (
-            !user ||
-            !user.isActive ||
-            (user.role !== UserRole.ADMIN &&
-              user.role !== UserRole.CAJERO_PRINCIPAL)
-          ) {
+          const user = await this.usersRepository.findByPin(
+            params.authorizationPin,
+            {
+              allowedRoles: [UserRoleDto.admin, UserRoleDto.cajero_principal],
+              attemptScope: 'shift-authorization',
+            },
+          );
+          if (!user) {
             throw new BadRequestException(authorizationError);
           }
-          authorizer = user;
+          authorizer = {
+            id: user.id,
+            username: user.username,
+            role: toDbRole(user.role),
+          };
         }
 
         const updated = await tx.shift.update({

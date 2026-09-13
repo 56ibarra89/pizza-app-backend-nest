@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Matches,
   MaxLength,
 } from 'class-validator';
 import { CashExpenseCategoryDto } from './cash-expense-category.dto';
@@ -37,4 +38,11 @@ export class CreateCashExpenseDto {
   @IsOptional()
   @IsString()
   shiftId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{6}$/, {
+    message: 'El PIN de autorización debe contener exactamente 6 dígitos.',
+  })
+  authorizationPin?: string;
 }

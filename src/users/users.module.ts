@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { USERS_REPOSITORY } from './interfaces/users.repository';
 import { PrismaUsersRepository } from './repositories/prisma-users.repository';
 import { PasswordHasherService } from './services/password-hasher.service';
@@ -9,20 +10,31 @@ import { PasswordResetEmailService } from './services/password-reset-email.servi
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { UsersController } from './controllers/users.controller';
 import { AuthController } from './controllers/auth.controller';
-import { ShiftsModule } from '../shifts/shifts.module';
+import {
+  getJwtAudience,
+  getJwtIssuer,
+  requireSecuritySecret,
+} from '../common/security/security-config';
 
 @Module({
   imports: [
-    ShiftsModule,
-    JwtModule.register({
-      secret:
-        process.env.JWT_SECRET ||
-        (process.env.NODE_ENV === 'production'
-          ? (() => {
-              throw new Error('JWT_SECRET must be defined in production!');
-            })()
-          : 'pizza-secret-key-dev-only-change-me'),
-      signOptions: { expiresIn: (process.env.JWT_EXPIRES_IN as any) || '24h' },
+    ConfigModule,
+    JwtModule.registerAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        secret: requireSecuritySecret(config, 'JWT_SECRET'),
+        signOptions: {
+          expiresIn: (config.get<string>('JWT_EXPIRES_IN') || '15m') as any,
+          algorithm: 'HS256',
+          issuer: getJwtIssuer(config),
+          audience: getJwtAudience(config),
+        },
+        verifyOptions: {
+          algorithms: ['HS256'],
+          issuer: getJwtIssuer(config),
+          audience: getJwtAudience(config),
+        },
+      }),
     }),
   ],
   controllers: [UsersController, AuthController],
@@ -37,6 +49,6 @@ import { ShiftsModule } from '../shifts/shifts.module';
       useClass: PrismaUsersRepository,
     },
   ],
-  exports: [JwtModule, USERS_REPOSITORY],
+  exports: [JwtModule, USERS_REPOSITORY, UsersService],
 })
 export class UsersModule {}

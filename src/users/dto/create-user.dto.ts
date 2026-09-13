@@ -25,13 +25,16 @@ export class CreateUserDto {
 
   @IsString()
   @IsNotEmpty()
+  @Matches(/^\d{6}$/, {
+    message: 'El PIN debe contener exactamente 6 dígitos numéricos.',
+  })
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   pin!: string;
 
   @IsOptional()
   @IsString()
-  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/, {
-    message: 'La contraseña debe tener al menos 8 caracteres, una mayúscula, una minúscula, un número y un carácter especial (@$!%*?&)'
+  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,128}$/, {
+    message: 'La contraseña debe tener de 8 a 128 caracteres, una mayúscula, una minúscula, un número y un carácter especial (@$!%*?&)'
   })
   @Transform(({ value }) => (typeof value === 'string' ? value : value))
   password?: string;

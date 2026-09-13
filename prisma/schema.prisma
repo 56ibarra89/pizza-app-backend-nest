@@ -8,51 +8,64 @@ datasource db {
 }
 
 model User {
-  id                    String                  @id @default(uuid())
-  username              String                  @unique
-  email                 String?                 @unique
-  firstName             String
-  lastName              String
-  pin                   String                  @unique
-  passwordHash          String?
-  role                  UserRole
-  isActive              Boolean                 @default(true)
-  failedLoginAttempts   Int                     @default(0)
-  lockoutLevel          Int                     @default(0)
-  lockedUntil           DateTime?
-  lastVisit             DateTime?
-  themePreference       String                  @default("light")
-  tokenVersion          Int                     @default(0)
-  workDays              WeekDay[]               @default([])
-  createdAt             DateTime                @default(now())
-  updatedAt             DateTime                @updatedAt
-  createdAppConfigs     AppConfig[]             @relation("AppConfigCreatedBy")
-  updatedAppConfigs     AppConfig[]             @relation("AppConfigUpdatedBy")
-  createdCategories     Category[]              @relation("CategoryCreatedBy")
-  updatedCategories     Category[]              @relation("CategoryUpdatedBy")
-  createdCertificados   Certificado[]           @relation("CertificadoCreatedBy")
-  updatedCertificados   Certificado[]           @relation("CertificadoUpdatedBy")
-  createdCupones        Cupon[]                 @relation("CuponCreatedBy")
-  updatedCupones        Cupon[]                 @relation("CuponUpdatedBy")
-  createdDiscounts      DiscountPromotion[]     @relation("DiscountCreatedBy")
-  updatedDiscounts      DiscountPromotion[]     @relation("DiscountUpdatedBy")
-  createdHappyHours     HappyHourPromotion[]    @relation("HappyHourCreatedBy")
-  updatedHappyHours     HappyHourPromotion[]    @relation("HappyHourUpdatedBy")
-  cancelledOrders       Order[]                 @relation("OrderCancelledBy")
-  cashierOrders         Order[]                 @relation("OrderCashier")
-  drivenOrders          Order[]                 @relation("OrderDriver")
-  payments              Payment[]
-  createdProducts       Product[]               @relation("ProductCreatedBy")
-  updatedProducts       Product[]               @relation("ProductUpdatedBy")
-  cashierShifts         Shift[]                 @relation("ShiftCashier")
-  cashierExpenses       CashExpense[]           @relation("ExpenseCashier")
-  systemLogs            SystemLog[]             @relation("SystemLogUser")
-  extraDays             UserExtraDay[]          @relation("UserExtraDays")
-  waiterZoneAssignments WaiterZoneAssignment[]  @relation("UserWaiterZones")
-  kitchenAssignments    CookKitchenAssignment[] @relation("UserKitchenAssignments")
+  id                       String                  @id @default(uuid())
+  username                 String                  @unique
+  email                    String?                 @unique
+  firstName                String
+  lastName                 String
+  pinHash                  String?
+  pinLookup                String?                 @unique
+  passwordHash             String?
+  role                     UserRole
+  isActive                 Boolean                 @default(true)
+  failedLoginAttempts      Int                     @default(0)
+  lockoutLevel             Int                     @default(0)
+  lockedUntil              DateTime?
+  lastVisit                DateTime?
+  themePreference          String                  @default("light")
+  tokenVersion             Int                     @default(0)
+  passwordResetRequestedAt DateTime?
+  workDays                 WeekDay[]               @default([])
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @updatedAt
+  createdAppConfigs        AppConfig[]             @relation("AppConfigCreatedBy")
+  updatedAppConfigs        AppConfig[]             @relation("AppConfigUpdatedBy")
+  createdCategories        Category[]              @relation("CategoryCreatedBy")
+  updatedCategories        Category[]              @relation("CategoryUpdatedBy")
+  createdCertificados      Certificado[]           @relation("CertificadoCreatedBy")
+  updatedCertificados      Certificado[]           @relation("CertificadoUpdatedBy")
+  createdCupones           Cupon[]                 @relation("CuponCreatedBy")
+  updatedCupones           Cupon[]                 @relation("CuponUpdatedBy")
+  createdDiscounts         DiscountPromotion[]     @relation("DiscountCreatedBy")
+  updatedDiscounts         DiscountPromotion[]     @relation("DiscountUpdatedBy")
+  createdHappyHours        HappyHourPromotion[]    @relation("HappyHourCreatedBy")
+  updatedHappyHours        HappyHourPromotion[]    @relation("HappyHourUpdatedBy")
+  cancelledOrders          Order[]                 @relation("OrderCancelledBy")
+  cashierOrders            Order[]                 @relation("OrderCashier")
+  drivenOrders             Order[]                 @relation("OrderDriver")
+  payments                 Payment[]
+  createdProducts          Product[]               @relation("ProductCreatedBy")
+  updatedProducts          Product[]               @relation("ProductUpdatedBy")
+  cashierShifts            Shift[]                 @relation("ShiftCashier")
+  cashierExpenses          CashExpense[]           @relation("ExpenseCashier")
+  systemLogs               SystemLog[]             @relation("SystemLogUser")
+  extraDays                UserExtraDay[]          @relation("UserExtraDays")
+  waiterZoneAssignments    WaiterZoneAssignment[]  @relation("UserWaiterZones")
+  kitchenAssignments       CookKitchenAssignment[] @relation("UserKitchenAssignments")
 
   @@index([role])
   @@index([isActive])
+}
+
+model AuthAttempt {
+  key         String    @id
+  failures    Int       @default(0)
+  level       Int       @default(0)
+  lockedUntil DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  @@index([lockedUntil])
+  @@index([updatedAt])
 }
 
 model Customer {

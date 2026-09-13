@@ -38,6 +38,7 @@ const socketCorsOrigin =
 interface OrderSocketJwtPayload {
   sub: string;
   tokenVersion: number;
+  type: 'access';
 }
 
 interface OrdersServerToClientEvents {
@@ -174,6 +175,13 @@ export class OrdersGateway implements OnGatewayInit {
 
     const payload =
       await this.jwtService.verifyAsync<OrderSocketJwtPayload>(token);
+    if (
+      payload.type !== 'access' ||
+      typeof payload.sub !== 'string' ||
+      !Number.isInteger(payload.tokenVersion)
+    ) {
+      throw new Error('Tipo de token inválido');
+    }
     const user = await this.usersRepository.findById(payload.sub);
 
     if (!user || !user.isActive || user.tokenVersion !== payload.tokenVersion) {

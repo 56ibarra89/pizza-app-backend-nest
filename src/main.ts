@@ -1,23 +1,28 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  const logger = new Logger('Bootstrap');
 
-  // Initialize NestJS app
-  const isProd = process.env.NODE_ENV === 'production';
+  const apiHost = process.env.API_HOST?.trim() || '127.0.0.1';
+  const isLoopback = ['127.0.0.1', 'localhost', '::1'].includes(apiHost);
+  const trustProxyHops = Number.parseInt(
+    process.env.TRUST_PROXY_HOPS || '0',
+    10,
+  );
 
-  if (isProd) {
+  if (Number.isInteger(trustProxyHops) && trustProxyHops > 0) {
     const expressApp = app.getHttpAdapter().getInstance();
     if (typeof expressApp?.set === 'function') {
-      expressApp.set('trust proxy', 1);
+      expressApp.set('trust proxy', trustProxyHops);
     }
   }
 
-  const swaggerEnabled = !isProd || process.env.SWAGGER_ENABLED === 'true';
+  const swaggerEnabled = process.env.SWAGGER_ENABLED === 'true';
   app.use(
     helmet({
       contentSecurityPolicy: swaggerEnabled ? false : undefined,
@@ -25,13 +30,31 @@ async function bootstrap() {
   );
 
   const corsOrigins = process.env.CORS_ORIGINS
-    ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
-    : undefined;
-  if (!isProd) {
-    app.enableCors();
-  } else if (corsOrigins?.length) {
-    app.enableCors({ origin: corsOrigins });
+    ? process.env.CORS_ORIGINS.split(',')
+        .map((o) => o.trim())
+        .filter(Boolean)
+    : [];
+  const allowedOrigins = new Set(
+    corsOrigins.length
+      ? corsOrigins
+      : isLoopback
+        ? ['http://localhost:5173', 'http://127.0.0.1:5173', 'file://', 'null']
+        : [],
+  );
+  if (!isLoopback && allowedOrigins.size === 0) {
+    throw new Error(
+      'CORS_ORIGINS must be configured when the API is exposed outside localhost.',
+    );
   }
+  app.enableCors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error('Origin not allowed by CORS'));
+    },
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -52,6 +75,14 @@ async function bootstrap() {
     SwaggerModule.setup('docs', app, document);
   }
 
-  await app.listen(process.env.PORT ?? 3000);
+  const port = Number.parseInt(process.env.PORT || '3000', 10);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error('PORT must be an integer between 1 and 65535.');
+  }
+  await app.listen(port, apiHost);
+  logger.log(`API listening on ${apiHost}:${port}`);
+  if (!process.env.NODE_ENV) {
+    logger.warn('NODE_ENV is not configured; using development behavior.');
+  }
 }
 bootstrap();

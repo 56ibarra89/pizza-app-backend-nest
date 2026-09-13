@@ -6,7 +6,7 @@ export interface UserEntity {
   email?: string;
   firstName: string;
   lastName: string;
-  pin: string;
+  pinHash?: string;
   passwordHash?: string;
   role: UserRoleDto;
   isActive: boolean;

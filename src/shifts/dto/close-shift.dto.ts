@@ -59,7 +59,7 @@ export class CloseShiftDto {
 
   @IsOptional()
   @IsString()
-  @Matches(/^\d{4,12}$/)
+  @Matches(/^\d{6}$/)
   authorizationPin?: string;
 
   @IsOptional()

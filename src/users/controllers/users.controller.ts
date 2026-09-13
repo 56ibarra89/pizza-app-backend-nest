@@ -16,9 +16,22 @@ import { ApiTags } from '@nestjs/swagger';
 import { UsersService } from '../services/users.service';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
+import { UpdateOwnProfileDto } from '../dto/update-own-profile.dto';
 import { toUserResponseDto } from '../mappers/users.mapper';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRoleDto } from '../dto/user-role.dto';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
+
+const AUTHENTICATED_ROLES = [
+  UserRoleDto.admin,
+  UserRoleDto.cajero,
+  UserRoleDto.cajero_principal,
+  UserRoleDto.mesero,
+  UserRoleDto.cocinero,
+  UserRoleDto.despachador,
+  UserRoleDto.motorizado,
+];
 
 @ApiTags('users')
 @Roles(UserRoleDto.admin)
@@ -91,25 +104,21 @@ export class UsersController {
     return toUserResponseDto(created);
   }
 
+  @Patch('me')
+  @Roles(...AUTHENTICATED_ROLES)
+  async updateOwnProfile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateOwnProfileDto,
+  ) {
+    const updated = await this.users.updateOwnProfile(user.id, dto);
+    return toUserResponseDto(updated);
+  }
+
   @Patch(':id')
-  @Roles(
-    UserRoleDto.admin,
-    UserRoleDto.cajero,
-    UserRoleDto.mesero,
-    UserRoleDto.cocinero,
-    UserRoleDto.despachador,
-  )
   async update(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateUserDto,
-    @Request()
-    req: { user: { role: UserRoleDto; username: string; id: string } },
   ) {
-    if (req.user.role !== UserRoleDto.admin && req.user.id !== id) {
-      throw new ForbiddenException(
-        'No tienes permiso para editar este perfil.',
-      );
-    }
     const updated = await this.users.update(id, dto);
     return toUserResponseDto(updated);
   }

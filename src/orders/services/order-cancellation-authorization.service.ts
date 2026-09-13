@@ -25,8 +25,11 @@ export class OrderCancellationAuthorizationService {
       );
     }
 
-    const user = await this.usersRepository.findByPin(adminPin);
-    if (!user || !user.isActive || user.role !== UserRoleDto.admin) {
+    const user = await this.usersRepository.findByPin(adminPin, {
+      allowedRoles: [UserRoleDto.admin],
+      attemptScope: 'order-cancellation',
+    });
+    if (!user) {
       throw new ForbiddenException(
         'PIN de administrador inválido o usuario no tiene permisos.',
       );

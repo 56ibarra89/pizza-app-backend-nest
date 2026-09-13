@@ -6,7 +6,7 @@ export interface UserResponseDto {
   email?: string;
   firstName: string;
   lastName: string;
-  pin?: string;
+  hasPin?: boolean;
   role: UserRoleDto;
   isActive: boolean;
   createdAt: string;

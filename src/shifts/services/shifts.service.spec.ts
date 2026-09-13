@@ -41,7 +41,7 @@ describe('ShiftsService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new ShiftsService(repo);
+    service = new ShiftsService(repo, { emit: jest.fn() } as any);
   });
 
   afterEach(() => jest.useRealTimers());

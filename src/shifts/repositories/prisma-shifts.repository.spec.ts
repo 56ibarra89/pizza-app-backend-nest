@@ -4,10 +4,10 @@ import {
   PaymentMethod,
   Prisma,
   ShiftStatus,
-  UserRole,
 } from '@prisma/client';
 import type { PrismaService } from '../../prisma/prisma.service';
 import { PrismaShiftsRepository } from './prisma-shifts.repository';
+import { UserRoleDto } from '../../users/dto/user-role.dto';
 
 describe('PrismaShiftsRepository.close', () => {
   const existingShift = {
@@ -42,7 +42,7 @@ describe('PrismaShiftsRepository.close', () => {
     authorizer: {
       id: string;
       username: string;
-      role: UserRole;
+      role: UserRoleDto;
       isActive: boolean;
     } | null = null,
   ) => {
@@ -98,15 +98,19 @@ describe('PrismaShiftsRepository.close', () => {
         ),
       },
       order: { findMany: jest.fn(() => Promise.resolve([])) },
-      user: { findUnique: jest.fn(() => Promise.resolve(authorizer)) },
       systemLog: { create: systemLogCreate },
     };
     const transaction = jest.fn(
       (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
     );
-    const repository = new PrismaShiftsRepository({
-      $transaction: transaction,
-    } as unknown as PrismaService);
+    const repository = new PrismaShiftsRepository(
+      {
+        $transaction: transaction,
+      } as unknown as PrismaService,
+      {
+        findByPin: jest.fn(() => Promise.resolve(authorizer)),
+      } as any,
+    );
 
     return { repository, shiftUpdate, systemLogCreate };
   };
@@ -160,7 +164,7 @@ describe('PrismaShiftsRepository.close', () => {
         ...closeParams,
         closingAmount: 1099,
         discrepancyReason: 'Faltante confirmado en conteo físico',
-        authorizationPin: '9999',
+        authorizationPin: '999999',
       }),
     ).rejects.toThrow(
       new BadRequestException(
@@ -174,7 +178,7 @@ describe('PrismaShiftsRepository.close', () => {
     const { repository, systemLogCreate } = createHarness({
       id: 'admin-1',
       username: 'supervisor',
-      role: UserRole.ADMIN,
+      role: UserRoleDto.admin,
       isActive: true,
     });
 
@@ -182,7 +186,7 @@ describe('PrismaShiftsRepository.close', () => {
       ...closeParams,
       closingAmount: 1099,
       discrepancyReason: 'Faltante confirmado en conteo físico',
-      authorizationPin: '1234',
+      authorizationPin: '123456',
     });
 
     expect(result.cashDifference).toBe(-1);

@@ -19,6 +19,14 @@ describe('CashExpensesService', () => {
     getById: jest.fn(),
   };
 
+  const configService = {
+    getByIdOrDefault: jest.fn(),
+  };
+
+  const usersRepository = {
+    findByPin: jest.fn(),
+  };
+
   const user: AuthenticatedUser = {
     id: 'user-cajero-1',
     username: 'cajero1',
@@ -29,7 +37,23 @@ describe('CashExpensesService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new CashExpensesService(repo as any, shiftsService as any);
+    configService.getByIdOrDefault.mockResolvedValue({
+      id: 'petty_cash_policy',
+      data: {
+        maxAmountWithoutAuth: 500,
+        maxShiftTotal: 2000,
+        requireVoucherOver: 0,
+        requireVoucherAlways: false,
+        categoryPolicies: {},
+      },
+    });
+    repo.getTotalExpensesByShiftId.mockResolvedValue(0);
+    service = new CashExpensesService(
+      repo as any,
+      shiftsService as any,
+      configService as any,
+      usersRepository as any,
+    );
   });
 
   it('registra un gasto exitosamente en el turno activo', async () => {
@@ -89,5 +113,59 @@ describe('CashExpensesService', () => {
         user,
       ),
     ).rejects.toThrow(BadRequestException);
+  });
+
+  it('exige y valida el PIN de administrador cuando la política lo requiere', async () => {
+    shiftsService.getActive.mockResolvedValue({
+      id: 'shift-123',
+      status: ShiftStatus.OPEN,
+    });
+    shiftsService.getById.mockResolvedValue({
+      id: 'shift-123',
+      status: ShiftStatus.OPEN,
+    });
+    configService.getByIdOrDefault.mockResolvedValue({
+      id: 'petty_cash_policy',
+      data: {
+        maxAmountWithoutAuth: 100,
+        maxShiftTotal: 2000,
+        requireVoucherOver: 0,
+        requireVoucherAlways: false,
+        categoryPolicies: {},
+      },
+    });
+
+    await expect(
+      service.create(
+        {
+          amount: 200,
+          category: CashExpenseCategoryDto.OTROS,
+          reason: 'Compra urgente',
+        },
+        user,
+      ),
+    ).rejects.toThrow('requiere autorización');
+
+    usersRepository.findByPin.mockResolvedValue({
+      id: 'admin-1',
+      role: UserRoleDto.admin,
+      isActive: true,
+    });
+    repo.create.mockResolvedValue({ id: 'expense-2' });
+
+    await service.create(
+      {
+        amount: 200,
+        category: CashExpenseCategoryDto.OTROS,
+        reason: 'Compra urgente',
+        authorizationPin: '123456',
+      },
+      user,
+    );
+
+    expect(usersRepository.findByPin).toHaveBeenCalledWith('123456', {
+      allowedRoles: [UserRoleDto.admin],
+      attemptScope: 'cash-expense-authorization',
+    });
   });
 });
