@@ -38,6 +38,10 @@ export interface OrderEntity {
   cashierSnapshotName?: string;
   customerTendered?: number;
   deliveryChange?: number;
+  kitchenReadyAt?: Date;
+  deliveryStartedAt?: Date;
+  deliveredAt?: Date;
+  deliverySlaAlertedAt?: Date;
   isSentToKitchen?: boolean;
   linkedTables?: string[];
 

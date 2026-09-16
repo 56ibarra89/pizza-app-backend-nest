@@ -37,6 +37,11 @@ import { KitchensService } from '../../kitchens/kitchens.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { InvoiceIssuingService } from './invoice-issuing.service';
 import { OrderTypeDto } from '../dto/order-type.dto';
+import {
+  DEFAULT_SERVICE_SLA_CONFIG,
+  SERVICE_SLA_CONFIG_ID,
+  normalizeServiceSlaConfig,
+} from '../../common/service-sla.config';
 
 @Injectable()
 export class OrdersService {
@@ -295,6 +300,9 @@ export class OrdersService {
       this.logger.debug(`Estado global derivado: ${nextGlobalStatus}`);
       const updated = await this.repo.update(id, {
         status: nextGlobalStatus,
+        ...(!wasReadyForPickup && this.isReadyForPickup(reloaded.items)
+          ? { kitchenReadyAt: new Date() }
+          : {}),
       });
       if (!wasReadyForPickup && this.isReadyForPickup(reloaded.items)) {
         this.emitOrderReady(updated);
@@ -384,6 +392,15 @@ export class OrdersService {
     };
     const becameReadyForPickup =
       !wasReadyForPickup && this.isReadyForPickup(items);
+    if (becameReadyForPickup) {
+      updateData.kitchenReadyAt = new Date();
+    }
+    if (
+      existing.orderType === OrderTypeDto.delivery &&
+      nextStatus === OrderStatusDto.delivered
+    ) {
+      updateData.deliveredAt = new Date();
+    }
 
     if (authorizerAdmin) {
       updateData.cancelReason = dto.cancelReason;
@@ -417,6 +434,119 @@ export class OrdersService {
     }
     this.publishOrder(updated, 'updated');
     return updated;
+  }
+
+  async startDelivery(id: string, user: AuthenticatedUser) {
+    const existing = await this.getById(id);
+    if (existing.orderType !== OrderTypeDto.delivery) {
+      throw new BadRequestException('La orden no corresponde a un delivery.');
+    }
+    if (
+      user.role === UserRoleDto.motorizado &&
+      existing.driverId &&
+      existing.driverId !== user.id
+    ) {
+      throw new ForbiddenException(
+        'Este pedido está asignado a otro motorizado.',
+      );
+    }
+    if (existing.deliveryStartedAt) return existing;
+    const hasKitchenItems = existing.items.some(
+      (item) => requiresKitchenPreparation(item) && item.isSentToKitchen,
+    );
+    if (
+      hasKitchenItems &&
+      existing.status !== OrderStatusDto.ready &&
+      !this.isReadyForPickup(existing.items)
+    ) {
+      throw new BadRequestException(
+        'El pedido aún no está listo para iniciar la ruta.',
+      );
+    }
+
+    const updated = await this.repo.update(id, {
+      deliveryStartedAt: new Date(),
+      deliverySlaAlertedAt: null,
+    });
+    this.publishOrder(updated, 'updated');
+    return updated;
+  }
+
+  async getSlaMetrics(daysInput = 30) {
+    const days = Math.min(365, Math.max(1, Math.round(daysInput || 30)));
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const configRecord = await this.prisma.appConfig.findUnique({
+      where: { id: SERVICE_SLA_CONFIG_ID },
+      select: { data: true },
+    });
+    const config = normalizeServiceSlaConfig(
+      configRecord?.data ?? DEFAULT_SERVICE_SLA_CONFIG,
+    );
+    const orders = await this.prisma.order.findMany({
+      where: {
+        timestamp: { gte: since },
+        status: { not: 'CANCELLED' },
+      },
+      select: {
+        timestamp: true,
+        kitchenReadyAt: true,
+        deliveryStartedAt: true,
+        deliveredAt: true,
+        items: {
+          where: { isSentToKitchen: true, sentAt: { not: null } },
+          select: { sentAt: true },
+        },
+      },
+    });
+
+    const kitchenMinutes = orders.flatMap((order) => {
+      if (!order.kitchenReadyAt) return [];
+      const sentTimes = order.items
+        .map((item) => item.sentAt?.getTime())
+        .filter((value): value is number => typeof value === 'number');
+      const startedAt = sentTimes.length
+        ? Math.min(...sentTimes)
+        : order.timestamp.getTime();
+      return [
+        Math.max(0, (order.kitchenReadyAt.getTime() - startedAt) / 60000),
+      ];
+    });
+    const deliveryMinutes = orders.flatMap((order) =>
+      order.deliveryStartedAt && order.deliveredAt
+        ? [
+            Math.max(
+              0,
+              (order.deliveredAt.getTime() -
+                order.deliveryStartedAt.getTime()) /
+                60000,
+            ),
+          ]
+        : [],
+    );
+    const summarize = (values: number[], limit: number) => ({
+      completed: values.length,
+      averageMinutes: values.length
+        ? Math.round(
+            (values.reduce((total, value) => total + value, 0) /
+              values.length) *
+              10,
+          ) / 10
+        : 0,
+      onTimeCount: values.filter((value) => value < limit).length,
+      onTimePercent: values.length
+        ? Math.round(
+            (values.filter((value) => value < limit).length / values.length) *
+              100,
+          )
+        : 0,
+    });
+
+    return {
+      days,
+      config,
+      kitchen: summarize(kitchenMinutes, config.kitchenCriticalMinutes),
+      delivery: summarize(deliveryMinutes, config.deliveryMaxMinutes),
+    };
   }
 
   async updateTables(id: string, tableIds: string[]) {

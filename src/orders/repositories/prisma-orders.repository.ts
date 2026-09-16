@@ -280,6 +280,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       linkedTables?: string[];
       customerTendered?: number | null;
       deliveryChange?: number | null;
+      kitchenReadyAt?: Date | null;
+      deliveryStartedAt?: Date | null;
+      deliveredAt?: Date | null;
+      deliverySlaAlertedAt?: Date | null;
     },
   ): Promise<OrderEntity> {
     const updateData: Prisma.OrderUpdateInput = {
@@ -362,6 +366,18 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         data.customerTendered === undefined ? undefined : data.customerTendered,
       deliveryChange:
         data.deliveryChange === undefined ? undefined : data.deliveryChange,
+      kitchenReadyAt:
+        data.kitchenReadyAt === undefined ? undefined : data.kitchenReadyAt,
+      deliveryStartedAt:
+        data.deliveryStartedAt === undefined
+          ? undefined
+          : data.deliveryStartedAt,
+      deliveredAt:
+        data.deliveredAt === undefined ? undefined : data.deliveredAt,
+      deliverySlaAlertedAt:
+        data.deliverySlaAlertedAt === undefined
+          ? undefined
+          : data.deliverySlaAlertedAt,
     };
 
     if (data.payments) {
@@ -439,7 +455,6 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     const whereClause: Prisma.OrderItemWhereInput = {
       orderId: params.orderId,
       isSentToKitchen: true,
-
     };
 
     if (params.itemId !== undefined) {
@@ -476,8 +491,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
 
         let overallStatus: KitchenStatusDto = 'pending' as KitchenStatusDto;
         if (allDelivered) overallStatus = 'delivered' as KitchenStatusDto;
-        else if (allReadyOrDelivered) overallStatus = 'ready' as KitchenStatusDto;
-        else if (anyPreparingOrReady) overallStatus = 'preparing' as KitchenStatusDto;
+        else if (allReadyOrDelivered)
+          overallStatus = 'ready' as KitchenStatusDto;
+        else if (anyPreparingOrReady)
+          overallStatus = 'preparing' as KitchenStatusDto;
 
         await this.prisma.orderItem.update({
           where: { id: item.id },
@@ -557,6 +574,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     }>;
     customerTendered: Prisma.Decimal | null;
     deliveryChange: Prisma.Decimal | null;
+    kitchenReadyAt: Date | null;
+    deliveryStartedAt: Date | null;
+    deliveredAt: Date | null;
+    deliverySlaAlertedAt: Date | null;
   }): OrderEntity {
     return {
       id: o.id,
@@ -623,6 +644,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       deliveryChange: o.deliveryChange
         ? o.deliveryChange.toNumber()
         : undefined,
+      kitchenReadyAt: o.kitchenReadyAt ?? undefined,
+      deliveryStartedAt: o.deliveryStartedAt ?? undefined,
+      deliveredAt: o.deliveredAt ?? undefined,
+      deliverySlaAlertedAt: o.deliverySlaAlertedAt ?? undefined,
       invoice:
         o.invoiceCorrelativoId &&
         o.invoiceDocumentType &&
@@ -644,4 +669,3 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     };
   }
 }
-

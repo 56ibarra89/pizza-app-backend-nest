@@ -199,6 +199,10 @@ model Order {
   discountAmount          Decimal?            @db.Decimal(12, 2)
   customerTendered        Decimal?            @db.Decimal(12, 2)
   deliveryChange          Decimal?            @db.Decimal(12, 2)
+  kitchenReadyAt          DateTime?
+  deliveryStartedAt       DateTime?
+  deliveredAt             DateTime?
+  deliverySlaAlertedAt    DateTime?
   cancelReason            String?
   cancelledAt             DateTime?
   cancelledById           String?
@@ -229,6 +233,9 @@ model Order {
   @@index([status])
   @@index([cashierId])
   @@index([driverId])
+  @@index([kitchenReadyAt])
+  @@index([deliveryStartedAt, deliveredAt])
+  @@index([deliverySlaAlertedAt])
   @@index([cuponId])
   @@index([discountId])
   @@index([happyHourId])

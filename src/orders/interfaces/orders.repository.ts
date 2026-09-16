@@ -75,6 +75,10 @@ export interface IOrdersRepository {
       driverId?: string | null;
       customerTendered?: number | null;
       deliveryChange?: number | null;
+      kitchenReadyAt?: Date | null;
+      deliveryStartedAt?: Date | null;
+      deliveredAt?: Date | null;
+      deliverySlaAlertedAt?: Date | null;
     },
   ): Promise<OrderEntity>;
 

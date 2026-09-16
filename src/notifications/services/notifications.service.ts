@@ -3,6 +3,12 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Subject } from 'rxjs';
 import { UserRole } from '@prisma/client';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import {
+  DEFAULT_SERVICE_SLA_CONFIG,
+  SERVICE_SLA_CONFIG_ID,
+  normalizeServiceSlaConfig,
+} from '../../common/service-sla.config';
 
 export interface NotificationEvent {
   id: string;
@@ -17,10 +23,102 @@ export interface NotificationEvent {
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
+  private checkingDeliverySlas = false;
 
   public readonly notificationStream = new Subject<NotificationEvent>();
 
   constructor(private readonly prisma: PrismaService) {}
+
+  @Cron(CronExpression.EVERY_MINUTE)
+  async checkOverdueDeliveries() {
+    if (this.checkingDeliverySlas) return;
+    this.checkingDeliverySlas = true;
+    try {
+      const configRecord = await this.prisma.appConfig.findUnique({
+        where: { id: SERVICE_SLA_CONFIG_ID },
+        select: { data: true },
+      });
+      const config = normalizeServiceSlaConfig(
+        configRecord?.data ?? DEFAULT_SERVICE_SLA_CONFIG,
+      );
+      if (!config.deliveryAlertsEnabled) return;
+
+      const cutoff = new Date(
+        Date.now() - config.deliveryMaxMinutes * 60 * 1000,
+      );
+      const overdue = await this.prisma.order.findMany({
+        where: {
+          orderType: 'DELIVERY',
+          deliveryStartedAt: { not: null, lte: cutoff },
+          deliveredAt: null,
+          deliverySlaAlertedAt: null,
+          status: { notIn: ['DELIVERED', 'PAID', 'CANCELLED'] },
+        },
+        select: {
+          id: true,
+          invoiceNumber: true,
+          customerSnapshotName: true,
+          cashierSnapshotName: true,
+          deliveryStartedAt: true,
+          customer: { select: { phone: true } },
+        },
+      });
+
+      for (const order of overdue) {
+        const claimed = await this.prisma.order.updateMany({
+          where: { id: order.id, deliverySlaAlertedAt: null },
+          data: { deliverySlaAlertedAt: new Date() },
+        });
+        if (claimed.count === 0) continue;
+
+        const elapsedMinutes = Math.max(
+          config.deliveryMaxMinutes,
+          Math.floor(
+            (Date.now() - (order.deliveryStartedAt?.getTime() ?? Date.now())) /
+              60000,
+          ),
+        );
+        const reference = order.invoiceNumber
+          ? `#${order.invoiceNumber}`
+          : `ORD-${order.id.slice(-6)}`;
+        const customer = order.customerSnapshotName || 'el cliente';
+        const phone = order.customer?.phone
+          ? ` Teléfono: ${order.customer.phone}.`
+          : '';
+        const title = 'Delivery fuera de tiempo';
+        const message = `${reference} lleva ${elapsedMinutes} min en ruta para ${customer}.${phone} Contacta al cliente preventivamente.`;
+
+        try {
+          const notifications = [
+            this.createNotification(title, message, UserRole.ADMIN),
+            this.createNotification(title, message, UserRole.CAJERO_PRINCIPAL),
+            this.createNotification(title, message, UserRole.DESPACHADOR),
+          ];
+          if (order.cashierSnapshotName) {
+            notifications.push(
+              this.createNotification(
+                title,
+                message,
+                UserRole.CAJERO,
+                order.cashierSnapshotName,
+              ),
+            );
+          }
+          await Promise.all(notifications);
+        } catch (error) {
+          await this.prisma.order.update({
+            where: { id: order.id },
+            data: { deliverySlaAlertedAt: null },
+          });
+          throw error;
+        }
+      }
+    } catch (error) {
+      this.logger.error('No se pudieron revisar los SLA de delivery.', error);
+    } finally {
+      this.checkingDeliverySlas = false;
+    }
+  }
 
   @OnEvent('order.ready')
   async handleOrderReadyEvent(payload: {
@@ -241,4 +339,3 @@ export class NotificationsService {
     }
   }
 }
-

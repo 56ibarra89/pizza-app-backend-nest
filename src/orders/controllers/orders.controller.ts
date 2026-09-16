@@ -151,6 +151,12 @@ export class OrdersController {
     return { success: true };
   }
 
+  @Get('sla/metrics')
+  @Roles(UserRoleDto.admin)
+  getSlaMetrics(@Query('days') days?: string) {
+    return this.orders.getSlaMetrics(Number(days) || 30);
+  }
+
   @Get(':id')
   async getById(
     @Param('id') id: string,
@@ -193,6 +199,21 @@ export class OrdersController {
   ) {
     const updated = await this.orders.updateStatus(id, dto, user);
     return this.getVisibleOrderResponse(updated, user);
+  }
+
+  @Patch(':id/start-delivery')
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.despachador,
+    UserRoleDto.motorizado,
+  )
+  async startDelivery(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const updated = await this.orders.startDelivery(id, user);
+    return toOrderResponseDto(updated);
   }
 
   @Patch(':id/items')
