@@ -1,4 +1,12 @@
-import { IsEnum, IsNumber, IsOptional, IsString, Matches } from 'class-validator';
+import {
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Matches,
+  ValidateIf,
+} from 'class-validator';
 import { OrderStatusDto } from './order-status.dto';
 
 export class UpdateOrderStatusDto {
@@ -11,7 +19,15 @@ export class UpdateOrderStatusDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   cancelReason?: string;
+
+  @ValidateIf(
+    (dto: UpdateOrderStatusDto) => dto.status === OrderStatusDto.cancelled,
+  )
+  @IsString()
+  @Matches(/^[a-z0-9][a-z0-9-]{0,79}$/)
+  cancelReasonId?: string;
 
   @IsOptional()
   @IsString()

@@ -157,6 +157,19 @@ export class OrdersController {
     return this.orders.getSlaMetrics(Number(days) || 30);
   }
 
+  @Get('cancellations/metrics')
+  @Roles(UserRoleDto.admin)
+  getCancellationMetrics(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    const now = new Date();
+    const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const start = startDate ? new Date(startDate) : defaultStart;
+    const end = endDate ? new Date(endDate) : now;
+    return this.orders.getCancellationMetrics(start, end);
+  }
+
   @Get(':id')
   async getById(
     @Param('id') id: string,

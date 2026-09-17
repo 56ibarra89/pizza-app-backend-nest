@@ -46,6 +46,13 @@ export interface OrderEntity {
   linkedTables?: string[];
 
   cancelReason?: string;
+  cancellationReasonId?: string;
+  cancellationReasonLabel?: string;
+  cancellationCategory?: string;
+  cancellationCountsAsWaste?: boolean;
+  cancellationWasPrepared?: boolean;
+  cancellationRequiresSupervisor?: boolean;
+  cancellationLossAmount?: number;
   cancelledById?: string;
   cancelledAt?: Date;
 

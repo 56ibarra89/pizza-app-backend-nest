@@ -274,6 +274,13 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       cashierSnapshotName?: string | null;
       driverId?: string | null;
       cancelReason?: string | null;
+      cancellationReasonId?: string | null;
+      cancellationReasonLabel?: string | null;
+      cancellationCategory?: string | null;
+      cancellationCountsAsWaste?: boolean;
+      cancellationWasPrepared?: boolean;
+      cancellationRequiresSupervisor?: boolean;
+      cancellationLossAmount?: number | null;
       cancelledById?: string | null;
       cancelledAt?: Date | null;
       isSentToKitchen?: boolean;
@@ -353,6 +360,25 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           : data.cashierSnapshotName,
       cancelReason:
         data.cancelReason === undefined ? undefined : data.cancelReason,
+      cancellationReasonId:
+        data.cancellationReasonId === undefined
+          ? undefined
+          : data.cancellationReasonId,
+      cancellationReasonLabel:
+        data.cancellationReasonLabel === undefined
+          ? undefined
+          : data.cancellationReasonLabel,
+      cancellationCategory:
+        data.cancellationCategory === undefined
+          ? undefined
+          : data.cancellationCategory,
+      cancellationCountsAsWaste: data.cancellationCountsAsWaste,
+      cancellationWasPrepared: data.cancellationWasPrepared,
+      cancellationRequiresSupervisor: data.cancellationRequiresSupervisor,
+      cancellationLossAmount:
+        data.cancellationLossAmount === undefined
+          ? undefined
+          : data.cancellationLossAmount,
       cancelledBy:
         data.cancelledById === undefined
           ? undefined
@@ -540,6 +566,13 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     happyHourId: number | null;
     cashierSnapshotName: string | null;
     cancelReason: string | null;
+    cancellationReasonId: string | null;
+    cancellationReasonLabel: string | null;
+    cancellationCategory: string | null;
+    cancellationCountsAsWaste: boolean;
+    cancellationWasPrepared: boolean;
+    cancellationRequiresSupervisor: boolean;
+    cancellationLossAmount: Prisma.Decimal | null;
     cancelledById: string | null;
     cancelledAt: Date | null;
     isSentToKitchen: boolean;
@@ -634,6 +667,13 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       happyHourId: o.happyHourId ?? undefined,
       cashierSnapshotName: o.cashierSnapshotName ?? undefined,
       cancelReason: o.cancelReason ?? undefined,
+      cancellationReasonId: o.cancellationReasonId ?? undefined,
+      cancellationReasonLabel: o.cancellationReasonLabel ?? undefined,
+      cancellationCategory: o.cancellationCategory ?? undefined,
+      cancellationCountsAsWaste: o.cancellationCountsAsWaste,
+      cancellationWasPrepared: o.cancellationWasPrepared,
+      cancellationRequiresSupervisor: o.cancellationRequiresSupervisor,
+      cancellationLossAmount: o.cancellationLossAmount?.toNumber() ?? undefined,
       cancelledById: o.cancelledById ?? undefined,
       cancelledAt: o.cancelledAt ?? undefined,
       isSentToKitchen: o.isSentToKitchen,

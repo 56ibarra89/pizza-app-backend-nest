@@ -68,6 +68,13 @@ export interface IOrdersRepository {
       cashierId?: string | null;
       cashierSnapshotName?: string | null;
       cancelReason?: string | null;
+      cancellationReasonId?: string | null;
+      cancellationReasonLabel?: string | null;
+      cancellationCategory?: string | null;
+      cancellationCountsAsWaste?: boolean;
+      cancellationWasPrepared?: boolean;
+      cancellationRequiresSupervisor?: boolean;
+      cancellationLossAmount?: number | null;
       cancelledById?: string | null;
       cancelledAt?: Date | null;
       isSentToKitchen?: boolean;

@@ -42,6 +42,13 @@ import {
   SERVICE_SLA_CONFIG_ID,
   normalizeServiceSlaConfig,
 } from '../../common/service-sla.config';
+import {
+  DEFAULT_VOID_WASTE_POLICY_CONFIG,
+  VOID_WASTE_POLICY_CONFIG_ID,
+  normalizeVoidWastePolicyConfig,
+  type CancellationReasonPolicy,
+  type VoidWastePolicyConfig,
+} from '../../common/void-waste-policy.config';
 
 @Injectable()
 export class OrdersService {
@@ -261,10 +268,26 @@ export class OrdersService {
       }
     }
 
-    const authorizerAdmin =
-      dto.status === OrderStatusDto.cancelled
-        ? await this.cancellationAuthorization.authorize(dto.adminPin)
-        : undefined;
+    let cancellationPolicy:
+      | {
+          config: VoidWastePolicyConfig;
+          reason: CancellationReasonPolicy;
+          wasPrepared: boolean;
+          requiresSupervisor: boolean;
+        }
+      | undefined;
+    let authorizerAdmin:
+      | Awaited<ReturnType<OrderCancellationAuthorizationService['authorize']>>
+      | undefined;
+
+    if (dto.status === OrderStatusDto.cancelled) {
+      cancellationPolicy = await this.resolveCancellationPolicy(existing, dto);
+      if (cancellationPolicy.requiresSupervisor) {
+        authorizerAdmin = await this.cancellationAuthorization.authorize(
+          dto.adminPin,
+        );
+      }
+    }
     this.logger.debug(
       `updateStatus start id=${id}, status=${dto.status}, sentAt=${dto.sentAt}, existing=${existing.status}, isFinal=${isFinal}`,
     );
@@ -402,9 +425,23 @@ export class OrdersService {
       updateData.deliveredAt = new Date();
     }
 
-    if (authorizerAdmin) {
-      updateData.cancelReason = dto.cancelReason;
-      updateData.cancelledById = authorizerAdmin.id;
+    if (cancellationPolicy) {
+      const note = dto.cancelReason?.trim();
+      const reasonText = note
+        ? `${cancellationPolicy.reason.label}: ${note}`
+        : cancellationPolicy.reason.label;
+      updateData.cancelReason = reasonText;
+      updateData.cancellationReasonId = cancellationPolicy.reason.id;
+      updateData.cancellationReasonLabel = cancellationPolicy.reason.label;
+      updateData.cancellationCategory = cancellationPolicy.reason.category;
+      updateData.cancellationCountsAsWaste =
+        cancellationPolicy.reason.countsAsWaste ||
+        cancellationPolicy.wasPrepared;
+      updateData.cancellationWasPrepared = cancellationPolicy.wasPrepared;
+      updateData.cancellationRequiresSupervisor =
+        cancellationPolicy.requiresSupervisor;
+      updateData.cancellationLossAmount = existing.total;
+      updateData.cancelledById = authorizerAdmin?.id ?? user?.id;
       updateData.cancelledAt = new Date();
 
       // Send email to all admins
@@ -413,8 +450,8 @@ export class OrdersService {
         : 'Desconocido';
       const adminName = authorizerAdmin
         ? `${authorizerAdmin.firstName || ''} ${authorizerAdmin.lastName || ''}`.trim()
-        : 'Desconocido';
-      const reasonStr = dto.cancelReason || 'No especificado';
+        : 'No requerido por la política';
+      const reasonStr = reasonText;
       const invoiceNum = existing.invoice?.invoiceNumber
         ? `#${existing.invoice.invoiceNumber}`
         : 'Sin Factura';
@@ -549,6 +586,109 @@ export class OrdersService {
     };
   }
 
+  async getCancellationMetrics(startDate: Date, endDate: Date) {
+    if (
+      Number.isNaN(startDate.getTime()) ||
+      Number.isNaN(endDate.getTime()) ||
+      endDate < startDate
+    ) {
+      throw new BadRequestException('El rango de fechas no es válido.');
+    }
+
+    const orders = await this.prisma.order.findMany({
+      where: {
+        status: 'CANCELLED',
+        cancelledAt: { gte: startDate, lte: endDate },
+      },
+      orderBy: { cancelledAt: 'desc' },
+      select: {
+        id: true,
+        invoiceNumber: true,
+        cancelledAt: true,
+        cancellationReasonId: true,
+        cancellationReasonLabel: true,
+        cancellationCategory: true,
+        cancellationCountsAsWaste: true,
+        cancellationWasPrepared: true,
+        cancellationRequiresSupervisor: true,
+        cancellationLossAmount: true,
+        total: true,
+        cashierSnapshotName: true,
+      },
+    });
+
+    const categoryMap = new Map<
+      string,
+      { category: string; count: number; amount: number }
+    >();
+    const reasonMap = new Map<
+      string,
+      {
+        reasonId: string;
+        label: string;
+        category: string;
+        count: number;
+        amount: number;
+      }
+    >();
+    let totalAffectedAmount = 0;
+    let totalWasteAmount = 0;
+
+    const recent = orders.map((order) => {
+      const amount = (order.cancellationLossAmount ?? order.total).toNumber();
+      const category = order.cancellationCategory ?? 'OTHER';
+      const reasonId = order.cancellationReasonId ?? 'legacy';
+      const label = order.cancellationReasonLabel ?? 'Anulación anterior';
+      totalAffectedAmount += amount;
+      if (order.cancellationCountsAsWaste) totalWasteAmount += amount;
+
+      const categoryEntry = categoryMap.get(category) ?? {
+        category,
+        count: 0,
+        amount: 0,
+      };
+      categoryEntry.count += 1;
+      categoryEntry.amount += amount;
+      categoryMap.set(category, categoryEntry);
+
+      const reasonEntry = reasonMap.get(reasonId) ?? {
+        reasonId,
+        label,
+        category,
+        count: 0,
+        amount: 0,
+      };
+      reasonEntry.count += 1;
+      reasonEntry.amount += amount;
+      reasonMap.set(reasonId, reasonEntry);
+
+      return {
+        orderId: order.id,
+        invoiceNumber: order.invoiceNumber,
+        cancelledAt: order.cancelledAt?.toISOString(),
+        reasonId,
+        reasonLabel: label,
+        category,
+        amount,
+        countsAsWaste: order.cancellationCountsAsWaste,
+        wasPrepared: order.cancellationWasPrepared,
+        requiredSupervisor: order.cancellationRequiresSupervisor,
+        cashierName: order.cashierSnapshotName,
+      };
+    });
+
+    return {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      totalCancelledOrders: orders.length,
+      totalAffectedAmount: Math.round(totalAffectedAmount * 100) / 100,
+      totalWasteAmount: Math.round(totalWasteAmount * 100) / 100,
+      byCategory: [...categoryMap.values()].sort((a, b) => b.amount - a.amount),
+      byReason: [...reasonMap.values()].sort((a, b) => b.amount - a.amount),
+      recent: recent.slice(0, 100),
+    };
+  }
+
   async updateTables(id: string, tableIds: string[]) {
     await this.tableAssignments.replace(id, tableIds);
 
@@ -628,6 +768,43 @@ export class OrdersService {
       this.publishOrder(finalized, 'updated');
     }
     return finalized;
+  }
+
+  private async resolveCancellationPolicy(
+    order: OrderEntity,
+    dto: UpdateOrderStatusDto,
+  ) {
+    const saved = await this.prisma.appConfig.findUnique({
+      where: { id: VOID_WASTE_POLICY_CONFIG_ID },
+      select: { data: true },
+    });
+    const config = normalizeVoidWastePolicyConfig(
+      saved?.data ?? DEFAULT_VOID_WASTE_POLICY_CONFIG,
+    );
+    const reason = config.reasons.find(
+      (candidate) => candidate.id === dto.cancelReasonId && candidate.isActive,
+    );
+    if (!reason) {
+      throw new BadRequestException(
+        'Selecciona un motivo de anulación activo y válido.',
+      );
+    }
+
+    const wasPrepared = order.items.some(
+      (item) =>
+        requiresKitchenPreparation(item) &&
+        item.isSentToKitchen &&
+        (item.kitchenStatus === KitchenStatusDto.preparing ||
+          item.kitchenStatus === KitchenStatusDto.ready ||
+          item.kitchenStatus === KitchenStatusDto.delivered),
+    );
+    const requiresSupervisor =
+      reason.requiresSupervisor ||
+      (config.requireSupervisorForPaidOrders &&
+        order.status === OrderStatusDto.paid) ||
+      (config.requireSupervisorWhenPreparationStarted && wasPrepared);
+
+    return { config, reason, wasPrepared, requiresSupervisor };
   }
 
   private publishOrder(

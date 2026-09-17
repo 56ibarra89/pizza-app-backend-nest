@@ -175,62 +175,72 @@ model Shift {
 }
 
 model Order {
-  id                      String              @id @default(uuid())
-  subTotal                Decimal?            @db.Decimal(12, 2)
-  taxAmount               Decimal?            @db.Decimal(12, 2)
-  total                   Decimal             @db.Decimal(12, 2)
-  status                  OrderStatus
-  timestamp               DateTime            @default(now())
-  customerAddress         String?
-  orderType               OrderType?
-  isSentToKitchen         Boolean             @default(false)
-  createdAt               DateTime            @default(now())
-  updatedAt               DateTime            @updatedAt
-  cashierId               String?
-  customerId              String?
-  shiftId                 String?
-  invoiceCorrelativoId    String?
-  invoiceDocumentType     DocumentType?
-  invoiceResolutionNumber String?
-  invoicePrefix           String?
-  invoiceIssuedNumber     Int?
-  invoiceNumber           String?             @unique
-  invoiceIssuedAt         DateTime?
-  discountAmount          Decimal?            @db.Decimal(12, 2)
-  customerTendered        Decimal?            @db.Decimal(12, 2)
-  deliveryChange          Decimal?            @db.Decimal(12, 2)
-  kitchenReadyAt          DateTime?
-  deliveryStartedAt       DateTime?
-  deliveredAt             DateTime?
-  deliverySlaAlertedAt    DateTime?
-  cancelReason            String?
-  cancelledAt             DateTime?
-  cancelledById           String?
-  driverId                String?
-  cashierSnapshotName     String?
-  cuponId                 Int?
-  discountId              Int?
-  happyHourId             Int?
-  customerSnapshotName    String?
-  certificadosRedeemed    Certificado[]
-  cancelledBy             User?               @relation("OrderCancelledBy", fields: [cancelledById], references: [id])
-  cashier                 User?               @relation("OrderCashier", fields: [cashierId], references: [id])
-  cupon                   Cupon?              @relation(fields: [cuponId], references: [id])
-  discount                DiscountPromotion?  @relation(fields: [discountId], references: [id])
-  happyHour               HappyHourPromotion? @relation(fields: [happyHourId], references: [id])
-  customer                Customer?           @relation(fields: [customerId], references: [id])
-  driver                  User?               @relation("OrderDriver", fields: [driverId], references: [id])
-  invoiceCorrelativo      Correlativo?        @relation("OrderInvoiceCorrelativo", fields: [invoiceCorrelativoId], references: [id])
-  shift                   Shift?              @relation(fields: [shiftId], references: [id])
-  items                   OrderItem[]
-  linkedTables            OrderTable[]
-  payments                Payment[]
+  id                             String              @id @default(uuid())
+  subTotal                       Decimal?            @db.Decimal(12, 2)
+  taxAmount                      Decimal?            @db.Decimal(12, 2)
+  total                          Decimal             @db.Decimal(12, 2)
+  status                         OrderStatus
+  timestamp                      DateTime            @default(now())
+  customerAddress                String?
+  orderType                      OrderType?
+  isSentToKitchen                Boolean             @default(false)
+  createdAt                      DateTime            @default(now())
+  updatedAt                      DateTime            @updatedAt
+  cashierId                      String?
+  customerId                     String?
+  shiftId                        String?
+  invoiceCorrelativoId           String?
+  invoiceDocumentType            DocumentType?
+  invoiceResolutionNumber        String?
+  invoicePrefix                  String?
+  invoiceIssuedNumber            Int?
+  invoiceNumber                  String?             @unique
+  invoiceIssuedAt                DateTime?
+  discountAmount                 Decimal?            @db.Decimal(12, 2)
+  customerTendered               Decimal?            @db.Decimal(12, 2)
+  deliveryChange                 Decimal?            @db.Decimal(12, 2)
+  kitchenReadyAt                 DateTime?
+  deliveryStartedAt              DateTime?
+  deliveredAt                    DateTime?
+  deliverySlaAlertedAt           DateTime?
+  cancelReason                   String?
+  cancellationReasonId           String?
+  cancellationReasonLabel        String?
+  cancellationCategory           String?
+  cancellationCountsAsWaste      Boolean             @default(false)
+  cancellationWasPrepared        Boolean             @default(false)
+  cancellationRequiresSupervisor Boolean             @default(false)
+  cancellationLossAmount         Decimal?            @db.Decimal(12, 2)
+  cancelledAt                    DateTime?
+  cancelledById                  String?
+  driverId                       String?
+  cashierSnapshotName            String?
+  cuponId                        Int?
+  discountId                     Int?
+  happyHourId                    Int?
+  customerSnapshotName           String?
+  certificadosRedeemed           Certificado[]
+  cancelledBy                    User?               @relation("OrderCancelledBy", fields: [cancelledById], references: [id])
+  cashier                        User?               @relation("OrderCashier", fields: [cashierId], references: [id])
+  cupon                          Cupon?              @relation(fields: [cuponId], references: [id])
+  discount                       DiscountPromotion?  @relation(fields: [discountId], references: [id])
+  happyHour                      HappyHourPromotion? @relation(fields: [happyHourId], references: [id])
+  customer                       Customer?           @relation(fields: [customerId], references: [id])
+  driver                         User?               @relation("OrderDriver", fields: [driverId], references: [id])
+  invoiceCorrelativo             Correlativo?        @relation("OrderInvoiceCorrelativo", fields: [invoiceCorrelativoId], references: [id])
+  shift                          Shift?              @relation(fields: [shiftId], references: [id])
+  items                          OrderItem[]
+  linkedTables                   OrderTable[]
+  payments                       Payment[]
 
   @@index([timestamp])
   @@index([shiftId])
   @@index([customerSnapshotName])
   @@index([customerId])
   @@index([status])
+  @@index([cancelledAt])
+  @@index([cancellationCategory, cancelledAt])
+  @@index([cancellationReasonId, cancelledAt])
   @@index([cashierId])
   @@index([driverId])
   @@index([kitchenReadyAt])
