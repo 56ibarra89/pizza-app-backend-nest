@@ -145,6 +145,15 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     payments?: {
       method: import('../dto/payment-method.dto').PaymentMethodDto;
       amount: number;
+      reference?: string;
+      methodConfigId?: string;
+      methodSnapshotName?: string;
+      methodType?: string;
+      currency?: string;
+      originalAmount?: number;
+      exchangeRate?: number;
+      commissionRate?: number;
+      commissionAmount?: number;
       cashierId?: string;
       cashierSnapshotName?: string;
     }[];
@@ -186,6 +195,15 @@ export class PrismaOrdersRepository implements IOrdersRepository {
                 create: data.payments.map((p) => ({
                   method: toDbPaymentMethod(p.method),
                   amount: p.amount,
+                  reference: p.reference,
+                  methodConfigId: p.methodConfigId,
+                  methodSnapshotName: p.methodSnapshotName,
+                  methodType: p.methodType,
+                  currency: p.currency,
+                  originalAmount: p.originalAmount,
+                  exchangeRate: p.exchangeRate,
+                  commissionRate: p.commissionRate,
+                  commissionAmount: p.commissionAmount,
                   cashierId: p.cashierId,
                   cashierSnapshotName: p.cashierSnapshotName,
                 })),
@@ -212,6 +230,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
             size: i.size,
             quantity: i.quantity,
             note: i.note,
+            kitchenModifiers: i.kitchenModifiers
+              ? (i.kitchenModifiers as unknown as Prisma.InputJsonValue)
+              : undefined,
             giftQuantity: i.giftQuantity ?? 0,
             giftReason: i.giftReason,
             isSentToKitchen: i.isSentToKitchen ?? false,
@@ -266,6 +287,15 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         | {
             method: import('../dto/payment-method.dto').PaymentMethodDto;
             amount: number;
+            reference?: string;
+            methodConfigId?: string;
+            methodSnapshotName?: string;
+            methodType?: string;
+            currency?: string;
+            originalAmount?: number;
+            exchangeRate?: number;
+            commissionRate?: number;
+            commissionAmount?: number;
             cashierId?: string;
             cashierSnapshotName?: string;
           }[]
@@ -412,6 +442,15 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         create: data.payments.map((p) => ({
           method: toDbPaymentMethod(p.method),
           amount: p.amount,
+          reference: p.reference,
+          methodConfigId: p.methodConfigId,
+          methodSnapshotName: p.methodSnapshotName,
+          methodType: p.methodType,
+          currency: p.currency,
+          originalAmount: p.originalAmount,
+          exchangeRate: p.exchangeRate,
+          commissionRate: p.commissionRate,
+          commissionAmount: p.commissionAmount,
           cashierId: p.cashierId,
           cashierSnapshotName: p.cashierSnapshotName,
         })),
@@ -438,6 +477,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           size: i.size,
           quantity: i.quantity,
           note: i.note,
+          kitchenModifiers: i.kitchenModifiers
+            ? (i.kitchenModifiers as unknown as Prisma.InputJsonValue)
+            : undefined,
           giftQuantity: i.giftQuantity ?? 0,
           giftReason: i.giftReason,
           isSentToKitchen: i.isSentToKitchen ?? false,
@@ -582,6 +624,14 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       method: import('@prisma/client').PaymentMethod;
       amount: Prisma.Decimal;
       reference: string | null;
+      methodConfigId: string | null;
+      methodSnapshotName: string | null;
+      methodType: string | null;
+      currency: string | null;
+      originalAmount: Prisma.Decimal | null;
+      exchangeRate: Prisma.Decimal | null;
+      commissionRate: Prisma.Decimal | null;
+      commissionAmount: Prisma.Decimal | null;
       cashierId: string | null;
       cashierSnapshotName: string | null;
       createdAt: Date;
@@ -594,6 +644,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       size: string;
       quantity: number;
       note: string | null;
+      kitchenModifiers: Prisma.JsonValue | null;
       giftQuantity: number;
       giftReason: string | null;
       isSentToKitchen: boolean;
@@ -619,6 +670,14 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         method: fromDbPaymentMethod(p.method),
         amount: p.amount.toNumber(),
         reference: p.reference ?? undefined,
+        methodConfigId: p.methodConfigId ?? undefined,
+        methodSnapshotName: p.methodSnapshotName ?? undefined,
+        methodType: p.methodType ?? undefined,
+        currency: p.currency ?? undefined,
+        originalAmount: p.originalAmount?.toNumber(),
+        exchangeRate: p.exchangeRate?.toNumber(),
+        commissionRate: p.commissionRate?.toNumber(),
+        commissionAmount: p.commissionAmount?.toNumber(),
         cashierId: p.cashierId ?? undefined,
         cashierSnapshotName: p.cashierSnapshotName ?? undefined,
         createdAt: p.createdAt,
@@ -636,6 +695,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           price: e.price.toNumber(),
         })),
         note: i.note ?? undefined,
+        kitchenModifiers: Array.isArray(i.kitchenModifiers)
+          ? (i.kitchenModifiers as unknown as CartItemEntity['kitchenModifiers'])
+          : undefined,
         giftQuantity: i.giftQuantity,
         giftReason: i.giftReason ?? undefined,
         isSentToKitchen: i.isSentToKitchen,

@@ -134,6 +134,15 @@ export class InvoiceIssuingService {
                   create: dto.payments.map((payment) => ({
                     method: toDbPaymentMethod(payment.method),
                     amount: payment.amount,
+                    reference: payment.reference,
+                    methodConfigId: payment.methodConfigId,
+                    methodSnapshotName: payment.methodSnapshotName,
+                    methodType: payment.methodType,
+                    currency: payment.currency,
+                    originalAmount: payment.originalAmount,
+                    exchangeRate: payment.exchangeRate,
+                    commissionRate: payment.commissionRate,
+                    commissionAmount: payment.commissionAmount,
                   })),
                 },
               }
@@ -263,6 +272,15 @@ export class InvoiceIssuingService {
                 create: dto.payments.map((payment) => ({
                   method: toDbPaymentMethod(payment.method),
                   amount: payment.amount,
+                  reference: payment.reference,
+                  methodConfigId: payment.methodConfigId,
+                  methodSnapshotName: payment.methodSnapshotName,
+                  methodType: payment.methodType,
+                  currency: payment.currency,
+                  originalAmount: payment.originalAmount,
+                  exchangeRate: payment.exchangeRate,
+                  commissionRate: payment.commissionRate,
+                  commissionAmount: payment.commissionAmount,
                 })),
               },
             }

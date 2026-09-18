@@ -29,11 +29,25 @@ export type ShiftEntity = {
   authorizedBySnapshotName?: string;
   authorizedByRole?: string;
   denominationBreakdown?: CashDenominationCount[];
+  paymentBreakdown?: ShiftPaymentBreakdown[];
+  totalPaymentCommission?: number;
+  netSales?: number;
   status: ShiftStatus;
   notes?: string;
   expenses?: CashExpenseEntity[];
   createdAt: Date;
   updatedAt: Date;
+};
+
+export type ShiftPaymentBreakdown = {
+  methodId: string;
+  name: string;
+  type: string;
+  currency: string;
+  transactionCount: number;
+  grossAmount: number;
+  commissionAmount: number;
+  netAmount: number;
 };
 
 export type CashDenominationCount = {
@@ -62,6 +76,9 @@ export type ShiftClosePreview = {
     card: number;
     app: number;
     total: number;
+    breakdown: ShiftPaymentBreakdown[];
+    totalCommission: number;
+    net: number;
   };
   expenses: CashExpenseEntity[];
   totalExpenses: number;

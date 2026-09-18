@@ -5,6 +5,18 @@ export interface SelectedExtraEntity {
   price: number;
 }
 
+export type KitchenModifierKindEntity =
+  | 'REMOVE'
+  | 'ADD'
+  | 'PREPARATION'
+  | 'SERVICE';
+
+export interface KitchenModifierSelectionEntity {
+  id: string;
+  label: string;
+  kind: KitchenModifierKindEntity;
+}
+
 export interface CartItemEntity {
   id?: number;
   productId?: string;
@@ -15,6 +27,7 @@ export interface CartItemEntity {
   quantity: number;
   extras: SelectedExtraEntity[];
   note?: string;
+  kitchenModifiers?: KitchenModifierSelectionEntity[];
   giftQuantity: number;
   giftReason?: string;
   isSentToKitchen?: boolean;

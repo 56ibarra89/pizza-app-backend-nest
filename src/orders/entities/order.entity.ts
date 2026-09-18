@@ -9,6 +9,14 @@ export interface PaymentEntity {
   method: PaymentMethodDto;
   amount: number;
   reference?: string;
+  methodConfigId?: string;
+  methodSnapshotName?: string;
+  methodType?: string;
+  currency?: string;
+  originalAmount?: number;
+  exchangeRate?: number;
+  commissionRate?: number;
+  commissionAmount?: number;
   cashierId?: string;
   cashierSnapshotName?: string;
   createdAt: Date;

@@ -49,6 +49,14 @@ import {
   type CancellationReasonPolicy,
   type VoidWastePolicyConfig,
 } from '../../common/void-waste-policy.config';
+import {
+  DEFAULT_PAYMENT_METHODS_CONFIG,
+  PAYMENT_METHODS_CONFIG_ID,
+  normalizePaymentMethodsConfig,
+  type PaymentMethodConfig,
+} from '../../common/payment-methods.config';
+import { PaymentMethodDto } from '../dto/payment-method.dto';
+import type { OrderPaymentDto } from '../dto/order-payment.dto';
 
 @Injectable()
 export class OrdersService {
@@ -102,6 +110,7 @@ export class OrdersService {
   }
 
   async create(dto: CreateOrderDto, user?: AuthenticatedUser) {
+    const resolvedPayments = await this.resolvePayments(dto.payments);
     const isDelivery = dto.orderType === OrderTypeDto.delivery;
     const status = isDelivery
       ? OrderStatusDto.pending
@@ -161,7 +170,7 @@ export class OrdersService {
       happyHourId:
         promotion.source === 'happy-hour' ? promotion.happyHourId : undefined,
       driverId: dto.driverId,
-      payments: dto.payments,
+      payments: resolvedPayments,
       customerTendered: dto.customerTendered,
       deliveryChange: dto.deliveryChange,
     });
@@ -194,7 +203,7 @@ export class OrdersService {
         const finalized = await this.finalize(
           created.id,
           {
-            payments: dto.payments,
+            payments: resolvedPayments,
             customerSnapshotName: dto.customerSnapshotName,
             customerAddress: dto.customerAddress,
             orderType: dto.orderType,
@@ -689,6 +698,97 @@ export class OrdersService {
     };
   }
 
+  async getPaymentMetrics(startDate: Date, endDate: Date) {
+    if (
+      Number.isNaN(startDate.getTime()) ||
+      Number.isNaN(endDate.getTime()) ||
+      endDate < startDate
+    ) {
+      throw new BadRequestException('El rango de fechas no es válido.');
+    }
+    const payments = await this.prisma.payment.findMany({
+      where: {
+        order: {
+          status: 'PAID',
+          timestamp: { gte: startDate, lte: endDate },
+        },
+      },
+      select: {
+        method: true,
+        amount: true,
+        methodConfigId: true,
+        methodSnapshotName: true,
+        methodType: true,
+        currency: true,
+        commissionRate: true,
+        commissionAmount: true,
+        reference: true,
+      },
+    });
+    const groups = new Map<
+      string,
+      {
+        methodId: string;
+        name: string;
+        type: string;
+        currency: string;
+        transactionCount: number;
+        referencedCount: number;
+        grossAmount: number;
+        commissionAmount: number;
+        netAmount: number;
+      }
+    >();
+    for (const payment of payments) {
+      const methodId = payment.methodConfigId ?? `legacy-${payment.method}`;
+      const gross = payment.amount.toNumber();
+      const commission =
+        payment.commissionAmount?.toNumber() ??
+        Math.round(gross * (payment.commissionRate?.toNumber() ?? 0)) / 100;
+      const current = groups.get(methodId) ?? {
+        methodId,
+        name: payment.methodSnapshotName ?? payment.method,
+        type: payment.methodType ?? payment.method,
+        currency: payment.currency ?? 'NIO',
+        transactionCount: 0,
+        referencedCount: 0,
+        grossAmount: 0,
+        commissionAmount: 0,
+        netAmount: 0,
+      };
+      current.transactionCount += 1;
+      if (payment.reference) current.referencedCount += 1;
+      current.grossAmount += gross;
+      current.commissionAmount += commission;
+      current.netAmount += gross - commission;
+      groups.set(methodId, current);
+    }
+    const round = (value: number) => Math.round(value * 100) / 100;
+    const breakdown = [...groups.values()]
+      .map((group) => ({
+        ...group,
+        grossAmount: round(group.grossAmount),
+        commissionAmount: round(group.commissionAmount),
+        netAmount: round(group.netAmount),
+      }))
+      .sort((a, b) => b.grossAmount - a.grossAmount);
+    return {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      transactionCount: payments.length,
+      grossAmount: round(
+        breakdown.reduce((sum, group) => sum + group.grossAmount, 0),
+      ),
+      commissionAmount: round(
+        breakdown.reduce((sum, group) => sum + group.commissionAmount, 0),
+      ),
+      netAmount: round(
+        breakdown.reduce((sum, group) => sum + group.netAmount, 0),
+      ),
+      breakdown,
+    };
+  }
+
   async updateTables(id: string, tableIds: string[]) {
     await this.tableAssignments.replace(id, tableIds);
 
@@ -762,7 +862,12 @@ export class OrdersService {
     const existing = await this.getById(id);
     if (existing.status === OrderStatusDto.paid) return existing;
 
-    await this.finalization.finalize(existing, dto, user);
+    const resolvedPayments = await this.resolvePayments(dto.payments);
+    await this.finalization.finalize(
+      existing,
+      resolvedPayments ? { ...dto, payments: resolvedPayments } : dto,
+      user,
+    );
     const finalized = await this.getById(id);
     if (publishEvent) {
       this.publishOrder(finalized, 'updated');
@@ -805,6 +910,99 @@ export class OrdersService {
       (config.requireSupervisorWhenPreparationStarted && wasPrepared);
 
     return { config, reason, wasPrepared, requiresSupervisor };
+  }
+
+  private async resolvePayments(
+    payments?: OrderPaymentDto[],
+  ): Promise<OrderPaymentDto[] | undefined> {
+    if (!payments) return undefined;
+    const [saved, general] = await Promise.all([
+      this.prisma.appConfig.findUnique({
+        where: { id: PAYMENT_METHODS_CONFIG_ID },
+        select: { data: true },
+      }),
+      this.prisma.appConfig.findUnique({
+        where: { id: 'general_config' },
+        select: { data: true },
+      }),
+    ]);
+    const config = normalizePaymentMethodsConfig(
+      saved?.data ?? DEFAULT_PAYMENT_METHODS_CONFIG,
+    );
+
+    return payments.map((payment) => {
+      const configured = this.findPaymentMethod(config.methods, payment);
+      if (!configured || !configured.isActive) {
+        throw new BadRequestException(
+          'El método de pago seleccionado ya no está disponible.',
+        );
+      }
+      const reference = payment.reference?.trim();
+      if (
+        configured.requiresReference &&
+        (!reference || reference.length < 4)
+      ) {
+        throw new BadRequestException(
+          `${configured.name} requiere una referencia de al menos 4 caracteres.`,
+        );
+      }
+      const amount = Math.round(payment.amount * 100) / 100;
+      const commissionAmount =
+        Math.round(amount * configured.commissionRate) / 100;
+      const generalData =
+        typeof general?.data === 'object' &&
+        general.data !== null &&
+        !Array.isArray(general.data)
+          ? general.data
+          : undefined;
+      const exchangeRate =
+        configured.currency === 'USD'
+          ? Math.max(0.0001, Number(generalData?.exchangeRate) || 36.5)
+          : 1;
+
+      return {
+        ...payment,
+        method: this.toLegacyPaymentMethod(configured),
+        methodConfigId: configured.id,
+        reference,
+        methodSnapshotName: configured.name,
+        methodType: configured.type,
+        currency: configured.currency,
+        originalAmount: Math.round((amount / exchangeRate) * 100) / 100,
+        exchangeRate,
+        commissionRate: configured.commissionRate,
+        commissionAmount,
+      };
+    });
+  }
+
+  private findPaymentMethod(
+    methods: PaymentMethodConfig[],
+    payment: OrderPaymentDto,
+  ) {
+    if (payment.methodConfigId) {
+      return methods.find((method) => method.id === payment.methodConfigId);
+    }
+    const expectedType =
+      payment.method === PaymentMethodDto.EFECTIVO
+        ? 'CASH'
+        : payment.method === PaymentMethodDto.TARJETA
+          ? 'CARD_POS'
+          : undefined;
+    return methods.find(
+      (method) =>
+        method.isActive &&
+        (expectedType
+          ? method.type === expectedType
+          : method.type === 'BANK_TRANSFER' ||
+            method.type === 'DIGITAL_WALLET'),
+    );
+  }
+
+  private toLegacyPaymentMethod(method: PaymentMethodConfig): PaymentMethodDto {
+    if (method.type === 'CASH') return PaymentMethodDto.EFECTIVO;
+    if (method.type === 'CARD_POS') return PaymentMethodDto.TARJETA;
+    return PaymentMethodDto.APP;
   }
 
   private publishOrder(

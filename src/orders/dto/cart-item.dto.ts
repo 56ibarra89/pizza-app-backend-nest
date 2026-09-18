@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  ArrayMaxSize,
   IsBoolean,
   IsEnum,
   IsInt,
@@ -8,11 +9,34 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
 import { SelectedExtraDto } from './selected-extra.dto';
 import { KitchenStatusDto } from './kitchen-status.dto';
+
+export enum KitchenModifierKindDto {
+  REMOVE = 'REMOVE',
+  ADD = 'ADD',
+  PREPARATION = 'PREPARATION',
+  SERVICE = 'SERVICE',
+}
+
+export class KitchenModifierSelectionDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  id!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  label!: string;
+
+  @IsEnum(KitchenModifierKindDto)
+  kind!: KitchenModifierKindDto;
+}
 
 export class CartItemDto {
   @IsOptional()
@@ -43,7 +67,15 @@ export class CartItemDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(200)
   note?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @ValidateNested({ each: true })
+  @Type(() => KitchenModifierSelectionDto)
+  kitchenModifiers?: KitchenModifierSelectionDto[];
 
   @IsOptional()
   @IsInt()
@@ -78,4 +110,3 @@ export class CartItemDto {
   @IsArray()
   comboSelections?: any[];
 }
-

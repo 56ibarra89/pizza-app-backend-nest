@@ -35,7 +35,19 @@ export interface IOrdersRepository {
     cuponId?: number;
     discountId?: number;
     happyHourId?: number;
-    payments?: { method: PaymentMethodDto; amount: number }[];
+    payments?: Array<{
+      method: PaymentMethodDto;
+      amount: number;
+      reference?: string;
+      methodConfigId?: string;
+      methodSnapshotName?: string;
+      methodType?: string;
+      currency?: string;
+      originalAmount?: number;
+      exchangeRate?: number;
+      commissionRate?: number;
+      commissionAmount?: number;
+    }>;
     cashierId?: string;
     cashierSnapshotName?: string;
     isSentToKitchen?: boolean;
@@ -64,7 +76,19 @@ export interface IOrdersRepository {
       cuponId?: number | null;
       discountId?: number | null;
       happyHourId?: number | null;
-      payments?: { method: PaymentMethodDto; amount: number }[] | null;
+      payments?: Array<{
+        method: PaymentMethodDto;
+        amount: number;
+        reference?: string;
+        methodConfigId?: string;
+        methodSnapshotName?: string;
+        methodType?: string;
+        currency?: string;
+        originalAmount?: number;
+        exchangeRate?: number;
+        commissionRate?: number;
+        commissionAmount?: number;
+      }> | null;
       cashierId?: string | null;
       cashierSnapshotName?: string | null;
       cancelReason?: string | null;

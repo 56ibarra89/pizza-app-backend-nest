@@ -13,6 +13,7 @@ export function toOrderResponseDto(order: OrderEntity) {
       quantity: i.quantity,
       extras: i.extras.map((e) => ({ name: e.name, price: e.price })),
       note: i.note,
+      kitchenModifiers: i.kitchenModifiers,
       giftQuantity: i.giftQuantity,
       giftReason: i.giftReason,
       isSentToKitchen: i.isSentToKitchen,

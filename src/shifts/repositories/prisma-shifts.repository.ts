@@ -283,6 +283,9 @@ export class PrismaShiftsRepository implements IShiftsRepository {
             denominationBreakdown: params.denominationBreakdown
               ? (params.denominationBreakdown as Prisma.InputJsonValue)
               : Prisma.JsonNull,
+            paymentBreakdown: preview.sales.breakdown,
+            totalPaymentCommission: preview.sales.totalCommission,
+            netSales: preview.sales.net,
             status: ShiftStatus.CLOSED,
             notes: params.notes ?? existing.notes,
           },
@@ -314,6 +317,9 @@ export class PrismaShiftsRepository implements IShiftsRepository {
               cashSales: preview.sales.cash,
               cardSales: preview.sales.card,
               appSales: preview.sales.app,
+              paymentBreakdown: preview.sales.breakdown,
+              paymentCommission: preview.sales.totalCommission,
+              netSales: preview.sales.net,
               totalExpenses: preview.totalExpenses,
               expectedCash: preview.expectedCash,
               countedCash: params.closingAmount,
@@ -376,6 +382,20 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     let card = new Prisma.Decimal(0);
     let app = new Prisma.Decimal(0);
     let total = new Prisma.Decimal(0);
+    const paymentGroups = new Map<
+      string,
+      {
+        methodId: string;
+        name: string;
+        type: string;
+        currency: string;
+        transactionCount: number;
+        grossAmount: number;
+        commissionAmount: number;
+        netAmount: number;
+      }
+    >();
+    let totalCommission = new Prisma.Decimal(0);
     for (const payment of payments) {
       total = total.add(payment.amount);
       if (payment.method === PaymentMethod.EFECTIVO)
@@ -383,6 +403,25 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       if (payment.method === PaymentMethod.TARJETA)
         card = card.add(payment.amount);
       if (payment.method === PaymentMethod.APP) app = app.add(payment.amount);
+      const methodId = payment.methodConfigId ?? `legacy-${payment.method}`;
+      const gross = payment.amount.toNumber();
+      const commission = payment.commissionAmount?.toNumber() ?? 0;
+      totalCommission = totalCommission.add(commission);
+      const group = paymentGroups.get(methodId) ?? {
+        methodId,
+        name: payment.methodSnapshotName ?? payment.method,
+        type: payment.methodType ?? payment.method,
+        currency: payment.currency ?? 'NIO',
+        transactionCount: 0,
+        grossAmount: 0,
+        commissionAmount: 0,
+        netAmount: 0,
+      };
+      group.transactionCount += 1;
+      group.grossAmount += gross;
+      group.commissionAmount += commission;
+      group.netAmount += gross - commission;
+      paymentGroups.set(methodId, group);
     }
 
     const totalExpenses = shift.expenses.reduce(
@@ -435,6 +474,14 @@ export class PrismaShiftsRepository implements IShiftsRepository {
         card: card.toNumber(),
         app: app.toNumber(),
         total: total.toNumber(),
+        breakdown: [...paymentGroups.values()].map((group) => ({
+          ...group,
+          grossAmount: Math.round(group.grossAmount * 100) / 100,
+          commissionAmount: Math.round(group.commissionAmount * 100) / 100,
+          netAmount: Math.round(group.netAmount * 100) / 100,
+        })),
+        totalCommission: totalCommission.toNumber(),
+        net: total.sub(totalCommission).toNumber(),
       },
       expenses,
       totalExpenses: totalExpenses.toNumber(),
@@ -523,6 +570,10 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       authorizedBySnapshotName: row.authorizedBySnapshotName ?? undefined,
       authorizedByRole: row.authorizedByRole ?? undefined,
       denominationBreakdown: this.mapDenominations(row.denominationBreakdown),
+      paymentBreakdown: this.mapPaymentBreakdown(row.paymentBreakdown),
+      totalPaymentCommission:
+        row.totalPaymentCommission?.toNumber() ?? undefined,
+      netSales: row.netSales?.toNumber() ?? undefined,
       status: row.status,
       notes: row.notes ?? undefined,
       expenses,
@@ -551,5 +602,39 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       }
     }
     return entries.length > 0 ? entries : undefined;
+  }
+
+  private mapPaymentBreakdown(value: Prisma.JsonValue | null) {
+    if (!Array.isArray(value)) return undefined;
+    return value.flatMap((item) => {
+      if (
+        typeof item !== 'object' ||
+        item === null ||
+        Array.isArray(item) ||
+        typeof item.methodId !== 'string' ||
+        typeof item.name !== 'string'
+      ) {
+        return [];
+      }
+      return [
+        {
+          methodId: item.methodId,
+          name: item.name,
+          type: typeof item.type === 'string' ? item.type : 'OTHER',
+          currency: typeof item.currency === 'string' ? item.currency : 'NIO',
+          transactionCount:
+            typeof item.transactionCount === 'number'
+              ? item.transactionCount
+              : 0,
+          grossAmount:
+            typeof item.grossAmount === 'number' ? item.grossAmount : 0,
+          commissionAmount:
+            typeof item.commissionAmount === 'number'
+              ? item.commissionAmount
+              : 0,
+          netAmount: typeof item.netAmount === 'number' ? item.netAmount : 0,
+        },
+      ];
+    });
   }
 }

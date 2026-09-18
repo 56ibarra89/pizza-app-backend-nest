@@ -170,6 +170,21 @@ export class OrdersController {
     return this.orders.getCancellationMetrics(start, end);
   }
 
+  @Get('payments/metrics')
+  @Roles(UserRoleDto.admin)
+  getPaymentMetrics(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    const now = new Date();
+    return this.orders.getPaymentMetrics(
+      startDate
+        ? new Date(startDate)
+        : new Date(now.getFullYear(), now.getMonth(), 1),
+      endDate ? new Date(endDate) : now,
+    );
+  }
+
   @Get(':id')
   async getById(
     @Param('id') id: string,
