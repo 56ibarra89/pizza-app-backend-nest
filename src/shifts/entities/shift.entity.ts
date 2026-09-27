@@ -33,6 +33,7 @@ export type ShiftEntity = {
   totalPaymentCommission?: number;
   netSales?: number;
   status: ShiftStatus;
+  closeType?: 'HANDOVER' | 'END_OF_DAY';
   notes?: string;
   expenses?: CashExpenseEntity[];
   createdAt: Date;

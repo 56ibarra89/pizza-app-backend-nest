@@ -80,7 +80,31 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       where: { id },
       include: { expenses: { orderBy: { createdAt: 'desc' } } },
     });
-    return row ? this.map(row) : null;
+    if (!row) return null;
+    let closeType: 'HANDOVER' | 'END_OF_DAY' | undefined = undefined;
+    if (row.status === ShiftStatus.CLOSED) {
+      const log = await this.prisma.systemLog.findFirst({
+        where: {
+          action: {
+            in: [
+              'SHIFT_CLOSED_HANDOVER',
+              'SHIFT_CLOSED_END_OF_DAY',
+              'SHIFT_CLOSED_HANDOVER_WITH_DISCREPANCY',
+              'SHIFT_CLOSED_END_OF_DAY_WITH_DISCREPANCY',
+            ],
+          },
+          details: { contains: row.id },
+        },
+        select: { action: true },
+        orderBy: { timestamp: 'desc' },
+      });
+      if (log) {
+        closeType = log.action.includes('END_OF_DAY')
+          ? 'END_OF_DAY'
+          : 'HANDOVER';
+      }
+    }
+    return this.map(row, closeType);
   }
 
   async getClosePreview(params: {
@@ -112,7 +136,43 @@ export class PrismaShiftsRepository implements IShiftsRepository {
         startTime: { gte: params.from, lte: params.to },
       },
     });
-    return rows.map((row) => this.map(row));
+
+    const shiftIds = rows.map((r) => r.id);
+    const closeTypeMap = new Map<string, 'HANDOVER' | 'END_OF_DAY'>();
+    if (shiftIds.length > 0) {
+      const logs = await this.prisma.systemLog.findMany({
+        where: {
+          action: {
+            in: [
+              'SHIFT_CLOSED_HANDOVER',
+              'SHIFT_CLOSED_END_OF_DAY',
+              'SHIFT_CLOSED_HANDOVER_WITH_DISCREPANCY',
+              'SHIFT_CLOSED_END_OF_DAY_WITH_DISCREPANCY',
+            ],
+          },
+        },
+        select: { action: true, details: true },
+        orderBy: { timestamp: 'desc' },
+      });
+
+      for (const log of logs) {
+        if (!log.details) continue;
+        try {
+          const parsed = JSON.parse(log.details);
+          if (parsed?.shiftId && !closeTypeMap.has(parsed.shiftId)) {
+            const isEndOfDay =
+              log.action.includes('END_OF_DAY') ||
+              parsed.closeType === 'END_OF_DAY';
+            closeTypeMap.set(
+              parsed.shiftId,
+              isEndOfDay ? 'END_OF_DAY' : 'HANDOVER',
+            );
+          }
+        } catch {}
+      }
+    }
+
+    return rows.map((row) => this.map(row, closeTypeMap.get(row.id)));
   }
 
   async open(params: {
@@ -340,7 +400,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
             }),
           },
         });
-        return this.map(updated);
+        return this.map(updated, params.closeType ?? 'HANDOVER');
       },
       {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -525,7 +585,10 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     };
   }
 
-  private map(row: ShiftWithExpenses): ShiftEntity {
+  private map(
+    row: ShiftWithExpenses,
+    closeType?: 'HANDOVER' | 'END_OF_DAY',
+  ): ShiftEntity {
     const expenses = row.expenses.map((expense) => this.mapExpense(expense));
     const currentExpenseTotal = expenses.reduce(
       (sum, expense) => sum + expense.amount,
@@ -575,6 +638,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
         row.totalPaymentCommission?.toNumber() ?? undefined,
       netSales: row.netSales?.toNumber() ?? undefined,
       status: row.status,
+      closeType,
       notes: row.notes ?? undefined,
       expenses,
       createdAt: row.createdAt,
