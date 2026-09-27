@@ -24,7 +24,7 @@ import {
       useFactory: (config: ConfigService) => ({
         secret: requireSecuritySecret(config, 'JWT_SECRET'),
         signOptions: {
-          expiresIn: (config.get<string>('JWT_EXPIRES_IN') || '15m') as any,
+          expiresIn: (config.get<string>('JWT_EXPIRES_IN') || '12h') as any,
           algorithm: 'HS256',
           issuer: getJwtIssuer(config),
           audience: getJwtAudience(config),

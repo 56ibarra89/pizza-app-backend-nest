@@ -346,6 +346,19 @@ export class UsersService {
     return result;
   }
 
+  async refreshToken(userId: string): Promise<{ access_token: string }> {
+    const user = await this.repo.findById(userId);
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Usuario inactivo o no existe');
+    }
+    const access_token = this.jwtService.sign({
+      sub: user.id,
+      tokenVersion: user.tokenVersion,
+      type: 'access',
+    });
+    return { access_token };
+  }
+
   async requestPasswordReset(identifier: string, source = 'unknown') {
     const startedAt = Date.now();
     const genericResponse = {

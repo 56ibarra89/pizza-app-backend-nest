@@ -14,4 +14,21 @@ describe('AuthController session revocation', () => {
 
     expect(users.revokeAllTokens).toHaveBeenCalledWith('user-1');
   });
+
+  it('delegates refresh token requests to UsersService', async () => {
+    const users = {
+      refreshToken: jest.fn(() => Promise.resolve({ access_token: 'new-token' })),
+    };
+    const controller = new AuthController(users as any);
+
+    const result = await controller.refresh({
+      id: 'user-1',
+      username: 'cashier',
+      role: UserRoleDto.cajero,
+    });
+
+    expect(users.refreshToken).toHaveBeenCalledWith('user-1');
+    expect(result).toEqual({ access_token: 'new-token' });
+  });
 });
+

@@ -68,6 +68,12 @@ export class AuthController {
   }
 
   @Roles(...AUTHENTICATED_ROLES)
+  @Post('refresh')
+  async refresh(@CurrentUser() user: AuthenticatedUser) {
+    return this.users.refreshToken(user.id);
+  }
+
+  @Roles(...AUTHENTICATED_ROLES)
   @Post('logout')
   async logout(@CurrentUser() user: AuthenticatedUser) {
     await this.users.revokeAllTokens(user.id);
