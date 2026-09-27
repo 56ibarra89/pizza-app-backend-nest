@@ -41,6 +41,19 @@ async function main() {
   ]);
   const pinLookup = createPinLookup(pin, pinPepper);
 
+  const existingUser = await prisma.user.findUnique({
+    where: { username },
+  });
+
+  const forceOverwrite = process.env.SEED_ADMIN_FORCE_OVERWRITE === 'true';
+
+  if (existingUser && existingUser.passwordHash && existingUser.pinHash && !forceOverwrite) {
+    console.log(
+      `Admin user '${username}' already exists with credentials configured. Preserving existing credentials (skipping overwrite).`,
+    );
+    return;
+  }
+
   const adminUser = await prisma.user.upsert({
     where: { username },
     update: {
@@ -69,7 +82,7 @@ async function main() {
     },
   });
 
-  console.log(`Admin user created/rotated: ${adminUser.username}`);
+  console.log(`Admin user created/updated: ${adminUser.username}`);
 }
 
 main()

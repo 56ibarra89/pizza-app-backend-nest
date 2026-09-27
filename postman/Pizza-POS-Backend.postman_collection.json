@@ -1,0 +1,5085 @@
+{
+  "info": {
+    "_postman_id": "2f2d43bf-e751-4a46-bd89-a9fd2ae70f53",
+    "name": "Pizza POS Backend - API completa",
+    "description": "Colección importable para probar la API REST del backend Pizza POS. Ejecuta primero “Login con contraseña” o “Login con PIN”; el token Bearer se guarda automáticamente. Las solicitudes con ⚠ modifican o eliminan datos y deben ejecutarse conscientemente. Los IDs creados se guardan como variables cuando la respuesta los incluye.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const now = new Date();",
+          "const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);",
+          "pm.collectionVariables.set(\"today\", localDate);"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:3000",
+      "type": "string"
+    },
+    {
+      "key": "username",
+      "value": "admin",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "CAMBIAR_AQUI",
+      "type": "string"
+    },
+    {
+      "key": "pin",
+      "value": "000000",
+      "type": "string"
+    },
+    {
+      "key": "email",
+      "value": "admin@pizzatogo.com",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "resetToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "today",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "00000000-0000-4000-8000-000000000001",
+      "type": "string"
+    },
+    {
+      "key": "driverId",
+      "value": "00000000-0000-4000-8000-000000000002",
+      "type": "string"
+    },
+    {
+      "key": "kitchenId",
+      "value": "00000000-0000-4000-8000-000000000003",
+      "type": "string"
+    },
+    {
+      "key": "categoryId",
+      "value": "00000000-0000-4000-8000-000000000004",
+      "type": "string"
+    },
+    {
+      "key": "productId",
+      "value": "00000000-0000-4000-8000-000000000005",
+      "type": "string"
+    },
+    {
+      "key": "customerId",
+      "value": "00000000-0000-4000-8000-000000000006",
+      "type": "string"
+    },
+    {
+      "key": "mesaId",
+      "value": "1-1",
+      "type": "string"
+    },
+    {
+      "key": "shiftId",
+      "value": "00000000-0000-4000-8000-000000000007",
+      "type": "string"
+    },
+    {
+      "key": "cashExpenseId",
+      "value": "00000000-0000-4000-8000-000000000008",
+      "type": "string"
+    },
+    {
+      "key": "orderId",
+      "value": "00000000-0000-4000-8000-000000000009",
+      "type": "string"
+    },
+    {
+      "key": "couponId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "discountId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "happyHourId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "certificateId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "certificateSerial",
+      "value": "CERT-POSTMAN-001",
+      "type": "string"
+    },
+    {
+      "key": "correlativoId",
+      "value": "00000000-0000-4000-8000-000000000010",
+      "type": "string"
+    },
+    {
+      "key": "configId",
+      "value": "general",
+      "type": "string"
+    },
+    {
+      "key": "printerId",
+      "value": "printer-postman",
+      "type": "string"
+    },
+    {
+      "key": "notificationId",
+      "value": "00000000-0000-4000-8000-000000000011",
+      "type": "string"
+    },
+    {
+      "key": "backupFilename",
+      "value": "backup.sql",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "00 - Estado del servicio",
+      "description": "",
+      "item": [
+        {
+          "name": "Inicio",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": []
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 - Autenticación",
+      "description": "",
+      "item": [
+        {
+          "name": "Login con contraseña (guarda token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Guarda access_token automáticamente en la variable de colección accessToken.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identifier\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                  "try { const data = pm.response.json(); const value = data.access_token; if (value !== undefined && value !== null) pm.collectionVariables.set(\"accessToken\", value); } catch (_) {}",
+                  "try { const token = pm.response.json().access_token; if (token) { const part = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'); const payload = JSON.parse(atob(part)); if (payload.sub) pm.collectionVariables.set('userId', payload.sub); } } catch (_) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login con PIN (guarda token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/pin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "pin"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pin\": \"{{pin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                  "try { const data = pm.response.json(); const value = data.access_token; if (value !== undefined && value !== null) pm.collectionVariables.set(\"accessToken\", value); } catch (_) {}",
+                  "try { const token = pm.response.json().access_token; if (token) { const part = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'); const payload = JSON.parse(atob(part)); if (payload.sub) pm.collectionVariables.set('userId', payload.sub); } } catch (_) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Solicitar restablecimiento",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/forgot-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "forgot-password"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Restablecer contraseña",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/reset-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "reset-password"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"newPassword\": \"NuevaClave1!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cerrar sesión",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cerrar todas las sesiones",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout-all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout-all"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Usuarios",
+      "description": "",
+      "item": [
+        {
+          "name": "Listar usuarios",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Estadísticas de motorizados",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/motorizados/delivery-stats?date={{today}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "motorizados",
+                "delivery-stats"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{today}}",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener usuario por ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener usuario por username",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/username/{{username}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "username",
+                "{{username}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario (guarda userId)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"usuario.postman\",\n  \"email\": \"postman@example.com\",\n  \"firstName\": \"Usuario\",\n  \"lastName\": \"Postman\",\n  \"pin\": \"654321\",\n  \"password\": \"ClaveSegura1!\",\n  \"role\": \"mesero\",\n  \"isActive\": true,\n  \"workDays\": [\n    \"MONDAY\",\n    \"TUESDAY\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                  "try { const data = pm.response.json(); const value = data.id; if (value !== undefined && value !== null) pm.collectionVariables.set(\"userId\", value); } catch (_) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar mi perfil",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Admin\",\n  \"lastName\": \"Postman\",\n  \"themePreference\": \"dark\",\n  \"currentPassword\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar usuario",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Usuario actualizado\",\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Desbloquear usuario",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}/unlock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "unlock"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar día extra",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}/extra-days",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "extra-days"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{today}}\",\n  \"notes\": \"Turno adicional de prueba\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar día extra",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}/extra-days/{{today}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "extra-days",
+                "{{today}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consultar zonas del mesero",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}/zones",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "zones"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar zonas del mesero",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}/zones",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "zones"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"zones\": [\n    {\n      \"day\": \"MONDAY\",\n      \"floor\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "⚠ Eliminar usuario",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "description": "Operación destructiva. Verifica userId antes de enviarla."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 - Cocinas",
+      "description": "",
+      "item": [
+        {
+          "name": "Listar cocinas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/kitchens",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "kitchens"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener cocina",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/kitchens/{{kitchenId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "kitchens",
+                "{{kitchenId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear cocina (guarda kitchenId)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/kitchens",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "kitchens"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Cocina Postman\",\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                  "try { const data = pm.response.json(); const value = data.id; if (value !== undefined && value !== null) pm.collectionVariables.set(\"kitchenId\", value); } catch (_) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar cocina",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/kitchens/{{kitchenId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "kitchens",
+                "{{kitchenId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Cocina Postman Actualizada\",\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cocineros y asignaciones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/kitchens/cooks/assignments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "kitchens",
+                "cooks",
+                "assignments"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar asignaciones de cocinero",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/kitchens/cooks/{{userId}}/assignments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "kitchens",
+                "cooks",
+                "{{userId}}",
+                "assignments"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assignments\": [\n    {\n      \"dayOfWeek\": \"MONDAY\",\n      \"kitchenId\": \"{{kitchenId}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mis asignaciones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/kitchens/me/assignments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "kitchens",
+                "me",
+                "assignments"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "⚠ Eliminar cocina",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/kitchens/{{kitchenId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "kitchens",
+                "{{kitchenId}}"
+              ]
+            },
+            "description": "Operación destructiva."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - Productos y categorías",
+      "description": "",
+      "item": [
+        {
+          "name": "Listar categorías",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products",
+                "categories"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear categoría (guarda categoryId)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/products/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products",
+                "categories"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"Postman\",\n  \"icon\": \"pizza\",\n  \"kitchenId\": \"{{kitchenId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                  "try { const data = pm.response.json(); const value = data.id; if (value !== undefined && value !== null) pm.collectionVariables.set(\"categoryId\", value); } catch (_) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar categoría",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/products/categories/{{categoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products",
+                "categories",
+                "{{categoryId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"Postman Actualizada\",\n  \"icon\": \"pizza\",\n  \"kitchenId\": \"{{kitchenId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar productos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products?categoryId={{categoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "categoryId",
+                  "value": "{{categoryId}}",
+                  "disabled": true,
+                  "description": "Activa este parámetro para filtrar por categoría."
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener producto",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products/{{productId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products",
+                "{{productId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear producto (guarda productId)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryId\": \"{{categoryId}}\",\n  \"name\": \"Pizza Postman\",\n  \"description\": \"Producto de prueba\",\n  \"isActive\": true,\n  \"hasMultipleSizes\": false,\n  \"isCombo\": false,\n  \"prices\": [\n    {\n      \"size\": \"Única\",\n      \"price\": 150\n    }\n  ],\n  \"extras\": [\n    {\n      \"name\": \"Queso extra\",\n      \"prices\": [\n        {\n          \"size\": \"Única\",\n          \"price\": 25\n        }\n      ]\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                  "try { const data = pm.response.json(); const value = data.id; if (value !== undefined && value !== null) pm.collectionVariables.set(\"productId\", value); } catch (_) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar producto",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/products/{{productId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products",
+                "{{productId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Pizza Postman Actualizada\",\n  \"isActive\": true,\n  \"prices\": [\n    {\n      \"size\": \"Única\",\n      \"price\": 175\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "⚠ Eliminar producto",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products/{{productId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products",
+                "{{productId}}"
+              ]
+            },
+            "description": "Operación destructiva."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "⚠ Eliminar categoría",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products/categories/{{categoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products",
+                "categories",
+                "{{categoryId}}"
+              ]
+            },
+            "description": "Operación destructiva."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 - Clientes",
+      "description": "",
+      "item": [
+        {
+          "name": "Listar/buscar clientes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers?query=Postman",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ],
+              "query": [
+                {
+                  "key": "query",
+                  "value": "Postman",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener cliente",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/{{customerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "{{customerId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear cliente (guarda customerId)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Cliente Postman\",\n  \"phone\": \"88888888\",\n  \"address\": \"Dirección de prueba\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                  "try { const data = pm.response.json(); const value = data.id; if (value !== undefined && value !== null) pm.collectionVariables.set(\"customerId\", value); } catch (_) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear o actualizar cliente",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/customers/upsert",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "upsert"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Cliente Postman\",\n  \"phone\": \"88888888\",\n  \"address\": \"Dirección de prueba\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                  "try { const data = pm.response.json(); const value = data.customer?.id; if (value !== undefined && value !== null) pm.collectionVariables.set(\"customerId\", value); } catch (_) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar cliente",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/customers/{{customerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "{{customerId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Cliente Postman Actualizado\",\n  \"phone\": \"87777777\",\n  \"address\": \"Nueva dirección\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "⚠ Eliminar cliente",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/{{customerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "{{customerId}}"
+              ]
+            },
+            "description": "Operación destructiva."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 - Mesas",
+      "description": "",
+      "item": [
+        {
+          "name": "Obtener configuración de pisos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/mesas/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mesas",
+                "config"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar configuración de pisos",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mesas/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mesas",
+                "config"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"id\": 1,\n    \"name\": \"Primer piso\",\n    \"tableCount\": 10\n  }\n]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar mesas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/mesas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mesas"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar estado de mesa",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mesas/{{mesaId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mesas",
+                "{{mesaId}}",
+                "status"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"OCUPADO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reservar mesa",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mesas/{{mesaId}}/reserve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mesas",
+                "{{mesaId}}",
+                "reserve"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reservationName\": \"Reserva Postman\",\n  \"reservationAmount\": 4,\n  \"reservationTime\": \"2026-09-26T18:00:00.000Z\",\n  \"expirationTime\": \"2026-09-26T20:00:00.000Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Liberar mesa",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/mesas/{{mesaId}}/release",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mesas",
+                "{{mesaId}}",
+                "release"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 - Turnos y caja",
+      "description": "",
+      "item": [
+        {
+          "name": "Turno activo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/shifts/active",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shifts",
+                "active"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                  "try { const data = pm.response.json(); const value = data.id; if (value !== undefined && value !== null) pm.collectionVariables.set(\"shiftId\", value); } catch (_) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar turnos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/shifts?limit=50&status=OPEN&from={{today}}&to={{today}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shifts"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "disabled": false
+                },
+                {
+                  "key": "status",
+                  "value": "OPEN",
+                  "disabled": true
+                },
+                {
+                  "key": "from",
+                  "value": "{{today}}",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "{{today}}",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener turno",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/shifts/{{shiftId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shifts",
+                "{{shiftId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Abrir turno (guarda shiftId)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/shifts/open",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shifts",
+                "open"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cashierName\": \"Caja Postman\",\n  \"cashierId\": \"{{userId}}\",\n  \"openingAmount\": 1000,\n  \"cashRegisterName\": \"Caja principal\",\n  \"notes\": \"Prueba desde Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                  "try { const data = pm.response.json(); const value = data.id; if (value !== undefined && value !== null) pm.collectionVariables.set(\"shiftId\", value); } catch (_) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Vista previa de cierre",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/shifts/{{shiftId}}/close-preview?countedCash=1000&countedCard=0&countedApp=0&closeType=HANDOVER",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shifts",
+                "{{shiftId}}",
+                "close-preview"
+              ],
+              "query": [
+                {
+                  "key": "countedCash",
+                  "value": "1000",
+                  "disabled": false
+                },
+                {
+                  "key": "countedCard",
+                  "value": "0",
+                  "disabled": false
+                },
+                {
+                  "key": "countedApp",
+                  "value": "0",
+                  "disabled": false
+                },
+                {
+                  "key": "closeType",
+                  "value": "HANDOVER",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cerrar turno",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/shifts/{{shiftId}}/close",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shifts",
+                "{{shiftId}}",
+                "close"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"closingAmount\": 1000,\n  \"declaredCardAmount\": 0,\n  \"declaredAppAmount\": 0,\n  \"notes\": \"Cierre de prueba\",\n  \"denominationBreakdown\": [\n    {\n      \"denomination\": 1000,\n      \"quantity\": 1\n    }\n  ],\n  \"closeType\": \"HANDOVER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Registrar gasto (guarda cashExpenseId)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/cash-expenses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cash-expenses"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 100,\n  \"category\": \"INSUMOS_URGENTES\",\n  \"reason\": \"Compra de prueba\",\n  \"voucherNumber\": \"POSTMAN-001\",\n  \"notes\": \"Prueba API\",\n  \"shiftId\": \"{{shiftId}}\",\n  \"authorizationPin\": \"{{pin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                  "try { const data = pm.response.json(); const value = data.id; if (value !== undefined && value !== null) pm.collectionVariables.set(\"cashExpenseId\", value); } catch (_) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar gastos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cash-expenses?shiftId={{shiftId}}&category=INSUMOS_URGENTES&startDate={{today}}&endDate={{today}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cash-expenses"
+              ],
+              "query": [
+                {
+                  "key": "shiftId",
+                  "value": "{{shiftId}}",
+                  "disabled": true
+                },
+                {
+                  "key": "category",
+                  "value": "INSUMOS_URGENTES",
+                  "disabled": true
+                },
+                {
+                  "key": "startDate",
+                  "value": "{{today}}",
+                  "disabled": true
+                },
+                {
+                  "key": "endDate",
+                  "value": "{{today}}",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gastos por turno",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cash-expenses/shift/{{shiftId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cash-expenses",
+                "shift",
+                "{{shiftId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener gasto",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cash-expenses/{{cashExpenseId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cash-expenses",
+                "{{cashExpenseId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "08 - Pedidos",
+      "description": "",
+      "item": [
+        {
+          "name": "Listar pedidos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders?scope=todayOrActive&startDate={{today}}&endDate={{today}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "scope",
+                  "value": "todayOrActive",
+                  "disabled": false
+                },
+                {
+                  "key": "startDate",
+                  "value": "{{today}}",
+                  "disabled": true
+                },
+                {
+                  "key": "endDate",
+                  "value": "{{today}}",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedidos del motorizado",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders/driver/{{driverId}}/today?date={{today}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "driver",
+                "{{driverId}}",
+                "today"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{today}}",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tickets ocultos de cocina",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders/kitchen/hidden-tickets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "kitchen",
+                "hidden-tickets"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ocultar tickets de cocina",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/kitchen/hidden-tickets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "kitchen",
+                "hidden-tickets"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticketIds\": [\n    \"{{orderId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Métricas SLA",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders/sla/metrics?days=30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "sla",
+                "metrics"
+              ],
+              "query": [
+                {
+                  "key": "days",
+                  "value": "30",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Métricas de cancelaciones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders/cancellations/metrics?startDate={{today}}&endDate={{today}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "cancellations",
+                "metrics"
+              ],
+              "query": [
+                {
+                  "key": "startDate",
+                  "value": "{{today}}",
+                  "disabled": true
+                },
+                {
+                  "key": "endDate",
+                  "value": "{{today}}",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Métricas de pagos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders/payments/metrics?startDate={{today}}&endDate={{today}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "payments",
+                "metrics"
+              ],
+              "query": [
+                {
+                  "key": "startDate",
+                  "value": "{{today}}",
+                  "disabled": true
+                },
+                {
+                  "key": "endDate",
+                  "value": "{{today}}",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener pedido",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear pedido (guarda orderId)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"shiftId\": \"{{shiftId}}\",\n  \"customerId\": \"{{customerId}}\",\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"name\": \"Pizza Postman\",\n      \"price\": 150,\n      \"size\": \"Única\",\n      \"quantity\": 1,\n      \"extras\": [],\n      \"note\": \"Sin cebolla\",\n      \"kitchenModifiers\": [\n        {\n          \"id\": \"sin-cebolla\",\n          \"label\": \"Sin cebolla\",\n          \"kind\": \"REMOVE\"\n        }\n      ],\n      \"isSentToKitchen\": false,\n      \"kitchenId\": \"{{kitchenId}}\"\n    }\n  ],\n  \"subTotal\": 150,\n  \"discountAmount\": 0,\n  \"taxAmount\": 0,\n  \"total\": 150,\n  \"status\": \"pending\",\n  \"customerSnapshotName\": \"Cliente Postman\",\n  \"customerPhone\": \"88888888\",\n  \"orderType\": \"llevar\",\n  \"promotionSource\": \"none\",\n  \"cashierSnapshotName\": \"Admin\",\n  \"cashierId\": \"{{userId}}\",\n  \"isSentToKitchen\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                  "try { const data = pm.response.json(); const value = data.id; if (value !== undefined && value !== null) pm.collectionVariables.set(\"orderId\", value); } catch (_) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar estado del pedido",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "status"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"preparing\",\n  \"kitchenId\": \"{{kitchenId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Iniciar entrega",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/start-delivery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "start-delivery"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar ítems",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "items"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"name\": \"Pizza Postman\",\n      \"price\": 150,\n      \"size\": \"Única\",\n      \"quantity\": 1,\n      \"extras\": [],\n      \"isSentToKitchen\": true,\n      \"kitchenId\": \"{{kitchenId}}\"\n    }\n  ],\n  \"subTotal\": 150,\n  \"discountAmount\": 0,\n  \"taxAmount\": 0,\n  \"total\": 150,\n  \"promotionSource\": \"none\",\n  \"isSentToKitchen\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar mesas vinculadas",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/tables",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "tables"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tableIds\": [\n    \"{{mesaId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Finalizar pedido",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/finalize",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "finalize"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payments\": [\n    {\n      \"method\": \"EFECTIVO\",\n      \"amount\": 150,\n      \"currency\": \"NIO\"\n    }\n  ],\n  \"customerSnapshotName\": \"Cliente Postman\",\n  \"orderType\": \"llevar\",\n  \"finalTotal\": 150,\n  \"subTotal\": 150,\n  \"discountAmount\": 0,\n  \"taxAmount\": 0,\n  \"promotionSource\": \"none\",\n  \"status\": \"paid\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "09 - Promociones",
+      "description": "",
+      "item": [
+        {
+          "name": "Cupones",
+          "description": "",
+          "item": [
+            {
+              "name": "Listar cupones",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/coupons",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "coupons"
+                  ]
+                },
+                "description": ""
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Crear cupón (guarda couponId)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/coupons",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "coupons"
+                  ]
+                },
+                "description": "",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"code\": \"POSTMAN10\",\n  \"discountType\": \"porcentaje\",\n  \"discountValue\": 10,\n  \"maxUses\": 100,\n  \"expiresDate\": \"2027-12-31T23:59:59.000Z\",\n  \"manualStatus\": \"Activo\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                      "try { const data = pm.response.json(); const value = data.id; if (value !== undefined && value !== null) pm.collectionVariables.set(\"couponId\", value); } catch (_) {}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Actualizar cupón",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/coupons/{{couponId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "coupons",
+                    "{{couponId}}"
+                  ]
+                },
+                "description": "",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"discountValue\": 15,\n  \"manualStatus\": \"Activo\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Canjear cupón",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/coupons/redeem",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "coupons",
+                    "redeem"
+                  ]
+                },
+                "description": "",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"code\": \"POSTMAN10\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "⚠ Eliminar cupón",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/coupons/{{couponId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "coupons",
+                    "{{couponId}}"
+                  ]
+                },
+                "description": ""
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Descuentos",
+          "description": "",
+          "item": [
+            {
+              "name": "Listar descuentos",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/discounts",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "discounts"
+                  ]
+                },
+                "description": ""
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Crear descuento (guarda discountId)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/discounts",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "discounts"
+                  ]
+                },
+                "description": "",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Descuento Postman\",\n  \"type\": \"Porcentaje\",\n  \"value\": 10,\n  \"status\": \"Activo\",\n  \"productIds\": [\n    \"{{productId}}\"\n  ],\n  \"categoryIds\": []\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                      "try { const data = pm.response.json(); const value = data.id; if (value !== undefined && value !== null) pm.collectionVariables.set(\"discountId\", value); } catch (_) {}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Actualizar descuento",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/discounts/{{discountId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "discounts",
+                    "{{discountId}}"
+                  ]
+                },
+                "description": "",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Descuento Postman 15%\",\n  \"value\": 15,\n  \"status\": \"Activo\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "⚠ Eliminar descuento",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/discounts/{{discountId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "discounts",
+                    "{{discountId}}"
+                  ]
+                },
+                "description": ""
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Happy Hours",
+          "description": "",
+          "item": [
+            {
+              "name": "Listar happy hours",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/happy-hours",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "happy-hours"
+                  ]
+                },
+                "description": ""
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Crear happy hour (guarda happyHourId)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/happy-hours",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "happy-hours"
+                  ]
+                },
+                "description": "",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Happy Hour Postman\",\n  \"daysOfWeek\": [\n    \"FRIDAY\"\n  ],\n  \"startTime\": \"17:00\",\n  \"endTime\": \"19:00\",\n  \"promotionType\": \"porcentaje\",\n  \"promotionValue\": 20,\n  \"productIds\": [\n    \"{{productId}}\"\n  ],\n  \"categoryIds\": [],\n  \"status\": \"Activo\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                      "try { const data = pm.response.json(); const value = data.id; if (value !== undefined && value !== null) pm.collectionVariables.set(\"happyHourId\", value); } catch (_) {}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Actualizar happy hour",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/happy-hours/{{happyHourId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "happy-hours",
+                    "{{happyHourId}}"
+                  ]
+                },
+                "description": "",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"endTime\": \"20:00\",\n  \"promotionValue\": 25,\n  \"status\": \"Activo\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "⚠ Eliminar happy hour",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/happy-hours/{{happyHourId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "happy-hours",
+                    "{{happyHourId}}"
+                  ]
+                },
+                "description": ""
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Certificados",
+          "description": "",
+          "item": [
+            {
+              "name": "Listar certificados",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/certificates",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "certificates"
+                  ]
+                },
+                "description": ""
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Buscar certificado por serial",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/certificates/{{certificateSerial}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "certificates",
+                    "{{certificateSerial}}"
+                  ]
+                },
+                "description": ""
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Crear certificado (guarda ID y serial)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/certificates",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "certificates"
+                  ]
+                },
+                "description": "",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"origin\": \"POSTMAN\",\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 1\n    }\n  ],\n  \"amount\": 150,\n  \"serial\": \"CERT-POSTMAN-001\",\n  \"description\": \"Certificado de prueba\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                      "try { const data = pm.response.json(); const value = data.id; if (value !== undefined && value !== null) pm.collectionVariables.set(\"certificateId\", value); } catch (_) {}",
+                      "try { const data = pm.response.json(); const value = data.serial; if (value !== undefined && value !== null) pm.collectionVariables.set(\"certificateSerial\", value); } catch (_) {}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Marcar certificado entregado",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/certificates/{{certificateId}}/deliver",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "certificates",
+                    "{{certificateId}}",
+                    "deliver"
+                  ]
+                },
+                "description": ""
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Cancelar certificado",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/certificates/{{certificateId}}/cancel",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "certificates",
+                    "{{certificateId}}",
+                    "cancel"
+                  ]
+                },
+                "description": ""
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Canjear certificado",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/certificates/redeem",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "certificates",
+                    "redeem"
+                  ]
+                },
+                "description": "",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"serial\": \"{{certificateSerial}}\",\n  \"redeemedOrderId\": \"{{orderId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "⚠ Eliminar certificado",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/promotions/certificates/{{certificateId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "promotions",
+                    "certificates",
+                    "{{certificateId}}"
+                  ]
+                },
+                "description": ""
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                      "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "10 - Correlativos fiscales",
+      "description": "",
+      "item": [
+        {
+          "name": "Listar correlativos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/correlativos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "correlativos"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener correlativo activo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/correlativos/active?documentType=FACTURA",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "correlativos",
+                "active"
+              ],
+              "query": [
+                {
+                  "key": "documentType",
+                  "value": "FACTURA",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear correlativo (guarda correlativoId)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/correlativos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "correlativos"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"documentType\": \"FACTURA\",\n  \"resolutionNumber\": \"RES-POSTMAN-001\",\n  \"prefix\": \"A\",\n  \"startNumber\": 1,\n  \"endNumber\": 1000,\n  \"currentNumber\": 1,\n  \"issueDate\": \"2026-01-01\",\n  \"expirationDate\": \"2027-12-31\",\n  \"status\": \"ACTIVO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                  "try { const data = pm.response.json(); const value = data.id; if (value !== undefined && value !== null) pm.collectionVariables.set(\"correlativoId\", value); } catch (_) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar correlativo",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/correlativos/{{correlativoId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "correlativos",
+                "{{correlativoId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"endNumber\": 2000,\n  \"status\": \"ACTIVO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consumir siguiente número",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/correlativos/next",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "correlativos",
+                "next"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"documentType\": \"FACTURA\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "⚠ Eliminar correlativo",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/correlativos/{{correlativoId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "correlativos",
+                "{{correlativoId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "11 - Configuración",
+      "description": "",
+      "item": [
+        {
+          "name": "Obtener configuración",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/config/{{configId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "config",
+                "{{configId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Guardar configuración",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/config/{{configId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "config",
+                "{{configId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"data\": {\n    \"enabled\": true,\n    \"source\": \"postman\"\n  },\n  \"updatedById\": \"{{userId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "12 - Dispositivos",
+      "description": "",
+      "item": [
+        {
+          "name": "Listar impresoras",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/devices/printers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "devices",
+                "printers"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Guardar impresora",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/devices/printers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "devices",
+                "printers"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{printerId}}\",\n  \"name\": \"Impresora Postman\",\n  \"role\": \"cashier\",\n  \"connectionType\": \"network\",\n  \"ipAddress\": \"192.168.1.100\",\n  \"port\": 9100,\n  \"openCashDrawer\": true,\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar dispositivos (legado)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/devices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "devices"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Escanear dispositivos",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/devices/scan",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "devices",
+                "scan"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "⚠ Eliminar impresora",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/devices/printers/{{printerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "devices",
+                "printers",
+                "{{printerId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "13 - Notificaciones",
+      "description": "",
+      "item": [
+        {
+          "name": "Listar notificaciones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Stream SSE (conexión continua)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/stream",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "stream"
+              ]
+            },
+            "description": "Endpoint Server-Sent Events. Postman mantendrá la conexión abierta."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Marcar notificación como leída",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/{{notificationId}}/read",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "{{notificationId}}",
+                "read"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "⚠ Eliminar notificación",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/{{notificationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "{{notificationId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "14 - Auditoría",
+      "description": "",
+      "item": [
+        {
+          "name": "Listar logs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/system-logs?limit=100&user={{username}}&action=LOGIN&level=INFO&role=ADMIN&startDate={{today}}&endDate={{today}}&search=postman",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "system-logs"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100",
+                  "disabled": false
+                },
+                {
+                  "key": "user",
+                  "value": "{{username}}",
+                  "disabled": true
+                },
+                {
+                  "key": "action",
+                  "value": "LOGIN",
+                  "disabled": true
+                },
+                {
+                  "key": "level",
+                  "value": "INFO",
+                  "disabled": true
+                },
+                {
+                  "key": "role",
+                  "value": "ADMIN",
+                  "disabled": true
+                },
+                {
+                  "key": "startDate",
+                  "value": "{{today}}",
+                  "disabled": true
+                },
+                {
+                  "key": "endDate",
+                  "value": "{{today}}",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "postman",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear log",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/system-logs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "system-logs"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user\": \"{{username}}\",\n  \"userId\": \"{{userId}}\",\n  \"role\": \"ADMIN\",\n  \"action\": \"POSTMAN_TEST\",\n  \"details\": \"Prueba manual desde la colección\",\n  \"level\": \"INFO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "15 - Dashboard administrativo",
+      "description": "",
+      "item": [
+        {
+          "name": "Cajas activas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/dashboard/cajas-activas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "dashboard",
+                "cajas-activas"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rendimiento de meseros",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/dashboard/rendimiento-meseros",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "dashboard",
+                "rendimiento-meseros"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "KPIs en vivo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/dashboard/live-kpis",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "dashboard",
+                "live-kpis"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "16 - Respaldos ⚠",
+      "description": "",
+      "item": [
+        {
+          "name": "Listar respaldos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/backups",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "backups"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generar respaldo",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/backups/generate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "backups",
+                "generate"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));",
+                  "try { const data = pm.response.json(); const value = data.filename; if (value !== undefined && value !== null) pm.collectionVariables.set(\"backupFilename\", value); } catch (_) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener configuración",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/backups/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "backups",
+                "config"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar configuración",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/backups/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "backups",
+                "config"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true,\n  \"hour\": 3,\n  \"minute\": 0,\n  \"backupOnShiftClose\": true,\n  \"retentionDays\": 30\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Descargar respaldo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/backups/{{backupFilename}}/download",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "backups",
+                "{{backupFilename}}",
+                "download"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "⚠ Restaurar desde historial",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/backups/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "backups",
+                "restore"
+              ]
+            },
+            "description": "Operación destructiva: restaura la base de datos.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"filename\": \"{{backupFilename}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "⚠ Restaurar archivo subido",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/backups/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "backups",
+                "restore"
+              ]
+            },
+            "description": "Selecciona manualmente un archivo .sql. Operación destructiva.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "⚠ Eliminar respaldo",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/backups/{{backupFilename}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "backups",
+                "{{backupFilename}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Respuesta HTTP válida\", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]));",
+                  "pm.test(\"Tiempo de respuesta menor a 5 s\", () => pm.expect(pm.response.responseTime).to.be.below(5000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
