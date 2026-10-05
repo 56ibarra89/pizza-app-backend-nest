@@ -9,7 +9,6 @@ import {
   IsUUID,
   ValidateNested,
 } from 'class-validator';
-import { ExtraIngredientDto } from './extra-ingredient.dto';
 import { ProductPriceDto } from './product-price.dto';
 import { ComboGroupDto } from './combo-group.dto';
 
@@ -46,12 +45,6 @@ export class CreateProductDto {
   @ValidateNested({ each: true })
   @Type(() => ProductPriceDto)
   prices!: ProductPriceDto[];
-
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => ExtraIngredientDto)
-  extras?: ExtraIngredientDto[];
 
   @IsOptional()
   @IsArray()

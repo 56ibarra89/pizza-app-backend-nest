@@ -6,8 +6,18 @@ import type { UpdateCategoryDto } from '../dto/update-category.dto';
 import type { CreateProductDto } from '../dto/create-product.dto';
 import type { UpdateProductDto } from '../dto/update-product.dto';
 import type { CategoryEntity } from '../entities/category.entity';
-import type { ProductEntity } from '../entities/product.entity';
-import { validateCreateProduct, validateUpdateProduct } from '../validators/products.validator';
+import type {
+  ExtraIngredientEntity,
+  ProductEntity,
+} from '../entities/product.entity';
+import type {
+  CreateCategoryExtraDto,
+  UpdateCategoryExtraDto,
+} from '../dto/category-extra.dto';
+import {
+  validateCreateProduct,
+  validateUpdateProduct,
+} from '../validators/products.validator';
 
 @Injectable()
 export class ProductsService {
@@ -29,6 +39,25 @@ export class ProductsService {
 
   deleteCategory(id: string): Promise<void> {
     return this.repo.deleteCategory(id);
+  }
+
+  createCategoryExtra(
+    categoryId: string,
+    dto: CreateCategoryExtraDto,
+  ): Promise<ExtraIngredientEntity> {
+    return this.repo.createCategoryExtra(categoryId, dto);
+  }
+
+  updateCategoryExtra(
+    categoryId: string,
+    extraId: string,
+    dto: UpdateCategoryExtraDto,
+  ): Promise<ExtraIngredientEntity> {
+    return this.repo.updateCategoryExtra(categoryId, extraId, dto);
+  }
+
+  deleteCategoryExtra(categoryId: string, extraId: string): Promise<void> {
+    return this.repo.deleteCategoryExtra(categoryId, extraId);
   }
 
   getProducts(params?: { categoryId?: string }): Promise<ProductEntity[]> {

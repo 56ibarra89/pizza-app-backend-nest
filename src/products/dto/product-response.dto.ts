@@ -1,5 +1,5 @@
 import type { ProductPriceDto } from './product-price.dto';
-import type { ExtraIngredientDto } from './extra-ingredient.dto';
+import type { ExtraIngredientEntity } from '../entities/product.entity';
 
 export interface ProductResponseDto {
   id: string;
@@ -8,5 +8,5 @@ export interface ProductResponseDto {
   description?: string;
   hasMultipleSizes: boolean;
   prices: ProductPriceDto[];
-  extras?: ExtraIngredientDto[];
+  extras?: ExtraIngredientEntity[];
 }

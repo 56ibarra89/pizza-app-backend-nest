@@ -17,6 +17,10 @@ import { CreateProductDto } from '../dto/create-product.dto';
 import { UpdateProductDto } from '../dto/update-product.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRoleDto } from '../../common';
+import {
+  CreateCategoryExtraDto,
+  UpdateCategoryExtraDto,
+} from '../dto/category-extra.dto';
 
 @ApiTags('products')
 @Controller('products')
@@ -47,6 +51,34 @@ export class ProductsController {
   @Roles(UserRoleDto.admin)
   deleteCategory(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.products.deleteCategory(id);
+  }
+
+  @Post('categories/:id/extras')
+  @Roles(UserRoleDto.admin)
+  createCategoryExtra(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: CreateCategoryExtraDto,
+  ) {
+    return this.products.createCategoryExtra(id, dto);
+  }
+
+  @Patch('categories/:id/extras/:extraId')
+  @Roles(UserRoleDto.admin)
+  updateCategoryExtra(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('extraId', new ParseUUIDPipe()) extraId: string,
+    @Body() dto: UpdateCategoryExtraDto,
+  ) {
+    return this.products.updateCategoryExtra(id, extraId, dto);
+  }
+
+  @Delete('categories/:id/extras/:extraId')
+  @Roles(UserRoleDto.admin)
+  deleteCategoryExtra(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('extraId', new ParseUUIDPipe()) extraId: string,
+  ) {
+    return this.products.deleteCategoryExtra(id, extraId);
   }
 
   @Get()

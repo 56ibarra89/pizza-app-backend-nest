@@ -560,6 +560,7 @@ model Category {
   discounts   DiscountCategory[]
   happyHours  HappyHourCategory[]
   products    Product[]
+  extras      CategoryExtra[]
   kitchenId   String?
   kitchen     Kitchen?            @relation(fields: [kitchenId], references: [id])
 
@@ -610,7 +611,6 @@ model Product {
   isActive         Boolean            @default(true)
   certificados     CertificadoItem[]
   discounts        DiscountProduct[]
-  extras           ExtraIngredient[]
   happyHours       HappyHourProduct[]
   orderItems       OrderItem[]
   category         Category           @relation(fields: [categoryId], references: [id], onDelete: Cascade)
@@ -636,22 +636,27 @@ model ProductPrice {
   @@unique([productId, size])
 }
 
-model ExtraIngredient {
-  id        String       @id @default(uuid())
-  productId String
-  name      String
-  product   Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
-  prices    ExtraPrice[]
+model CategoryExtra {
+  id         String               @id @default(uuid())
+  categoryId String
+  name       String
+  isActive   Boolean              @default(true)
+  sortOrder  Int                  @default(0)
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+  category   Category             @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  prices     CategoryExtraPrice[]
 
-  @@unique([productId, name])
+  @@unique([categoryId, name])
+  @@index([categoryId, isActive])
 }
 
-model ExtraPrice {
-  id      String          @id @default(uuid())
+model CategoryExtraPrice {
+  id      String        @id @default(uuid())
   extraId String
   size    String
-  price   Decimal         @db.Decimal(10, 2)
-  extra   ExtraIngredient @relation(fields: [extraId], references: [id], onDelete: Cascade)
+  price   Decimal       @db.Decimal(10, 2)
+  extra   CategoryExtra @relation(fields: [extraId], references: [id], onDelete: Cascade)
 
   @@unique([extraId, size])
 }

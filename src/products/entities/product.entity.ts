@@ -6,7 +6,10 @@ export interface ProductPriceEntity {
 }
 
 export interface ExtraIngredientEntity {
+  id?: string;
   name: string;
+  isActive?: boolean;
+  sortOrder?: number;
   prices: ProductPriceEntity[];
 }
 
