@@ -16,6 +16,7 @@ import {
 } from '../../promotions/interfaces/happy-hour-promotions.repository';
 import { CouponPromotionsService } from '../../promotions/services/coupon-promotions.service';
 import type { CartItemEntity } from '../entities/order-item.entity';
+import type { ProductEntity } from '../../products/entities/product.entity';
 import type {
   OrderPromotionInput,
   OrderPromotionSource,
@@ -100,6 +101,27 @@ export class OrderPricingService {
     @Inject(HAPPY_HOUR_PROMOTIONS_REPOSITORY)
     private readonly happyHours: IHappyHourPromotionsRepository,
   ) {}
+
+  async normalizeComboItems(
+    items: CartItemEntity[],
+  ): Promise<CartItemEntity[]> {
+    return Promise.all(
+      items.map(async (item) => {
+        if (!item.isCombo || !item.productId) return item;
+        const combo = await this.productsService.getProductById(item.productId);
+        if (!combo.isCombo) {
+          throw new BadRequestException('El producto indicado no es un combo');
+        }
+        return {
+          ...item,
+          comboSelections: await this.normalizeComboSelections(
+            combo,
+            item.comboSelections ?? [],
+          ),
+        };
+      }),
+    );
+  }
 
   async resolvePromotion(
     input: OrderPromotionInput,
@@ -404,7 +426,9 @@ export class OrderPricingService {
       const price = product.prices.find(
         (candidate) => candidate.size.toLowerCase() === item.size.toLowerCase(),
       );
-      let unitPrice = price?.price ?? item.price;
+      let unitPrice = product.isCombo
+        ? await this.resolveComboPrice(product, item)
+        : (price?.price ?? item.price);
 
       for (const selectedExtra of item.extras ?? []) {
         const extra = product.extras?.find(
@@ -444,5 +468,127 @@ export class OrderPricingService {
     }
 
     return { unitPrice: item.price, isDiscountable: true };
+  }
+
+  private async resolveComboPrice(
+    combo: ProductEntity,
+    item: CartItemEntity,
+  ): Promise<number> {
+    const selections = await this.normalizeComboSelections(
+      combo,
+      item.comboSelections ?? [],
+    );
+    const selectionsSurcharge = selections.reduce((total, selection) => {
+      const extras = (selection.extras ?? []).reduce(
+        (sum, extra) => sum + extra.price,
+        0,
+      );
+      return total + (selection.extraPrice + extras) * selection.quantity;
+    }, 0);
+    return (
+      Number(combo.comboPrice ?? combo.prices[0]?.price ?? 0) +
+      selectionsSurcharge
+    );
+  }
+
+  private async normalizeComboSelections(
+    combo: ProductEntity,
+    selections: NonNullable<CartItemEntity['comboSelections']>,
+  ): Promise<NonNullable<CartItemEntity['comboSelections']>> {
+    const groups = combo.comboGroups ?? [];
+    const knownGroupIds = new Set(groups.map((group) => group.id));
+    if (selections.some((selection) => !knownGroupIds.has(selection.groupId))) {
+      throw new BadRequestException(
+        'El combo contiene un grupo de selección inválido',
+      );
+    }
+
+    const normalized = [] as NonNullable<CartItemEntity['comboSelections']>;
+    for (const group of groups) {
+      const groupSelections = selections.filter(
+        (selection) => selection.groupId === group.id,
+      );
+      const selectedCount = groupSelections.reduce(
+        (sum, selection) => sum + selection.quantity,
+        0,
+      );
+      if (selectedCount !== group.requiredCount) {
+        throw new BadRequestException(
+          `El grupo ${group.name} requiere ${group.requiredCount} selección(es)`,
+        );
+      }
+
+      for (const selection of groupSelections) {
+        const option = group.options.find(
+          (candidate) =>
+            candidate.itemProductId === selection.productId &&
+            (!candidate.size ||
+              candidate.size.toLowerCase() === selection.size?.toLowerCase()),
+        );
+        if (!option) {
+          throw new BadRequestException(
+            `La opción ${selection.productName} no pertenece al grupo ${group.name}`,
+          );
+        }
+
+        const component = await this.productsService.getProductById(
+          selection.productId,
+        );
+        const selectedSize =
+          selection.size ?? option.size ?? component.prices[0]?.size;
+        if (!selectedSize) {
+          throw new BadRequestException(
+            `No se pudo determinar el tamaño de ${component.name}`,
+          );
+        }
+        if (
+          !component.prices.some(
+            (price) => price.size.toLowerCase() === selectedSize.toLowerCase(),
+          )
+        ) {
+          throw new BadRequestException(
+            `El tamaño ${selectedSize} no está disponible para ${component.name}`,
+          );
+        }
+
+        const requestedExtras = selection.extras ?? [];
+        const requestedExtraNames = requestedExtras.map((extra) =>
+          extra.name.trim().toLowerCase(),
+        );
+        if (new Set(requestedExtraNames).size !== requestedExtraNames.length) {
+          throw new BadRequestException(
+            `Hay extras duplicados para ${component.name}`,
+          );
+        }
+        const extras = requestedExtras.map((requested) => {
+          const extra = component.extras?.find(
+            (candidate) =>
+              candidate.name.toLowerCase() === requested.name.toLowerCase(),
+          );
+          const extraPrice = extra?.prices.find(
+            (candidate) =>
+              candidate.size.toLowerCase() === selectedSize.toLowerCase(),
+          );
+          if (!extra || !extraPrice) {
+            throw new BadRequestException(
+              `El extra ${requested.name} no está disponible para ${component.name}`,
+            );
+          }
+          return { name: extra.name, price: extraPrice.price };
+        });
+
+        normalized.push({
+          ...selection,
+          groupName: group.name,
+          productName: component.name,
+          size: selection.size ?? option.size,
+          extraPrice: option.extraPrice,
+          categoryId: component.categoryId,
+          extras,
+        });
+      }
+    }
+
+    return normalized;
   }
 }

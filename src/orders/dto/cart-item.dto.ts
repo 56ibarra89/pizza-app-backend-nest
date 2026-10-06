@@ -38,6 +38,62 @@ export class KitchenModifierSelectionDto {
   kind!: KitchenModifierKindDto;
 }
 
+export class ComboSelectionDto {
+  @IsString()
+  @IsNotEmpty()
+  groupId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  groupName!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  productId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  productName!: string;
+
+  @IsOptional()
+  @IsString()
+  size?: string;
+
+  @IsInt()
+  @Min(1)
+  quantity!: number;
+
+  @IsNumber()
+  @Min(0)
+  extraPrice!: number;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @ValidateNested({ each: true })
+  @Type(() => SelectedExtraDto)
+  extras?: SelectedExtraDto[];
+
+  @IsOptional()
+  @IsString()
+  kitchenId?: string;
+
+  @IsOptional()
+  @IsString()
+  categoryId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  categoryName?: string;
+
+  @IsOptional()
+  @IsEnum(KitchenStatusDto)
+  kitchenStatus?: KitchenStatusDto;
+}
+
 export class CartItemDto {
   @IsOptional()
   @IsString()
@@ -108,5 +164,8 @@ export class CartItemDto {
 
   @IsOptional()
   @IsArray()
-  comboSelections?: any[];
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => ComboSelectionDto)
+  comboSelections?: ComboSelectionDto[];
 }

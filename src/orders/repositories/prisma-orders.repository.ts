@@ -3,8 +3,11 @@ import { Prisma, type KitchenStatus, type OrderStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { IOrdersRepository } from '../interfaces/orders.repository';
 import type { OrderEntity } from '../entities/order.entity';
-import type { CartItemEntity } from '../entities/order-item.entity';
-import type { KitchenStatusDto } from '../dto/kitchen-status.dto';
+import type {
+  CartItemEntity,
+  SelectedComboOptionEntity,
+} from '../entities/order-item.entity';
+import { KitchenStatusDto } from '../dto/kitchen-status.dto';
 import {
   fromDbKitchenStatus,
   fromDbOrderStatus,
@@ -242,7 +245,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
               : undefined,
             kitchenId: i.kitchenId,
             isCombo: i.isCombo ?? false,
-            comboSelections: i.comboSelections ?? undefined,
+            comboSelections: i.comboSelections
+              ? (i.comboSelections as unknown as Prisma.InputJsonValue)
+              : undefined,
             extras: {
               create: i.extras.map((e) => ({ name: e.name, price: e.price })),
             },
@@ -489,7 +494,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
             : undefined,
           kitchenId: i.kitchenId,
           isCombo: i.isCombo ?? false,
-          comboSelections: i.comboSelections ?? undefined,
+          comboSelections: i.comboSelections
+            ? (i.comboSelections as unknown as Prisma.InputJsonValue)
+            : undefined,
           extras: {
             create: i.extras.map((e) => ({ name: e.name, price: e.price })),
           },
@@ -537,7 +544,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
 
     for (const item of items) {
       if (item.isCombo && Array.isArray(item.comboSelections)) {
-        const updatedSelections = (item.comboSelections as any[]).map((sel) => {
+        const selections =
+          item.comboSelections as unknown as SelectedComboOptionEntity[];
+        const updatedSelections = selections.map((sel) => {
           if (!params.kitchenId || sel.kitchenId === params.kitchenId) {
             return {
               ...sel,
@@ -548,13 +557,17 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         });
 
         const allDelivered = updatedSelections.every(
-          (s) => s.kitchenStatus === 'delivered',
+          (s) => s.kitchenStatus === KitchenStatusDto.delivered,
         );
         const allReadyOrDelivered = updatedSelections.every(
-          (s) => s.kitchenStatus === 'ready' || s.kitchenStatus === 'delivered',
+          (s) =>
+            s.kitchenStatus === KitchenStatusDto.ready ||
+            s.kitchenStatus === KitchenStatusDto.delivered,
         );
         const anyPreparingOrReady = updatedSelections.some(
-          (s) => s.kitchenStatus === 'preparing' || s.kitchenStatus === 'ready',
+          (s) =>
+            s.kitchenStatus === KitchenStatusDto.preparing ||
+            s.kitchenStatus === KitchenStatusDto.ready,
         );
 
         let overallStatus: KitchenStatusDto = 'pending' as KitchenStatusDto;
@@ -568,7 +581,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           where: { id: item.id },
           data: {
             kitchenStatus: toDbKitchenStatus(overallStatus),
-            comboSelections: updatedSelections,
+            comboSelections:
+              updatedSelections as unknown as Prisma.InputJsonValue,
           },
         });
       } else {
@@ -707,7 +721,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           : undefined,
         kitchenId: i.kitchenId ?? undefined,
         isCombo: Boolean(i.isCombo),
-        comboSelections: (i.comboSelections as any) ?? undefined,
+        comboSelections: Array.isArray(i.comboSelections)
+          ? (i.comboSelections as unknown as SelectedComboOptionEntity[])
+          : undefined,
       })),
       subTotal: o.subTotal ? o.subTotal.toNumber() : undefined,
       discountAmount: o.discountAmount

@@ -126,7 +126,7 @@ export class OrdersService {
         ...dto,
         cashierSnapshotName,
       });
-    const items = dto.items.map((item) => {
+    const rawItems = dto.items.map((item) => {
       const mappedItem = {
         ...item,
         giftQuantity: item.giftQuantity ?? 0,
@@ -141,6 +141,7 @@ export class OrdersService {
             kitchenStatus: undefined,
           };
     });
+    const items = await this.pricing.normalizeComboItems(rawItems);
     const promotion = await this.pricing.resolvePromotion(dto);
     const totals = await this.pricing.calculate(items, promotion);
 
@@ -804,7 +805,7 @@ export class OrdersService {
       existing.status === OrderStatusDto.paid ||
       existing.status === OrderStatusDto.cancelled;
 
-    const mappedItems: CartItemEntity[] = dto.items.map((item) => {
+    const rawItems: CartItemEntity[] = dto.items.map((item) => {
       const mappedItem: CartItemEntity = {
         ...item,
         giftQuantity: item.giftQuantity ?? 0,
@@ -819,6 +820,7 @@ export class OrdersService {
             kitchenStatus: undefined,
           };
     });
+    const mappedItems = await this.pricing.normalizeComboItems(rawItems);
     const nextStatus = isFinal
       ? existing.status
       : this.deriveGlobalStatus(mappedItems, existing.orderType);

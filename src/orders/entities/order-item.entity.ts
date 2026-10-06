@@ -17,6 +17,21 @@ export interface KitchenModifierSelectionEntity {
   kind: KitchenModifierKindEntity;
 }
 
+export interface SelectedComboOptionEntity {
+  groupId: string;
+  groupName: string;
+  productId: string;
+  productName: string;
+  size?: string;
+  quantity: number;
+  extraPrice: number;
+  extras?: SelectedExtraEntity[];
+  kitchenId?: string;
+  categoryId?: string;
+  categoryName?: string;
+  kitchenStatus?: KitchenStatusDto;
+}
+
 export interface CartItemEntity {
   id?: number;
   productId?: string;
@@ -35,5 +50,5 @@ export interface CartItemEntity {
   kitchenStatus?: KitchenStatusDto;
   kitchenId?: string;
   isCombo?: boolean;
-  comboSelections?: any[];
+  comboSelections?: SelectedComboOptionEntity[];
 }
