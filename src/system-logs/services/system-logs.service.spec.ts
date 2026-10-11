@@ -24,6 +24,7 @@ describe('SystemLogsService', () => {
       role: UserRoleDto.cocinero,
       action: 'LOGIN_PIN',
       level: LogLevel.INFO,
+      success: true,
     });
 
     await service.create(

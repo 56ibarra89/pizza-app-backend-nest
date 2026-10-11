@@ -2,6 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import type { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from './notifications.service';
+import type { SystemLogsService } from '../../system-logs/services/system-logs.service';
 
 describe('NotificationsService', () => {
   const notification = {
@@ -18,12 +19,16 @@ describe('NotificationsService', () => {
     update: jest.fn(),
   };
   const prisma = { notification, user, appConfig, order };
+  const systemLogs = { createProcess: jest.fn().mockResolvedValue({ id: 1 }) };
 
   let service: NotificationsService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new NotificationsService(prisma as unknown as PrismaService);
+    service = new NotificationsService(
+      prisma as unknown as PrismaService,
+      systemLogs as unknown as SystemLogsService,
+    );
     notification.create.mockImplementation(
       ({ data }: { data: Record<string, unknown> }) =>
         Promise.resolve({
@@ -134,5 +139,11 @@ describe('NotificationsService', () => {
         targetUsername: 'caja1',
       }),
     });
+    expect(systemLogs.createProcess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        process: 'DELIVERY_SLA_MONITOR',
+        entity: 'delivery-alert',
+      }),
+    );
   });
 });

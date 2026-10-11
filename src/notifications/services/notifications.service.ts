@@ -9,6 +9,7 @@ import {
   SERVICE_SLA_CONFIG_ID,
   normalizeServiceSlaConfig,
 } from '../../common/service-sla.config';
+import { SystemLogsService } from '../../system-logs/services/system-logs.service';
 
 export interface NotificationEvent {
   id: string;
@@ -27,7 +28,10 @@ export class NotificationsService {
 
   public readonly notificationStream = new Subject<NotificationEvent>();
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly systemLogs: SystemLogsService,
+  ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
   async checkOverdueDeliveries() {
@@ -64,6 +68,7 @@ export class NotificationsService {
         },
       });
 
+      const alertedOrderIds: string[] = [];
       for (const order of overdue) {
         const claimed = await this.prisma.order.updateMany({
           where: { id: order.id, deliverySlaAlertedAt: null },
@@ -105,6 +110,7 @@ export class NotificationsService {
             );
           }
           await Promise.all(notifications);
+          alertedOrderIds.push(order.id);
         } catch (error) {
           await this.prisma.order.update({
             where: { id: order.id },
@@ -112,6 +118,16 @@ export class NotificationsService {
           });
           throw error;
         }
+      }
+      if (alertedOrderIds.length > 0) {
+        await this.systemLogs.createProcess({
+          process: 'DELIVERY_SLA_MONITOR',
+          action: 'NOTIFICATIONS_DELIVERY_SLA_ALERT',
+          module: 'notifications',
+          operation: 'CREATE',
+          entity: 'delivery-alert',
+          after: { alertedOrderIds, count: alertedOrderIds.length },
+        });
       }
     } catch (error) {
       this.logger.error('No se pudieron revisar los SLA de delivery.', error);

@@ -398,20 +398,41 @@ model Correlativo {
 }
 
 model SystemLog {
-  id        Int      @id @default(autoincrement())
-  timestamp DateTime @default(now())
-  user      String
-  role      String?
-  action    String
-  details   String?
-  level     LogLevel @default(INFO)
-  userId    String?
-  userRef   User?    @relation("SystemLogUser", fields: [userId], references: [id])
+  id          Int      @id @default(autoincrement())
+  timestamp   DateTime @default(now())
+  user        String
+  role        String?
+  action      String
+  details     String?
+  level       LogLevel @default(INFO)
+  userId      String?
+  module      String?
+  operation   String?
+  entity      String?
+  entityId    String?
+  source      String?
+  requestId   String?
+  ipAddress   String?
+  userAgent   String?
+  httpMethod  String?
+  route       String?
+  statusCode  Int?
+  success     Boolean  @default(true)
+  durationMs  Int?
+  before      Json?
+  after       Json?
+  metadata    Json?
+  userRef     User?    @relation("SystemLogUser", fields: [userId], references: [id])
 
   @@index([timestamp])
   @@index([userId])
   @@index([user])
   @@index([level])
+  @@index([module])
+  @@index([operation])
+  @@index([entity, entityId])
+  @@index([success])
+  @@index([requestId])
 }
 
 model AppConfig {

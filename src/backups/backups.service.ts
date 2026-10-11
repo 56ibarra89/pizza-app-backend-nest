@@ -15,13 +15,17 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { AppConfigService } from '../app-config/services/app-config.service';
-import { BackupConfigDto, UpdateBackupConfigDto } from './dto/backup-config.dto';
+import {
+  BackupConfigDto,
+  UpdateBackupConfigDto,
+} from './dto/backup-config.dto';
 import { BackupItemDto, BackupType } from './dto/backup-item.dto';
 import { RestoreBackupResponseDto } from './dto/restore-backup.dto';
 import {
   CLOUD_BACKUP_PROVIDER,
   type ICloudBackupProvider,
 } from './interfaces/cloud-backup-provider.interface';
+import { SystemLogsService } from '../system-logs/services/system-logs.service';
 
 const execFileAsync = promisify(execFile);
 const CONFIG_KEY = 'backup_config';
@@ -37,6 +41,7 @@ export class BackupsService implements OnModuleInit {
     private readonly appConfigService: AppConfigService,
     @Inject(CLOUD_BACKUP_PROVIDER)
     private readonly cloudProvider: ICloudBackupProvider,
+    private readonly systemLogs: SystemLogsService,
   ) {}
 
   onModuleInit() {
@@ -302,7 +307,8 @@ export class BackupsService implements OnModuleInit {
 
         let type: BackupType = 'MANUAL';
         if (filename.startsWith('backup-auto')) type = 'AUTOMATIC';
-        else if (filename.startsWith('backup-shift-close')) type = 'SHIFT_CLOSE';
+        else if (filename.startsWith('backup-shift-close'))
+          type = 'SHIFT_CLOSE';
         else if (filename.startsWith('safety-snapshot'))
           type = 'SAFETY_SNAPSHOT';
 
@@ -333,7 +339,9 @@ export class BackupsService implements OnModuleInit {
     const sanitized = path.basename(filename);
     const fullPath = path.join(this.storageDir, sanitized);
     if (!fs.existsSync(fullPath)) {
-      throw new NotFoundException(`El archivo de respaldo ${filename} no existe`);
+      throw new NotFoundException(
+        `El archivo de respaldo ${filename} no existe`,
+      );
     }
     return fullPath;
   }
@@ -352,7 +360,9 @@ export class BackupsService implements OnModuleInit {
         // ignore
       }
     } catch (err: any) {
-      this.logger.error(`Error al eliminar archivo ${filename}: ${err?.message}`);
+      this.logger.error(
+        `Error al eliminar archivo ${filename}: ${err?.message}`,
+      );
       throw new InternalServerErrorException(
         `No se pudo eliminar el archivo de respaldo: ${err?.message}`,
       );
@@ -381,7 +391,9 @@ export class BackupsService implements OnModuleInit {
     }
 
     if (!fs.existsSync(sourcePath)) {
-      throw new NotFoundException('El archivo de respaldo a restaurar no existe');
+      throw new NotFoundException(
+        'El archivo de respaldo a restaurar no existe',
+      );
     }
 
     // 1. Crear Snapshot de Seguridad preventivo obligatorio
@@ -444,7 +456,9 @@ export class BackupsService implements OnModuleInit {
           'Base de datos restaurada correctamente. Se generó un snapshot de seguridad preventivo antes de aplicar los cambios.',
       };
     } catch (err: any) {
-      this.logger.error(`Fallo crítico al restaurar con psql: ${err?.message || err}`);
+      this.logger.error(
+        `Fallo crítico al restaurar con psql: ${err?.message || err}`,
+      );
       throw new InternalServerErrorException(
         `Error al restaurar la base de datos: ${err?.message || 'Error ejecutando psql'}. Tu estado previo quedó respaldado en: ${safetySnapshot.filename}`,
       );
@@ -506,7 +520,16 @@ export class BackupsService implements OnModuleInit {
         this.logger.log(
           `Disparando respaldo programado diario (${config.hour}:${String(config.minute).padStart(2, '0')})...`,
         );
-        await this.generateBackup('AUTOMATIC');
+        const backup = await this.generateBackup('AUTOMATIC');
+        await this.systemLogs.createProcess({
+          process: 'BACKUP_SCHEDULER',
+          action: 'BACKUPS_GENERATE',
+          module: 'backups',
+          operation: 'GENERATE',
+          entity: 'backup',
+          entityId: backup.filename,
+          after: backup,
+        });
       }
     } catch (err) {
       this.logger.error(`Error en verificación de cron de respaldos: ${err}`);
@@ -528,7 +551,17 @@ export class BackupsService implements OnModuleInit {
       this.logger.log(
         `Turno cerrado detectado (ID: ${payload.shiftId}, Tipo: ${payload.closeType || 'Desconocido'}). Disparando respaldo automático...`,
       );
-      await this.generateBackup('SHIFT_CLOSE');
+      const backup = await this.generateBackup('SHIFT_CLOSE');
+      await this.systemLogs.createProcess({
+        process: 'SHIFT_CLOSE_BACKUP_HANDLER',
+        action: 'BACKUPS_GENERATE_AFTER_SHIFT_CLOSE',
+        module: 'backups',
+        operation: 'GENERATE',
+        entity: 'backup',
+        entityId: backup.filename,
+        after: backup,
+        metadata: payload,
+      });
     } catch (err) {
       this.logger.error(
         `Error al generar respaldo automático por cierre de caja: ${err}`,

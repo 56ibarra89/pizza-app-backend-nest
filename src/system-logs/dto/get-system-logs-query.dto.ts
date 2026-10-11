@@ -1,6 +1,14 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { LogLevel } from '@prisma/client';
-import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 
 export class GetSystemLogsQueryDto {
   @IsOptional()
@@ -37,4 +45,21 @@ export class GetSystemLogsQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @IsOptional()
+  @IsString()
+  module?: string;
+
+  @IsOptional()
+  @IsString()
+  operation?: string;
+
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  @IsBoolean()
+  success?: boolean;
 }
