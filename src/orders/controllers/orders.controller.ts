@@ -96,16 +96,10 @@ export class OrdersController {
 
   @Get('driver/:driverId/today')
   @Permissions('delivery.read')
-  @Roles(
-    UserRoleDto.admin,
-    UserRoleDto.cajero,
-    UserRoleDto.cajero_principal,
-    UserRoleDto.mesero,
-    UserRoleDto.despachador,
-    UserRoleDto.motorizado,
-  )
+  @Roles(UserRoleDto.admin, UserRoleDto.despachador, UserRoleDto.motorizado)
   async getDriverTodayOrders(
     @Param('driverId') driverId: string,
+    @CurrentUser() user: AuthenticatedUser,
     @Query('date') dateStr?: string,
   ) {
     let dateToUse = dateStr;
@@ -117,8 +111,11 @@ export class OrdersController {
     const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
     const endOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
 
+    const effectiveDriverId =
+      user.role === UserRoleDto.motorizado ? user.id : driverId;
+
     const list = await this.orders.listByDriverAndDate(
-      driverId,
+      effectiveDriverId,
       startOfDay,
       endOfDay,
     );

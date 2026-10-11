@@ -19,8 +19,10 @@ import {
 import { UserRoleDto } from '../../common';
 import { KitchensService } from '../../kitchens/kitchens.service';
 import { requiresKitchenPreparation } from '../validators/order-item-kind';
+import { AccessControlService } from '../../access-control/access-control.service';
 
 const FULL_ORDERS_ROOM = 'authenticated-full-orders-clients';
+const ORDERS_READ_PERMISSION = 'orders.read';
 const kitchenRoom = (kitchenId: string) => `authenticated-kitchen:${kitchenId}`;
 
 const configuredOrigins = (process.env.CORS_ORIGINS ?? '')
@@ -54,6 +56,7 @@ interface OrderSocketData {
     id: string;
     username: string;
     role: UserRoleDto;
+    permissions: string[];
   };
 }
 
@@ -86,6 +89,7 @@ export class OrdersGateway implements OnGatewayInit {
   constructor(
     private readonly jwtService: JwtService,
     private readonly kitchens: KitchensService,
+    private readonly accessControl: AccessControlService,
     @Inject(USERS_REPOSITORY)
     private readonly usersRepository: IUsersRepository,
   ) {}
@@ -118,7 +122,7 @@ export class OrdersGateway implements OnGatewayInit {
         const ids: string[] = [];
         if (item.kitchenId) ids.push(item.kitchenId);
         if (item.isCombo && Array.isArray(item.comboSelections)) {
-          item.comboSelections.forEach((sel: any) => {
+          item.comboSelections.forEach((sel) => {
             if (sel.kitchenId) ids.push(sel.kitchenId);
           });
         }
@@ -135,7 +139,7 @@ export class OrdersGateway implements OnGatewayInit {
             item.kitchenId === kitchenId ||
             (item.isCombo &&
               Array.isArray(item.comboSelections) &&
-              item.comboSelections.some((sel: any) => sel.kitchenId === kitchenId)),
+              item.comboSelections.some((sel) => sel.kitchenId === kitchenId)),
         ),
       };
       this.server.to(kitchenRoom(kitchenId)).emit('orders:changed', {
@@ -189,10 +193,21 @@ export class OrdersGateway implements OnGatewayInit {
       throw new Error('Sesion invalida');
     }
 
+    const authorization = await this.accessControl.authorizationForUser(
+      user.id,
+    );
+    if (!authorization.permissions.includes(ORDERS_READ_PERMISSION)) {
+      this.logger.warn(
+        `Conexion de ordenes rechazada por permiso faltante: ${user.id}`,
+      );
+      throw new Error('Permiso de ordenes insuficiente');
+    }
+
     socket.data.user = {
       id: user.id,
       username: user.username,
       role: user.role,
+      permissions: authorization.permissions,
     };
   }
 

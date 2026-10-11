@@ -42,9 +42,39 @@ describe('RolesGuard', () => {
     expect(guard.canActivate(contextFor())).toBe(true);
   });
 
-  it('autoriza usando permisos aunque el rol no figure en la lista heredada', () => {
+  it('deniega aunque tenga el permiso cuando no cumple el rol requerido', () => {
     getAllAndOverride.mockImplementation((key: string) =>
       key === 'permissions' ? ['reports.read'] : [UserRoleDto.admin],
+    );
+
+    expect(() =>
+      guard.canActivate(contextFor(UserRoleDto.cajero, ['reports.read'])),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('autoriza cuando cumple tanto el permiso como el rol requerido', () => {
+    getAllAndOverride.mockImplementation((key: string) =>
+      key === 'permissions' ? ['reports.read'] : [UserRoleDto.admin],
+    );
+
+    expect(
+      guard.canActivate(contextFor(UserRoleDto.admin, ['reports.read'])),
+    ).toBe(true);
+  });
+
+  it('deniega aunque cumpla el rol cuando falta el permiso requerido', () => {
+    getAllAndOverride.mockImplementation((key: string) =>
+      key === 'permissions' ? ['reports.read'] : [UserRoleDto.admin],
+    );
+
+    expect(() =>
+      guard.canActivate(contextFor(UserRoleDto.admin, ['reports.export'])),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('autoriza un endpoint que exige únicamente permisos', () => {
+    getAllAndOverride.mockImplementation((key: string) =>
+      key === 'permissions' ? ['reports.read'] : undefined,
     );
 
     expect(

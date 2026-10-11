@@ -51,15 +51,16 @@ export class RolesGuard implements CanActivate {
           `No tienes permisos suficientes. Permisos requeridos: ${missing.join(', ')}`,
         );
       }
-      return true;
     }
 
-    const userRole = user.role.toLowerCase();
-    const hasRole = requiredRoles.some((r) => r.toLowerCase() === userRole);
-    if (!hasRole) {
-      throw new ForbiddenException(
-        `No tienes permisos suficientes. Roles permitidos: ${requiredRoles.join(', ')}`,
-      );
+    if (requiredRoles?.length) {
+      const userRole = user.role.toLowerCase();
+      const hasRole = requiredRoles.some((r) => r.toLowerCase() === userRole);
+      if (!hasRole) {
+        throw new ForbiddenException(
+          `No tienes permisos suficientes. Roles permitidos: ${requiredRoles.join(', ')}`,
+        );
+      }
     }
 
     return true;
