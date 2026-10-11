@@ -102,9 +102,49 @@ describe('OrderPricingService combo extras', () => {
     expect(totals.total).toBe(530);
   });
 
+  it('returns the authoritative unit price to persist with the order item', async () => {
+    const result = await createService().calculateWithPrices([createItem()]);
+
+    expect(result.items[0].price).toBe(530);
+    expect(result.totals.subTotal).toBe(530);
+  });
+
   it('rejects an extra that is not available for the component', async () => {
     await expect(
       createService().calculate([createItem('Extra inventado')]),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('ignores a manipulated client price for a catalog product', async () => {
+    const item: CartItemEntity = {
+      productId: pizza.id,
+      name: pizza.name,
+      price: 1,
+      size: 'único',
+      quantity: 2,
+      giftQuantity: 0,
+      extras: [{ name: 'Queso adicional', price: 1 }],
+    };
+
+    const result = await createService().calculateWithPrices([item]);
+
+    expect(result.items[0].price).toBe(220);
+    expect(result.items[0].extras).toEqual([
+      { name: 'Queso adicional', price: 20 },
+    ]);
+    expect(result.totals.subTotal).toBe(440);
+  });
+
+  it('rejects a catalog size that does not exist instead of trusting its price', async () => {
+    await expect(
+      createService().calculate([
+        {
+          ...createItem(),
+          productId: pizza.id,
+          isCombo: false,
+          size: 'inventado',
+        },
+      ]),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

@@ -143,13 +143,14 @@ export class OrdersService {
     });
     const items = await this.pricing.normalizeComboItems(rawItems);
     const promotion = await this.pricing.resolvePromotion(dto);
-    const totals = await this.pricing.calculate(items, promotion);
+    const { items: pricedItems, totals } =
+      await this.pricing.calculateWithPrices(items, promotion);
 
     const created = await this.repo.create({
       id: dto.id,
       shiftId,
       customerId,
-      items,
+      items: pricedItems,
       subTotal: totals.subTotal,
       discountAmount: totals.discountAmount,
       taxAmount: totals.taxAmount,
@@ -833,10 +834,11 @@ export class OrdersService {
       discountId: existing.discountId,
       happyHourId: existing.happyHourId,
     });
-    const totals = await this.pricing.calculate(mappedItems, promotion);
+    const { items: pricedItems, totals } =
+      await this.pricing.calculateWithPrices(mappedItems, promotion);
 
     const updated = await this.repo.update(id, {
-      items: mappedItems,
+      items: pricedItems,
       total: totals.total,
       subTotal: totals.subTotal,
       discountAmount: totals.discountAmount,

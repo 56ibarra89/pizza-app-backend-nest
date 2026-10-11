@@ -39,6 +39,7 @@ interface PricedItem {
   isDiscountable: boolean;
   productId?: string;
   categoryId?: string;
+  extras?: CartItemEntity['extras'];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -202,15 +203,28 @@ export class OrderPricingService {
     items: readonly CartItemEntity[],
     promotion: ResolvedOrderPromotion = { source: 'none' },
   ): Promise<OrderTotals> {
+    return (await this.calculateWithPrices(items, promotion)).totals;
+  }
+
+  async calculateWithPrices(
+    items: readonly CartItemEntity[],
+    promotion: ResolvedOrderPromotion = { source: 'none' },
+  ): Promise<{ items: CartItemEntity[]; totals: OrderTotals }> {
     const packagingConfig =
       await this.appConfigService.getByIdOrDefault('packaging_sizes');
     const packagingSizes = readPackagingSizes(packagingConfig.data);
 
     let subTotal = 0;
     let eligibleSubTotal = 0;
+    const pricedItems: CartItemEntity[] = [];
 
     for (const item of items) {
       const pricedItem = await this.resolveItemPrice(item, packagingSizes);
+      pricedItems.push({
+        ...item,
+        price: pricedItem.unitPrice,
+        extras: pricedItem.extras ?? item.extras,
+      });
       const isEligible = this.isPromotionEligible(item, pricedItem, promotion);
       const isTwoForOnePromotion =
         promotion.source === 'happy-hour' &&
@@ -258,10 +272,13 @@ export class OrderPricingService {
       taxPercentage > 0 ? taxableTotal * (taxPercentage / 100) : 0;
 
     return {
-      subTotal,
-      discountAmount,
-      taxAmount,
-      total: Math.max(0, taxableTotal + taxAmount),
+      items: pricedItems,
+      totals: {
+        subTotal,
+        discountAmount,
+        taxAmount,
+        total: Math.max(0, taxableTotal + taxAmount),
+      },
     };
   }
 
@@ -426,9 +443,15 @@ export class OrderPricingService {
       const price = product.prices.find(
         (candidate) => candidate.size.toLowerCase() === item.size.toLowerCase(),
       );
+      if (!product.isCombo && !price) {
+        throw new BadRequestException(
+          `El tamaño ${item.size} no está disponible para ${product.name}`,
+        );
+      }
       let unitPrice = product.isCombo
         ? await this.resolveComboPrice(product, item)
-        : (price?.price ?? item.price);
+        : price!.price;
+      const authoritativeExtras: CartItemEntity['extras'] = [];
 
       for (const selectedExtra of item.extras ?? []) {
         const extra = product.extras?.find(
@@ -439,7 +462,13 @@ export class OrderPricingService {
           (candidate) =>
             candidate.size.toLowerCase() === item.size.toLowerCase(),
         );
-        unitPrice += extraPrice?.price ?? 0;
+        if (!extra || !extraPrice) {
+          throw new BadRequestException(
+            `El extra ${selectedExtra.name} no está disponible para ${product.name}`,
+          );
+        }
+        unitPrice += extraPrice.price;
+        authoritativeExtras.push({ name: extra.name, price: extraPrice.price });
       }
 
       return {
@@ -447,6 +476,7 @@ export class OrderPricingService {
         isDiscountable: true,
         productId: product.id,
         categoryId: product.categoryId,
+        extras: authoritativeExtras,
       };
     }
 
