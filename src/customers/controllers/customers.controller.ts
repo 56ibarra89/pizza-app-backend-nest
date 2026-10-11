@@ -16,10 +16,11 @@ import { UpsertCustomerDto } from '../dto/upsert-customer.dto';
 import { UpdateCustomerDto } from '../dto/update-customer.dto';
 import { toCustomerResponseDto } from '../mappers/customers.mapper';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRoleDto } from '../../common';
+import { Permissions, UserRoleDto } from '../../common';
 
 @ApiTags('customers')
 @Controller('customers')
+@Permissions('customers.read')
 export class CustomersController {
   constructor(private readonly customers: CustomersService) {}
 
@@ -36,6 +37,7 @@ export class CustomersController {
   }
 
   @Post()
+  @Permissions('customers.manage')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -49,6 +51,7 @@ export class CustomersController {
   }
 
   @Post('upsert')
+  @Permissions('customers.manage')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -65,6 +68,7 @@ export class CustomersController {
   }
 
   @Patch(':id')
+  @Permissions('customers.manage')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -81,6 +85,7 @@ export class CustomersController {
   }
 
   @Delete(':id')
+  @Permissions('customers.manage')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,

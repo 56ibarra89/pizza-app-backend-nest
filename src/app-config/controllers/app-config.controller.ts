@@ -3,7 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 import { AppConfigService } from '../services/app-config.service';
 import { UpdateAppConfigDto } from '../dto/update-app-config.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRoleDto } from '../../common';
+import { Permissions, UserRoleDto } from '../../common';
 
 @ApiTags('config')
 @Roles(UserRoleDto.admin)
@@ -12,6 +12,7 @@ export class AppConfigController {
   constructor(private readonly service: AppConfigService) {}
 
   @Get(':id')
+  @Permissions('settings.read')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -26,6 +27,7 @@ export class AppConfigController {
   }
 
   @Put(':id')
+  @Permissions('settings.manage')
   @Roles(UserRoleDto.admin)
   upsert(@Param('id') id: string, @Body() dto: UpdateAppConfigDto) {
     return this.service.upsert(id, dto);

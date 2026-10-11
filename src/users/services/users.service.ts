@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  BadRequestException,
   Inject,
   Injectable,
   NotFoundException,
@@ -24,6 +25,9 @@ import { PinHasherService } from '../../common/security/pin-hasher.service';
 import type { UpdateOwnProfileDto } from '../dto/update-own-profile.dto';
 import { PinAttemptService } from '../../common/security/pin-attempt.service';
 import { createHash } from 'node:crypto';
+import { AccessControlService } from '../../access-control/access-control.service';
+import { fromDbRole } from '../mappers/user-role.mapper';
+import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 
 interface PasswordResetJwtPayload {
   sub: string;
@@ -67,6 +71,7 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly pinHasher: PinHasherService,
     private readonly authAttempts: PinAttemptService,
+    private readonly accessControl: AccessControlService,
   ) {}
 
   getAll() {
@@ -85,7 +90,13 @@ export class UsersService {
     return found;
   }
 
-  async create(dto: CreateUserDto) {
+  async create(dto: CreateUserDto, actor?: AuthenticatedUser) {
+    const accessRole = dto.accessRoleId
+      ? await this.prisma.accessRole.findUnique({ where: { id: dto.accessRoleId } })
+      : await this.prisma.accessRole.findUnique({ where: { code: dto.role } });
+    if (!accessRole || !accessRole.isActive) {
+      throw new BadRequestException('El rol seleccionado no existe o está inactivo.');
+    }
     const [passwordHash, pinHash] = await Promise.all([
       dto.password
         ? this.hasher.hash(dto.password)
@@ -93,7 +104,7 @@ export class UsersService {
       this.pinHasher.hash(dto.pin),
     ]);
     try {
-      return await this.repo.create({
+      const created = await this.repo.create({
         username: dto.username.toLowerCase(),
         email: dto.email ? dto.email.toLowerCase() : undefined,
         firstName: dto.firstName,
@@ -101,10 +112,17 @@ export class UsersService {
         pinHash,
         pinLookup: this.pinHasher.lookup(dto.pin),
         passwordHash,
-        role: dto.role,
+        role: fromDbRole(accessRole.baseRole),
+        accessRoleId: accessRole.id,
         isActive: dto.isActive ?? true,
         workDays: dto.workDays as any,
       });
+      await this.auditAccessChange(actor, 'USER_CREATED', {
+        userId: created.id,
+        username: created.username,
+        accessRoleId: created.accessRoleId,
+      });
+      return created;
     } catch (e) {
       if (
         e instanceof Prisma.PrismaClientKnownRequestError &&
@@ -116,9 +134,37 @@ export class UsersService {
     }
   }
 
-  async update(id: string, dto: UpdateUserDto) {
+  async update(id: string, dto: UpdateUserDto, actor?: AuthenticatedUser) {
     const current = await this.repo.findById(id);
     if (!current) throw new NotFoundException('Usuario no encontrado');
+    const accessRole = dto.accessRoleId
+      ? await this.prisma.accessRole.findUnique({ where: { id: dto.accessRoleId } })
+      : dto.role
+        ? await this.prisma.accessRole.findUnique({ where: { code: dto.role } })
+        : null;
+    if ((dto.accessRoleId || dto.role) && (!accessRole || !accessRole.isActive)) {
+      throw new BadRequestException('El rol seleccionado no existe o está inactivo.');
+    }
+    const nextRole = accessRole ? fromDbRole(accessRole.baseRole) : dto.role;
+    const systemAdminRole = await this.prisma.accessRole.findUnique({
+      where: { code: 'admin' },
+      select: { id: true },
+    });
+    const nextAccessRoleId = accessRole?.id ?? current.accessRoleId;
+    if (
+      systemAdminRole &&
+      current.accessRoleId === systemAdminRole.id &&
+      (nextAccessRoleId !== systemAdminRole.id || dto.isActive === false)
+    ) {
+      const activeAdmins = await this.prisma.user.count({
+        where: { accessRoleId: systemAdminRole.id, isActive: true },
+      });
+      if (activeAdmins <= 1) {
+        throw new ConflictException(
+          'No se puede desactivar o cambiar el rol del último administrador activo.',
+        );
+      }
+    }
     const [passwordHash, pinHash] = await Promise.all([
       dto.password !== undefined
         ? this.hasher.hash(dto.password)
@@ -131,10 +177,11 @@ export class UsersService {
       dto.password !== undefined ||
       dto.pin !== undefined ||
       dto.role !== undefined ||
+      dto.accessRoleId !== undefined ||
       dto.isActive === false;
 
     try {
-      return await this.repo.update(id, {
+      const updated = await this.repo.update(id, {
         username: dto.username ? dto.username.toLowerCase() : undefined,
         email:
           dto.email === undefined
@@ -147,12 +194,20 @@ export class UsersService {
         pinHash,
         pinLookup: dto.pin ? this.pinHasher.lookup(dto.pin) : undefined,
         passwordHash: passwordHash !== undefined ? passwordHash : undefined,
-        role: dto.role,
+        role: nextRole,
+        accessRoleId: accessRole?.id,
         isActive: dto.isActive,
         themePreference: dto.themePreference,
         workDays: dto.workDays as any,
         tokenVersion: revokesSessions ? current.tokenVersion + 1 : undefined,
       });
+      await this.auditAccessChange(actor, 'USER_UPDATED', {
+        userId: id,
+        previousAccessRoleId: current.accessRoleId,
+        accessRoleId: updated.accessRoleId,
+        active: updated.isActive,
+      });
+      return updated;
     } catch (e) {
       if (
         e instanceof Prisma.PrismaClientKnownRequestError &&
@@ -220,10 +275,28 @@ export class UsersService {
     }
   }
 
-  async delete(id: string) {
+  async delete(id: string, actor?: AuthenticatedUser) {
     const user = await this.repo.findById(id);
     if (!user) throw new NotFoundException('Usuario no encontrado');
-    return await this.repo.update(id, { isActive: false });
+    if (user.role === 'admin') {
+      const activeAdmins = await this.prisma.user.count({
+        where: { role: 'ADMIN', isActive: true },
+      });
+      if (activeAdmins <= 1) {
+        throw new ConflictException(
+          'No se puede desactivar al último administrador activo.',
+        );
+      }
+    }
+    const updated = await this.repo.update(id, {
+      isActive: false,
+      tokenVersion: user.tokenVersion + 1,
+    });
+    await this.auditAccessChange(actor, 'USER_DEACTIVATED', {
+      userId: id,
+      username: user.username,
+    });
+    return updated;
   }
 
   async unlockUser(id: string) {
@@ -249,6 +322,9 @@ export class UsersService {
     lastName?: string;
     access_token?: string;
     themePreference?: string;
+    accessRoleId?: string;
+    accessRoleName?: string;
+    permissions?: string[];
   }> {
     const idLower = params.identifier.toLowerCase();
     const sourceScope = securityScope(
@@ -291,6 +367,7 @@ export class UsersService {
       tokenVersion: user.tokenVersion,
       type: 'access',
     });
+    const authorization = await this.accessControl.authorizationForUser(user.id);
     return {
       success: true,
       username: user.username,
@@ -300,6 +377,7 @@ export class UsersService {
       lastName: user.lastName,
       access_token,
       themePreference: user.themePreference,
+      ...authorization,
     };
   }
 
@@ -313,6 +391,9 @@ export class UsersService {
     lastName: string;
     access_token: string;
     themePreference: string;
+    accessRoleId?: string;
+    accessRoleName?: string;
+    permissions: string[];
   } | null> {
     const user = await this.repo.findByPin(pin, {
       attemptScopes: [securityScope('pin-source-v2', source)],
@@ -328,6 +409,7 @@ export class UsersService {
       tokenVersion: user.tokenVersion,
       type: 'access',
     });
+    const authorization = await this.accessControl.authorizationForUser(user.id);
     return {
       username: user.username,
       role: user.role,
@@ -335,6 +417,7 @@ export class UsersService {
       lastName: user.lastName,
       access_token,
       themePreference: user.themePreference,
+      ...authorization,
     };
   }
 
@@ -570,5 +653,22 @@ export class UsersService {
       }
     });
     return { success: true };
+  }
+
+  private async auditAccessChange(
+    actor: AuthenticatedUser | undefined,
+    action: string,
+    details: unknown,
+  ) {
+    if (!actor) return;
+    await this.prisma.systemLog.create({
+      data: {
+        userId: actor.id,
+        user: actor.username,
+        role: actor.accessRoleName || actor.role,
+        action,
+        details: JSON.stringify(details),
+      },
+    });
   }
 }

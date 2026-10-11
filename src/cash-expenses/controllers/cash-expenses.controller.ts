@@ -13,7 +13,7 @@ import { CreateCashExpenseDto } from '../dto/create-cash-expense.dto';
 import { ListCashExpensesQueryDto } from '../dto/list-cash-expenses-query.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { UserRoleDto } from '../../common';
+import { Permissions, UserRoleDto } from '../../common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
@@ -22,6 +22,7 @@ import type { AuthenticatedUser } from '../../common/interfaces/authenticated-us
 @Controller('cash-expenses')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRoleDto.admin, UserRoleDto.cajero_principal, UserRoleDto.cajero)
+@Permissions('cash.expenses')
 export class CashExpensesController {
   constructor(private readonly expensesService: CashExpensesService) {}
 

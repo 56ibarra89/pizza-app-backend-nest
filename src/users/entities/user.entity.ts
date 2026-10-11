@@ -9,6 +9,8 @@ export interface UserEntity {
   pinHash?: string;
   passwordHash?: string;
   role: UserRoleDto;
+  accessRoleId?: string;
+  accessRoleName?: string;
   isActive: boolean;
   failedLoginAttempts: number;
   lockoutLevel: number;

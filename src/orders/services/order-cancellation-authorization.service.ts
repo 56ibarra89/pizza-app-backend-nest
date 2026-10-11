@@ -1,5 +1,4 @@
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
-import { UserRoleDto } from '../../common';
 import {
   USERS_REPOSITORY,
   type IUsersRepository,
@@ -21,17 +20,17 @@ export class OrderCancellationAuthorizationService {
   async authorize(adminPin?: string): Promise<AuthorizedCancellationAdmin> {
     if (!adminPin) {
       throw new ForbiddenException(
-        'Se requiere un PIN de administrador para cancelar la orden.',
+        'Se requiere un PIN autorizado para cancelar la orden.',
       );
     }
 
     const user = await this.usersRepository.findByPin(adminPin, {
-      allowedRoles: [UserRoleDto.admin],
+      requiredPermissions: ['orders.cancel.authorize'],
       attemptScope: 'order-cancellation',
     });
     if (!user) {
       throw new ForbiddenException(
-        'PIN de administrador inválido o usuario no tiene permisos.',
+        'PIN inválido o el usuario no tiene permiso para autorizar cancelaciones.',
       );
     }
 

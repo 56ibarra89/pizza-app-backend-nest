@@ -13,6 +13,7 @@ export interface IUsersRepository {
     pin: string,
     options?: {
       allowedRoles?: UserRoleDto[];
+      requiredPermissions?: string[];
       attemptScope?: string;
       attemptScopes?: string[];
       exposeLockout?: boolean;
@@ -31,6 +32,7 @@ export interface IUsersRepository {
     pinLookup: string;
     passwordHash?: string;
     role: UserRoleDto;
+    accessRoleId?: string;
     isActive: boolean;
     workDays?: string[];
   }): Promise<UserEntity>;
@@ -46,6 +48,7 @@ export interface IUsersRepository {
       pinLookup?: string;
       passwordHash?: string | null;
       role?: UserRoleDto;
+      accessRoleId?: string;
       isActive?: boolean;
       failedLoginAttempts?: number;
       lockoutLevel?: number;

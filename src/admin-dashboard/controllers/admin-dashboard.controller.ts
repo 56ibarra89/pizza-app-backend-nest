@@ -2,7 +2,7 @@ import { Controller, Get } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { AdminDashboardService } from '../services/admin-dashboard.service';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRoleDto } from '../../common';
+import { Permissions, UserRoleDto } from '../../common';
 import type {
   ActiveCashRegisterDto,
   WaiterPerformanceDto,
@@ -11,6 +11,7 @@ import type {
 
 @ApiTags('admin-dashboard')
 @Roles(UserRoleDto.admin, UserRoleDto.cajero_principal)
+@Permissions('cash.read')
 @Controller('admin/dashboard')
 export class AdminDashboardController {
   constructor(private readonly dashboardService: AdminDashboardService) {}

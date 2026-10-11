@@ -10,7 +10,7 @@ import { ApiTags } from '@nestjs/swagger';
 import { DevicesService } from './devices.service';
 import { PrinterConfigDto } from './dto/printer-config.dto';
 import { Roles } from '../common/decorators/roles.decorator';
-import { UserRoleDto } from '../common';
+import { Permissions, UserRoleDto } from '../common';
 
 @ApiTags('devices')
 @Controller('devices')
@@ -18,6 +18,7 @@ export class DevicesController {
   constructor(private readonly devicesService: DevicesService) {}
 
   @Get('printers')
+  @Permissions('devices.read')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -31,18 +32,21 @@ export class DevicesController {
   }
 
   @Post('printers')
+  @Permissions('devices.manage')
   @Roles(UserRoleDto.admin, UserRoleDto.cajero_principal)
   savePrinter(@Body() dto: PrinterConfigDto): Promise<PrinterConfigDto> {
     return this.devicesService.savePrinter(dto);
   }
 
   @Delete('printers/:id')
+  @Permissions('devices.manage')
   @Roles(UserRoleDto.admin, UserRoleDto.cajero_principal)
   deletePrinter(@Param('id') id: string): Promise<void> {
     return this.devicesService.deletePrinter(id);
   }
 
   @Get()
+  @Permissions('devices.read')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -54,6 +58,7 @@ export class DevicesController {
   }
 
   @Post('scan')
+  @Permissions('devices.manage')
   @Roles(UserRoleDto.admin, UserRoleDto.cajero_principal)
   scan(): { success: boolean; message: string } {
     return {

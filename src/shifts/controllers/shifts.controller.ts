@@ -6,7 +6,7 @@ import { CloseShiftDto } from '../dto/close-shift.dto';
 import { ListShiftsQueryDto } from '../dto/list-shifts-query.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { UserRoleDto } from '../../common';
+import { Permissions, UserRoleDto } from '../../common';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { CloseShiftPreviewQueryDto } from '../dto/close-shift-preview-query.dto';
 
@@ -16,21 +16,25 @@ export class ShiftsController {
   constructor(private readonly service: ShiftsService) {}
 
   @Get('active')
+  @Permissions('cash.status')
   getActive(@CurrentUser() user?: AuthenticatedUser) {
     return this.service.getActive(user);
   }
 
   @Get()
+  @Permissions('cash.read')
   list(@Query() query: ListShiftsQueryDto) {
     return this.service.list(query);
   }
 
   @Get(':id')
+  @Permissions('cash.read')
   getById(@Param('id') id: string) {
     return this.service.getById(id);
   }
 
   @Get(':id/close-preview')
+  @Permissions('cash.close')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero_principal,
@@ -46,6 +50,7 @@ export class ShiftsController {
   }
 
   @Post('open')
+  @Permissions('cash.open')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero_principal,
@@ -57,6 +62,7 @@ export class ShiftsController {
   }
 
   @Post(':id/close')
+  @Permissions('cash.close')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero_principal,

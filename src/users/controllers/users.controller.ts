@@ -22,6 +22,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRoleDto } from '../dto/user-role.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
+import { Permissions } from '../../common';
 
 const AUTHENTICATED_ROLES = [
   UserRoleDto.admin,
@@ -39,7 +40,29 @@ const AUTHENTICATED_ROLES = [
 export class UsersController {
   constructor(private readonly users: UsersService) {}
 
+  @Get('directory')
+  @Permissions('users.directory')
+  async getDirectory() {
+    const list = await this.users.getAll();
+    return list.map((user) => ({
+      id: user.id,
+      username: user.username,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      accessRoleId: user.accessRoleId,
+      accessRoleName: user.accessRoleName,
+      isActive: user.isActive,
+      workDays: user.workDays,
+      extraDays: user.extraDays?.map((day) => ({
+        date: day.date.toISOString(),
+        notes: day.notes,
+      })),
+    }));
+  }
+
   @Get()
+  @Permissions('users.read')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -55,6 +78,7 @@ export class UsersController {
   }
 
   @Get('motorizados/delivery-stats')
+  @Permissions('delivery.read')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -71,6 +95,7 @@ export class UsersController {
   }
 
   @Get(':id')
+  @Permissions('users.read')
   async getById(@Param('id', new ParseUUIDPipe()) id: string) {
     const user = await this.users.getById(id);
     return toUserResponseDto(user);
@@ -99,8 +124,12 @@ export class UsersController {
   }
 
   @Post()
-  async create(@Body() dto: CreateUserDto) {
-    const created = await this.users.create(dto);
+  @Permissions('users.manage')
+  async create(
+    @Body() dto: CreateUserDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    const created = await this.users.create(dto, actor);
     return toUserResponseDto(created);
   }
 
@@ -115,20 +144,27 @@ export class UsersController {
   }
 
   @Patch(':id')
+  @Permissions('users.manage')
   async update(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateUserDto,
+    @CurrentUser() actor: AuthenticatedUser,
   ) {
-    const updated = await this.users.update(id, dto);
+    const updated = await this.users.update(id, dto, actor);
     return toUserResponseDto(updated);
   }
 
   @Delete(':id')
-  delete(@Param('id', new ParseUUIDPipe()) id: string) {
-    return this.users.delete(id);
+  @Permissions('users.manage')
+  delete(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.users.delete(id, actor);
   }
 
   @Post(':id/unlock')
+  @Permissions('users.manage')
   async unlock(@Param('id', new ParseUUIDPipe()) id: string) {
     const updated = await this.users.unlockUser(id);
     return toUserResponseDto(updated);
@@ -136,6 +172,7 @@ export class UsersController {
 
   @Roles(UserRoleDto.admin)
   @Post(':id/extra-days')
+  @Permissions('users.manage')
   async addExtraDay(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() body: { date: string; notes?: string },
@@ -145,6 +182,7 @@ export class UsersController {
 
   @Roles(UserRoleDto.admin)
   @Delete(':id/extra-days/:date')
+  @Permissions('users.manage')
   async removeExtraDay(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Param('date') date: string,
@@ -153,12 +191,14 @@ export class UsersController {
   }
 
   @Get(':id/zones')
+  @Permissions('tables.read')
   @Roles(UserRoleDto.admin, UserRoleDto.mesero)
   async getWaiterZones(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.users.getWaiterZones(id);
   }
 
   @Put(':id/zones')
+  @Permissions('tables.assign_zones')
   @Roles(UserRoleDto.admin)
   async updateWaiterZones(
     @Param('id', new ParseUUIDPipe()) id: string,

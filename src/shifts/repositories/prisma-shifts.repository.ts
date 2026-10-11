@@ -27,7 +27,6 @@ import {
   USERS_REPOSITORY,
   type IUsersRepository,
 } from '../../users/interfaces/users.repository';
-import { UserRoleDto } from '../../users/dto/user-role.dto';
 import { toDbRole } from '../../users/mappers/user-role.mapper';
 
 type ShiftWithExpenses = Prisma.ShiftGetPayload<{
@@ -294,7 +293,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
 
           const authorizationError = `El turno presenta un descuadre (${reasons.join(
             ', ',
-          )}) y requiere autorización con PIN de Administrador y justificación.`;
+          )}) y requiere autorización con PIN y justificación.`;
           if (!reason || reason.length < 5 || !params.authorizationPin) {
             throw new BadRequestException(authorizationError);
           }
@@ -302,7 +301,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
           const user = await this.usersRepository.findByPin(
             params.authorizationPin,
             {
-              allowedRoles: [UserRoleDto.admin, UserRoleDto.cajero_principal],
+              requiredPermissions: ['cash.close.authorize'],
               attemptScope: 'shift-authorization',
             },
           );

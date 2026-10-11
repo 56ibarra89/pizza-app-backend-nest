@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, Matches, IsArray } from 'class-validator';
+import { IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, Matches, IsArray, IsUUID } from 'class-validator';
 import { UserRoleDto } from './user-role.dto';
 
 export class CreateUserDto {
@@ -41,6 +41,10 @@ export class CreateUserDto {
 
   @IsEnum(UserRoleDto)
   role!: UserRoleDto;
+
+  @IsOptional()
+  @IsUUID()
+  accessRoleId?: string;
 
   @IsOptional()
   @IsBoolean()

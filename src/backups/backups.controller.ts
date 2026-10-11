@@ -18,7 +18,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { Roles } from '../common/decorators/roles.decorator';
-import { UserRoleDto } from '../common';
+import { Permissions, UserRoleDto } from '../common';
 import { BackupsService } from './backups.service';
 import { BackupConfigDto, UpdateBackupConfigDto } from './dto/backup-config.dto';
 import { BackupItemDto } from './dto/backup-item.dto';
@@ -31,6 +31,7 @@ export class BackupsController {
   constructor(private readonly backupsService: BackupsService) {}
 
   @Get()
+  @Permissions('backups.read')
   @ApiOperation({ summary: 'Listar todos los respaldos locales' })
   @ApiResponse({ status: 200, type: [BackupItemDto] })
   async list(): Promise<BackupItemDto[]> {
@@ -38,6 +39,7 @@ export class BackupsController {
   }
 
   @Post('generate')
+  @Permissions('backups.manage')
   @ApiOperation({ summary: 'Generar un respaldo manual de la base de datos' })
   @ApiResponse({ status: 201, type: BackupItemDto })
   async generate(): Promise<BackupItemDto> {
@@ -45,6 +47,7 @@ export class BackupsController {
   }
 
   @Get('config')
+  @Permissions('backups.read')
   @ApiOperation({ summary: 'Obtener configuración de respaldos automáticos y retención' })
   @ApiResponse({ status: 200, type: BackupConfigDto })
   async getConfig(): Promise<BackupConfigDto> {
@@ -52,6 +55,7 @@ export class BackupsController {
   }
 
   @Put('config')
+  @Permissions('backups.manage')
   @ApiOperation({ summary: 'Actualizar configuración de respaldos' })
   @ApiResponse({ status: 200, type: BackupConfigDto })
   async updateConfig(
@@ -61,6 +65,7 @@ export class BackupsController {
   }
 
   @Get(':filename/download')
+  @Permissions('backups.read')
   @ApiOperation({ summary: 'Descargar archivo de respaldo' })
   async download(
     @Param('filename') filename: string,
@@ -80,6 +85,7 @@ export class BackupsController {
   }
 
   @Post('restore')
+  @Permissions('backups.manage')
   @ApiOperation({
     summary:
       'Restaurar la base de datos desde un archivo existente o subido. Crea automáticamente un Snapshot de Seguridad preventivo.',
@@ -133,6 +139,7 @@ export class BackupsController {
   }
 
   @Delete(':filename')
+  @Permissions('backups.manage')
   @ApiOperation({ summary: 'Eliminar un archivo de respaldo del almacenamiento local' })
   async delete(@Param('filename') filename: string): Promise<{ success: boolean; message: string }> {
     await this.backupsService.deleteBackup(filename);

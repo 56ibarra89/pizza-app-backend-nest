@@ -8,6 +8,8 @@ export interface UserResponseDto {
   lastName: string;
   hasPin?: boolean;
   role: UserRoleDto;
+  accessRoleId?: string;
+  accessRoleName?: string;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

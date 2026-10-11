@@ -9,13 +9,14 @@ import {
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRoleDto } from '../../common';
+import { Permissions, UserRoleDto } from '../../common';
 import { CreateCertificadoDto } from '../dto/certificados/create-certificado.dto';
 import { RedeemCertificadoDto } from '../dto/certificados/redeem-certificado.dto';
 import { CertificatePromotionsService } from '../services/certificate-promotions.service';
 
 @ApiTags('promotions')
 @Controller('promotions/certificates')
+@Permissions('promotions.read')
 export class CertificatesController {
   constructor(private readonly certificates: CertificatePromotionsService) {}
 
@@ -30,12 +31,14 @@ export class CertificatesController {
   }
 
   @Post()
+  @Permissions('promotions.manage')
   @Roles(UserRoleDto.admin)
   create(@Body() dto: CreateCertificadoDto) {
     return this.certificates.create(dto);
   }
 
   @Post(':id/deliver')
+  @Permissions('billing.create')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -47,18 +50,21 @@ export class CertificatesController {
   }
 
   @Post(':id/cancel')
+  @Permissions('promotions.manage')
   @Roles(UserRoleDto.admin)
   cancel(@Param('id', ParseIntPipe) id: number) {
     return this.certificates.cancel(id);
   }
 
   @Delete(':id')
+  @Permissions('promotions.manage')
   @Roles(UserRoleDto.admin)
   delete(@Param('id', ParseIntPipe) id: number) {
     return this.certificates.delete(id);
   }
 
   @Post('redeem')
+  @Permissions('billing.create')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,

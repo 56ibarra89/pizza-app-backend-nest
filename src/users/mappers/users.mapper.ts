@@ -10,6 +10,8 @@ export function toUserResponseDto(entity: UserEntity): UserResponseDto {
     lastName: entity.lastName,
     hasPin: Boolean(entity.pinHash),
     role: entity.role,
+    accessRoleId: entity.accessRoleId,
+    accessRoleName: entity.accessRoleName,
     isActive: entity.isActive,
     createdAt: entity.createdAt.toISOString(),
     updatedAt: entity.updatedAt.toISOString(),

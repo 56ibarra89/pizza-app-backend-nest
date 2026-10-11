@@ -4,7 +4,7 @@ import { SystemLogsService } from '../services/system-logs.service';
 import { CreateSystemLogDto } from '../dto/create-system-log.dto';
 import { GetSystemLogsQueryDto } from '../dto/get-system-logs-query.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRoleDto } from '../../common';
+import { Permissions, UserRoleDto } from '../../common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 
@@ -14,6 +14,7 @@ export class SystemLogsController {
   constructor(private readonly service: SystemLogsService) {}
 
   @Get()
+  @Permissions('audit.read')
   @Roles(UserRoleDto.admin)
   getMany(@Query() query: GetSystemLogsQueryDto) {
     return this.service.getMany(query);

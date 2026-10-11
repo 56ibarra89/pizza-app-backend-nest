@@ -10,13 +10,14 @@ import {
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRoleDto } from '../../common';
+import { Permissions, UserRoleDto } from '../../common';
 import { CreateDiscountDto } from '../dto/discounts/create-discount.dto';
 import { UpdateDiscountDto } from '../dto/discounts/update-discount.dto';
 import { CommercialPromotionsService } from '../services/commercial-promotions.service';
 
 @ApiTags('promotions')
 @Controller('promotions/discounts')
+@Permissions('promotions.read')
 export class DiscountsController {
   constructor(
     private readonly commercialPromotions: CommercialPromotionsService,
@@ -28,12 +29,14 @@ export class DiscountsController {
   }
 
   @Post()
+  @Permissions('promotions.manage')
   @Roles(UserRoleDto.admin)
   create(@Body() dto: CreateDiscountDto) {
     return this.commercialPromotions.createDiscount(dto);
   }
 
   @Patch(':id')
+  @Permissions('promotions.manage')
   @Roles(UserRoleDto.admin)
   update(
     @Param('id', ParseIntPipe) id: number,
@@ -43,6 +46,7 @@ export class DiscountsController {
   }
 
   @Delete(':id')
+  @Permissions('promotions.manage')
   @Roles(UserRoleDto.admin)
   delete(@Param('id', ParseIntPipe) id: number) {
     return this.commercialPromotions.deleteDiscount(id);

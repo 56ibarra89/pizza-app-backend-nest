@@ -17,7 +17,7 @@ import { FinalizeOrderDto } from '../dto/finalize-order.dto';
 import { toOrderResponseDto } from '../mappers/orders.mapper';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { UserRoleDto } from '../../common';
+import { Permissions, UserRoleDto } from '../../common';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { KitchensService } from '../../kitchens/kitchens.service';
 import type { OrderEntity } from '../entities/order.entity';
@@ -25,6 +25,7 @@ import { requiresKitchenPreparation } from '../validators/order-item-kind';
 
 @ApiTags('orders')
 @Controller('orders')
+@Permissions('orders.read')
 export class OrdersController {
   constructor(
     private readonly orders: OrdersService,
@@ -94,6 +95,7 @@ export class OrdersController {
   }
 
   @Get('driver/:driverId/today')
+  @Permissions('delivery.read')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -124,6 +126,7 @@ export class OrdersController {
   }
 
   @Get('kitchen/hidden-tickets')
+  @Permissions('kitchen.read')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -136,6 +139,7 @@ export class OrdersController {
   }
 
   @Post('kitchen/hidden-tickets')
+  @Permissions('kitchen.update')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -152,12 +156,14 @@ export class OrdersController {
   }
 
   @Get('sla/metrics')
+  @Permissions('reports.read')
   @Roles(UserRoleDto.admin)
   getSlaMetrics(@Query('days') days?: string) {
     return this.orders.getSlaMetrics(Number(days) || 30);
   }
 
   @Get('cancellations/metrics')
+  @Permissions('reports.read')
   @Roles(UserRoleDto.admin)
   getCancellationMetrics(
     @Query('startDate') startDate?: string,
@@ -171,6 +177,7 @@ export class OrdersController {
   }
 
   @Get('payments/metrics')
+  @Permissions('reports.read')
   @Roles(UserRoleDto.admin)
   getPaymentMetrics(
     @Query('startDate') startDate?: string,
@@ -195,6 +202,7 @@ export class OrdersController {
   }
 
   @Post()
+  @Permissions('orders.manage')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -211,6 +219,7 @@ export class OrdersController {
   }
 
   @Patch(':id/status')
+  @Permissions('orders.status')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -225,11 +234,18 @@ export class OrdersController {
     @Body() dto: UpdateOrderStatusDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    if (
+      dto.status === 'cancelled' &&
+      !user.permissions?.includes('orders.cancel')
+    ) {
+      throw new ForbiddenException('No tienes permiso para cancelar órdenes.');
+    }
     const updated = await this.orders.updateStatus(id, dto, user);
     return this.getVisibleOrderResponse(updated, user);
   }
 
   @Patch(':id/start-delivery')
+  @Permissions('delivery.read')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero_principal,
@@ -245,6 +261,7 @@ export class OrdersController {
   }
 
   @Patch(':id/items')
+  @Permissions('orders.manage')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -258,6 +275,7 @@ export class OrdersController {
   }
 
   @Patch(':id/tables')
+  @Permissions('tables.operate')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -274,6 +292,7 @@ export class OrdersController {
   }
 
   @Patch(':id/finalize')
+  @Permissions('orders.finalize')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,

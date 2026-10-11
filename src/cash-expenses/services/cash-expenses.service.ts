@@ -19,7 +19,6 @@ import {
   USERS_REPOSITORY,
   type IUsersRepository,
 } from '../../users/interfaces/users.repository';
-import { UserRoleDto } from '../../users/dto/user-role.dto';
 import { CashExpenseCategoryDto } from '../dto/cash-expense-category.dto';
 
 const PETTY_CASH_POLICY_KEY = 'petty_cash_policy';
@@ -184,19 +183,19 @@ export class CashExpensesService {
     if (requiresAuthorization) {
       if (!dto.authorizationPin) {
         throw new BadRequestException(
-          'Este gasto requiere autorización con PIN de administrador.',
+          'Este gasto requiere autorización con un PIN autorizado.',
         );
       }
       const authorizer = await this.usersRepository.findByPin(
         dto.authorizationPin,
         {
-          allowedRoles: [UserRoleDto.admin],
+          requiredPermissions: ['cash.expenses.authorize'],
           attemptScope: 'cash-expense-authorization',
         },
       );
       if (!authorizer) {
         throw new BadRequestException(
-          'El PIN de autorización no pertenece a un administrador activo.',
+          'El PIN no pertenece a un usuario activo con permiso para autorizar gastos.',
         );
       }
     }

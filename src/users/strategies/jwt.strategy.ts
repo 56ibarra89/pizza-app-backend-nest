@@ -49,6 +49,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
+      include: {
+        accessRole: {
+          include: {
+            permissions: { include: { permission: true } },
+          },
+        },
+      },
     });
     if (!user || !user.isActive) {
       throw new UnauthorizedException('Usuario inactivo o no existe');
@@ -63,6 +70,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       id: user.id,
       username: user.username,
       role: fromDbRole(user.role),
+      accessRoleId: user.accessRole?.id,
+      accessRoleName: user.accessRole?.name,
+      permissions:
+        user.accessRole?.permissions.map((entry) => entry.permission.code) ?? [],
     };
   }
 }

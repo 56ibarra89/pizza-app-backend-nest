@@ -4,18 +4,20 @@ import { UpdateFloorDto } from './dto/update-floor.dto';
 import { UpdateMesaStatusDto } from './dto/update-mesa-status.dto';
 import { ReserveMesaDto } from './dto/reserve-mesa.dto';
 import { Roles } from '../common/decorators/roles.decorator';
-import { UserRoleDto } from '../common';
+import { Permissions, UserRoleDto } from '../common';
 
 @Controller('mesas')
 export class MesasController {
   constructor(private readonly mesasService: MesasService) {}
 
   @Get('config')
+  @Permissions('tables.read')
   getFloorsConfig() {
     return this.mesasService.getFloorsConfig();
   }
 
   @Post('config')
+  @Permissions('tables.configure')
   @Roles(UserRoleDto.admin)
   updateFloorsConfig(
     @Body(new ParseArrayPipe({ items: UpdateFloorDto }))
@@ -25,11 +27,13 @@ export class MesasController {
   }
 
   @Get()
+  @Permissions('tables.read')
   getMesas() {
     return this.mesasService.getMesas();
   }
 
   @Patch(':id/status')
+  @Permissions('tables.operate')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -45,6 +49,7 @@ export class MesasController {
   }
 
   @Patch(':id/reserve')
+  @Permissions('tables.operate')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,
@@ -60,6 +65,7 @@ export class MesasController {
   }
 
   @Patch(':id/release')
+  @Permissions('tables.operate')
   @Roles(
     UserRoleDto.admin,
     UserRoleDto.cajero,

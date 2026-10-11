@@ -70,6 +70,7 @@ describe('UsersService security boundaries', () => {
       prisma as any,
       pinHasher as any,
       authAttempts as any,
+      { authorizationForUser: jest.fn() } as any,
     );
     return {
       service,

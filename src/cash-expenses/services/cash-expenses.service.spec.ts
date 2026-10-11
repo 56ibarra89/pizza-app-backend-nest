@@ -164,7 +164,7 @@ describe('CashExpensesService', () => {
     );
 
     expect(usersRepository.findByPin).toHaveBeenCalledWith('123456', {
-      allowedRoles: [UserRoleDto.admin],
+      requiredPermissions: ['cash.expenses.authorize'],
       attemptScope: 'cash-expense-authorization',
     });
   });

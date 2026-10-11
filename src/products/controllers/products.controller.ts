@@ -16,7 +16,7 @@ import { UpdateCategoryDto } from '../dto/update-category.dto';
 import { CreateProductDto } from '../dto/create-product.dto';
 import { UpdateProductDto } from '../dto/update-product.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRoleDto } from '../../common';
+import { Permissions, UserRoleDto } from '../../common';
 import {
   CreateCategoryExtraDto,
   UpdateCategoryExtraDto,
@@ -24,6 +24,7 @@ import {
 
 @ApiTags('products')
 @Controller('products')
+@Permissions('products.read')
 export class ProductsController {
   constructor(private readonly products: ProductsService) {}
 
@@ -33,12 +34,14 @@ export class ProductsController {
   }
 
   @Post('categories')
+  @Permissions('products.manage')
   @Roles(UserRoleDto.admin)
   createCategory(@Body() dto: CreateCategoryDto) {
     return this.products.createCategory(dto);
   }
 
   @Patch('categories/:id')
+  @Permissions('products.manage')
   @Roles(UserRoleDto.admin)
   updateCategory(
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -48,12 +51,14 @@ export class ProductsController {
   }
 
   @Delete('categories/:id')
+  @Permissions('products.manage')
   @Roles(UserRoleDto.admin)
   deleteCategory(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.products.deleteCategory(id);
   }
 
   @Post('categories/:id/extras')
+  @Permissions('products.manage')
   @Roles(UserRoleDto.admin)
   createCategoryExtra(
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -63,6 +68,7 @@ export class ProductsController {
   }
 
   @Patch('categories/:id/extras/:extraId')
+  @Permissions('products.manage')
   @Roles(UserRoleDto.admin)
   updateCategoryExtra(
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -73,6 +79,7 @@ export class ProductsController {
   }
 
   @Delete('categories/:id/extras/:extraId')
+  @Permissions('products.manage')
   @Roles(UserRoleDto.admin)
   deleteCategoryExtra(
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -92,12 +99,14 @@ export class ProductsController {
   }
 
   @Post()
+  @Permissions('products.manage')
   @Roles(UserRoleDto.admin)
   createProduct(@Body() dto: CreateProductDto) {
     return this.products.createProduct(dto);
   }
 
   @Patch(':id')
+  @Permissions('products.manage')
   @Roles(UserRoleDto.admin)
   updateProduct(
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -107,6 +116,7 @@ export class ProductsController {
   }
 
   @Delete(':id')
+  @Permissions('products.manage')
   @Roles(UserRoleDto.admin)
   deleteProduct(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.products.deleteProduct(id);

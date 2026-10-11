@@ -27,11 +27,13 @@ import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
 import { DevicesModule } from './devices/devices.module';
 import { BackupsModule } from './backups/backups.module';
 import { SecurityModule } from './common/security/security.module';
+import { AccessControlModule } from './access-control/access-control.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     SecurityModule,
+    AccessControlModule,
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([
       {

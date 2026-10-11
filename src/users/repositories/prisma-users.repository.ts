@@ -18,7 +18,7 @@ export class PrismaUsersRepository implements IUsersRepository {
   async getAll(): Promise<UserEntity[]> {
     const users = await this.prisma.user.findMany({
       orderBy: { username: 'asc' },
-      include: { extraDays: true },
+      include: { extraDays: true, accessRole: true },
     });
     return users.map((u) => this.mapUser(u));
   }
@@ -26,7 +26,7 @@ export class PrismaUsersRepository implements IUsersRepository {
   async findById(id: string): Promise<UserEntity | null> {
     const found = await this.prisma.user.findUnique({
       where: { id },
-      include: { extraDays: true },
+      include: { extraDays: true, accessRole: true },
     });
     return found ? this.mapUser(found) : null;
   }
@@ -34,7 +34,7 @@ export class PrismaUsersRepository implements IUsersRepository {
   async findByUsername(username: string): Promise<UserEntity | null> {
     const found = await this.prisma.user.findUnique({
       where: { username },
-      include: { extraDays: true },
+      include: { extraDays: true, accessRole: true },
     });
     return found ? this.mapUser(found) : null;
   }
@@ -42,7 +42,7 @@ export class PrismaUsersRepository implements IUsersRepository {
   async findByEmail(email: string): Promise<UserEntity | null> {
     const found = await this.prisma.user.findUnique({
       where: { email },
-      include: { extraDays: true },
+      include: { extraDays: true, accessRole: true },
     });
     return found ? this.mapUser(found) : null;
   }
@@ -52,7 +52,7 @@ export class PrismaUsersRepository implements IUsersRepository {
       where: {
         OR: [{ username: identifier }, { email: identifier }],
       },
-      include: { extraDays: true },
+      include: { extraDays: true, accessRole: true },
     });
     return found ? this.mapUser(found) : null;
   }
@@ -61,6 +61,7 @@ export class PrismaUsersRepository implements IUsersRepository {
     pin: string,
     options: {
       allowedRoles?: UserRoleDto[];
+      requiredPermissions?: string[];
       attemptScope?: string;
       attemptScopes?: string[];
       exposeLockout?: boolean;
@@ -73,7 +74,12 @@ export class PrismaUsersRepository implements IUsersRepository {
 
     const found = await this.prisma.user.findUnique({
       where: { pinLookup: this.pinHasher.lookup(pin) },
-      include: { extraDays: true },
+      include: {
+        extraDays: true,
+        accessRole: {
+          include: { permissions: { include: { permission: true } } },
+        },
+      },
     });
     const hashMatches = found?.pinHash
       ? await this.pinHasher.verify(pin, found.pinHash)
@@ -86,7 +92,14 @@ export class PrismaUsersRepository implements IUsersRepository {
     const roleAllowed =
       !options.allowedRoles?.length ||
       (mapped ? options.allowedRoles.includes(mapped.role) : false);
-    if (!mapped || !mapped.isActive || !roleAllowed) {
+    const permissionCodes = new Set(
+      found?.accessRole?.permissions.map((entry) => entry.permission.code) ??
+        [],
+    );
+    const permissionsAllowed =
+      !options.requiredPermissions?.length ||
+      options.requiredPermissions.every((code) => permissionCodes.has(code));
+    if (!mapped || !mapped.isActive || !roleAllowed || !permissionsAllowed) {
       const lockout = await this.pinAttempts.registerPinFailure(scopes);
       if (options.exposeLockout) {
         throw new HttpException(
@@ -150,7 +163,7 @@ export class PrismaUsersRepository implements IUsersRepository {
     const updated = await this.prisma.user.update({
       where: { id },
       data: { tokenVersion: { increment: 1 } },
-      include: { extraDays: true },
+      include: { extraDays: true, accessRole: true },
     });
     return this.mapUser(updated);
   }
@@ -164,6 +177,7 @@ export class PrismaUsersRepository implements IUsersRepository {
     pinLookup: string;
     passwordHash?: string;
     role: UserRoleDto;
+    accessRoleId?: string;
     isActive: boolean;
     workDays?: string[];
   }): Promise<UserEntity> {
@@ -177,10 +191,11 @@ export class PrismaUsersRepository implements IUsersRepository {
         pinLookup: data.pinLookup,
         passwordHash: data.passwordHash,
         role: toDbRole(data.role),
+        accessRoleId: data.accessRoleId,
         isActive: data.isActive,
         workDays: data.workDays as any,
       },
-      include: { extraDays: true },
+      include: { extraDays: true, accessRole: true },
     });
     return this.mapUser(created);
   }
@@ -196,6 +211,7 @@ export class PrismaUsersRepository implements IUsersRepository {
       pinLookup?: string;
       passwordHash?: string | null;
       role?: UserRoleDto;
+      accessRoleId?: string;
       isActive?: boolean;
       failedLoginAttempts?: number;
       lockoutLevel?: number;
@@ -217,6 +233,7 @@ export class PrismaUsersRepository implements IUsersRepository {
         pinLookup: data.pinLookup,
         passwordHash: data.passwordHash,
         role: data.role ? toDbRole(data.role) : undefined,
+        accessRoleId: data.accessRoleId,
         isActive: data.isActive,
         failedLoginAttempts: data.failedLoginAttempts,
         lockoutLevel: data.lockoutLevel,
@@ -226,7 +243,7 @@ export class PrismaUsersRepository implements IUsersRepository {
         tokenVersion: data.tokenVersion,
         workDays: data.workDays as any,
       },
-      include: { extraDays: true },
+      include: { extraDays: true, accessRole: true },
     });
 
     return this.mapUser(updated);
@@ -246,6 +263,8 @@ export class PrismaUsersRepository implements IUsersRepository {
     pinLookup: string | null;
     passwordHash: string | null;
     role: import('@prisma/client').UserRole;
+    accessRoleId: string | null;
+    accessRole?: { id: string; name: string } | null;
     isActive: boolean;
     failedLoginAttempts: number;
     lockoutLevel: number;
@@ -267,6 +286,8 @@ export class PrismaUsersRepository implements IUsersRepository {
       pinHash: u.pinHash ?? undefined,
       passwordHash: u.passwordHash ?? undefined,
       role: fromDbRole(u.role),
+      accessRoleId: u.accessRoleId ?? undefined,
+      accessRoleName: u.accessRole?.name,
       isActive: u.isActive,
       failedLoginAttempts: u.failedLoginAttempts,
       lockoutLevel: u.lockoutLevel,

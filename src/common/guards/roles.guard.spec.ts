@@ -7,19 +7,21 @@ describe('RolesGuard', () => {
   const getAllAndOverride = jest.fn();
   const guard = new RolesGuard({ getAllAndOverride } as unknown as Reflector);
 
-  const contextFor = (role?: UserRoleDto) =>
+  const contextFor = (role?: UserRoleDto, permissions: string[] = []) =>
     ({
       getHandler: jest.fn(),
       getClass: jest.fn(),
       switchToHttp: () => ({
-        getRequest: () => ({ user: role ? { role } : undefined }),
+        getRequest: () => ({ user: role ? { role, permissions } : undefined }),
       }),
     }) as unknown as ExecutionContext;
 
   beforeEach(() => jest.clearAllMocks());
 
   it('deniega al motorizado los endpoints sin permiso explícito', () => {
-    getAllAndOverride.mockReturnValue([UserRoleDto.admin]);
+    getAllAndOverride.mockImplementation((key: string) =>
+      key === 'roles' ? [UserRoleDto.admin] : undefined,
+    );
 
     expect(() => guard.canActivate(contextFor(UserRoleDto.motorizado))).toThrow(
       ForbiddenException,
@@ -27,7 +29,9 @@ describe('RolesGuard', () => {
   });
 
   it('permite al motorizado un endpoint que declara su rol', () => {
-    getAllAndOverride.mockReturnValue([UserRoleDto.motorizado]);
+    getAllAndOverride.mockImplementation((key: string) =>
+      key === 'roles' ? [UserRoleDto.motorizado] : undefined,
+    );
 
     expect(guard.canActivate(contextFor(UserRoleDto.motorizado))).toBe(true);
   });
@@ -36,5 +40,25 @@ describe('RolesGuard', () => {
     getAllAndOverride.mockReturnValue(undefined);
 
     expect(guard.canActivate(contextFor())).toBe(true);
+  });
+
+  it('autoriza usando permisos aunque el rol no figure en la lista heredada', () => {
+    getAllAndOverride.mockImplementation((key: string) =>
+      key === 'permissions' ? ['reports.read'] : [UserRoleDto.admin],
+    );
+
+    expect(
+      guard.canActivate(contextFor(UserRoleDto.cajero, ['reports.read'])),
+    ).toBe(true);
+  });
+
+  it('deniega cuando falta un permiso requerido', () => {
+    getAllAndOverride.mockImplementation((key: string) =>
+      key === 'permissions' ? ['roles.manage'] : undefined,
+    );
+
+    expect(() =>
+      guard.canActivate(contextFor(UserRoleDto.cajero, ['roles.read'])),
+    ).toThrow(ForbiddenException);
   });
 });

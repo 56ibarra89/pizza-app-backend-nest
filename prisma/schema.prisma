@@ -17,6 +17,8 @@ model User {
   pinLookup                String?                 @unique
   passwordHash             String?
   role                     UserRole
+  accessRoleId             String?
+  accessRole               AccessRole?             @relation(fields: [accessRoleId], references: [id])
   isActive                 Boolean                 @default(true)
   failedLoginAttempts      Int                     @default(0)
   lockoutLevel             Int                     @default(0)
@@ -54,7 +56,46 @@ model User {
   kitchenAssignments       CookKitchenAssignment[] @relation("UserKitchenAssignments")
 
   @@index([role])
+  @@index([accessRoleId])
   @@index([isActive])
+}
+
+model AccessRole {
+  id          String           @id @default(uuid())
+  code        String           @unique
+  name        String
+  description String?
+  baseRole    UserRole
+  isSystem    Boolean          @default(false)
+  isActive    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  users       User[]
+  permissions RolePermission[]
+
+  @@index([baseRole])
+  @@index([isActive])
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  code        String           @unique
+  module      String
+  action      String
+  description String
+  roles       RolePermission[]
+
+  @@index([module])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         AccessRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
 }
 
 model AuthAttempt {

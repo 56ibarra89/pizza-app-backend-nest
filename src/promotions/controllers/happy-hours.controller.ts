@@ -10,13 +10,14 @@ import {
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRoleDto } from '../../common';
+import { Permissions, UserRoleDto } from '../../common';
 import { CreateHappyHourDto } from '../dto/happy-hours/create-happy-hour.dto';
 import { UpdateHappyHourDto } from '../dto/happy-hours/update-happy-hour.dto';
 import { CommercialPromotionsService } from '../services/commercial-promotions.service';
 
 @ApiTags('promotions')
 @Controller('promotions/happy-hours')
+@Permissions('promotions.read')
 export class HappyHoursController {
   constructor(
     private readonly commercialPromotions: CommercialPromotionsService,
@@ -28,12 +29,14 @@ export class HappyHoursController {
   }
 
   @Post()
+  @Permissions('promotions.manage')
   @Roles(UserRoleDto.admin)
   create(@Body() dto: CreateHappyHourDto) {
     return this.commercialPromotions.createHappyHour(dto);
   }
 
   @Patch(':id')
+  @Permissions('promotions.manage')
   @Roles(UserRoleDto.admin)
   update(
     @Param('id', ParseIntPipe) id: number,
@@ -43,6 +46,7 @@ export class HappyHoursController {
   }
 
   @Delete(':id')
+  @Permissions('promotions.manage')
   @Roles(UserRoleDto.admin)
   delete(@Param('id', ParseIntPipe) id: number) {
     return this.commercialPromotions.deleteHappyHour(id);
