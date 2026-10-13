@@ -1,5 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, type KitchenStatus, type OrderStatus } from '@prisma/client';
+import {
+  PaymentMethod,
+  Prisma,
+  type KitchenStatus,
+  type OrderStatus,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { IOrdersRepository } from '../interfaces/orders.repository';
 import type { OrderEntity } from '../entities/order.entity';
@@ -18,6 +23,7 @@ import {
   toDbOrderType,
   toDbPaymentMethod,
 } from '../mappers/status.mapper';
+import type { OrderHistoryPage } from '../interfaces/orders.repository';
 
 @Injectable()
 export class PrismaOrdersRepository implements IOrdersRepository {
@@ -49,42 +55,174 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     return orders.map((o) => this.mapOrder(o));
   }
 
-  async listAll(): Promise<OrderEntity[]> {
-    const orders = await this.prisma.order.findMany({
-      include: {
-        customer: { select: { id: true, name: true, phone: true } },
-        payments: true,
-        items: {
-          include: { extras: true, product: { select: { categoryId: true } } },
-          orderBy: { id: 'asc' },
-        },
-        linkedTables: { select: { tableId: true } },
-      },
-      orderBy: { timestamp: 'desc' },
-    });
-    return orders.map((o) => this.mapOrder(o));
-  }
+  async listHistory(params: {
+    startDate: Date;
+    endDate: Date;
+    page: number;
+    pageSize: number;
+    search?: string;
+    paymentMethodId?: string;
+    view?: 'all' | 'invoices';
+    statuses?: import('../dto/order-status.dto').OrderStatusDto[];
+  }): Promise<OrderHistoryPage> {
+    const baseConditions: Prisma.OrderWhereInput[] = [
+      { timestamp: { gte: params.startDate, lte: params.endDate } },
+    ];
+    if (params.statuses?.length) {
+      baseConditions.push({
+        status: { in: params.statuses.map(toDbOrderStatus) },
+      });
+    }
+    if (params.view === 'invoices') {
+      baseConditions.push({
+        OR: [
+          { status: 'PAID' },
+          { status: 'CANCELLED' },
+          { status: 'DELIVERED', linkedTables: { none: {} } },
+        ],
+      });
+    }
+    if (params.search) {
+      const tableSearch = params.search.replace(/^mesa\s+/i, '');
+      baseConditions.push({
+        OR: [
+          { id: { contains: params.search, mode: 'insensitive' } },
+          {
+            invoiceNumber: {
+              contains: params.search,
+              mode: 'insensitive',
+            },
+          },
+          {
+            customerSnapshotName: {
+              contains: params.search,
+              mode: 'insensitive',
+            },
+          },
+          {
+            customer: {
+              name: { contains: params.search, mode: 'insensitive' },
+            },
+          },
+          {
+            cashierSnapshotName: {
+              contains: params.search,
+              mode: 'insensitive',
+            },
+          },
+          {
+            linkedTables: {
+              some: {
+                tableId: { contains: tableSearch, mode: 'insensitive' },
+              },
+            },
+          },
+        ],
+      });
+    }
+    const baseWhere: Prisma.OrderWhereInput = {
+      AND: baseConditions,
+    };
 
-  async listByDateRange(
-    startDate: Date,
-    endDate: Date,
-  ): Promise<OrderEntity[]> {
-    const list = await this.prisma.order.findMany({
-      where: {
-        createdAt: { gte: startDate, lte: endDate },
-      },
-      include: {
-        customer: { select: { id: true, name: true, phone: true } },
-        payments: true,
-        items: {
-          include: { extras: true, product: { select: { categoryId: true } } },
-          orderBy: { id: 'asc' },
-        },
-        linkedTables: { select: { tableId: true } },
-      },
-      orderBy: { timestamp: 'desc' },
-    });
-    return list.map((o) => this.mapOrder(o));
+    let paymentWhere: Prisma.OrderWhereInput = {};
+    if (params.paymentMethodId === 'MIXTO') {
+      const mixedOrders = await this.prisma.$queryRaw<
+        Array<{ orderId: string }>
+      >(
+        Prisma.sql`
+          SELECT p."orderId"
+          FROM "Payment" p
+          INNER JOIN "Order" o ON o."id" = p."orderId"
+          WHERE o."timestamp" >= ${params.startDate}
+            AND o."timestamp" <= ${params.endDate}
+          GROUP BY p."orderId"
+          HAVING COUNT(*) > 1
+        `,
+      );
+      paymentWhere = { id: { in: mixedOrders.map((row) => row.orderId) } };
+    } else if (params.paymentMethodId?.startsWith('legacy:')) {
+      const method = params.paymentMethodId.slice('legacy:'.length);
+      if (Object.values(PaymentMethod).includes(method as PaymentMethod)) {
+        paymentWhere = {
+          OR: [
+            { payments: { some: { method: method as PaymentMethod } } },
+            ...(method === PaymentMethod.EFECTIVO
+              ? [{ payments: { none: {} } }]
+              : []),
+          ],
+        };
+      } else {
+        paymentWhere = { id: { in: [] } };
+      }
+    } else if (params.paymentMethodId) {
+      paymentWhere = {
+        payments: { some: { methodConfigId: params.paymentMethodId } },
+      };
+    }
+
+    const where: Prisma.OrderWhereInput = {
+      AND: [baseWhere, paymentWhere],
+    };
+    const [rows, total, paymentMethods, ordersWithoutPayments] =
+      await Promise.all([
+        this.prisma.order.findMany({
+          where,
+          skip: (params.page - 1) * params.pageSize,
+          take: params.pageSize,
+          include: {
+            customer: { select: { id: true, name: true, phone: true } },
+            payments: true,
+            items: {
+              include: {
+                extras: true,
+                product: { select: { categoryId: true } },
+              },
+              orderBy: { id: 'asc' },
+            },
+            linkedTables: { select: { tableId: true } },
+          },
+          orderBy: [{ timestamp: 'desc' }, { id: 'desc' }],
+        }),
+        this.prisma.order.count({ where }),
+        this.prisma.payment.findMany({
+          where: { order: baseWhere },
+          select: {
+            method: true,
+            methodConfigId: true,
+            methodSnapshotName: true,
+          },
+          distinct: ['methodConfigId', 'method'],
+        }),
+        this.prisma.order.count({
+          where: { AND: [baseWhere, { payments: { none: {} } }] },
+        }),
+      ]);
+
+    const paymentMethodOptions = new Map<string, string>();
+    for (const payment of paymentMethods) {
+      const id = payment.methodConfigId ?? `legacy:${payment.method}`;
+      const fallbackName =
+        payment.method === PaymentMethod.EFECTIVO
+          ? 'Efectivo'
+          : payment.method === PaymentMethod.TARJETA
+            ? 'POS Tarjeta'
+            : 'App / Transferencia';
+      paymentMethodOptions.set(
+        id,
+        payment.methodSnapshotName?.trim() || fallbackName,
+      );
+    }
+    if (ordersWithoutPayments > 0) {
+      paymentMethodOptions.set('legacy:EFECTIVO', 'Efectivo');
+    }
+
+    return {
+      items: rows.map((row) => this.mapOrder(row)),
+      total,
+      paymentMethodOptions: [...paymentMethodOptions.entries()]
+        .map(([id, name]) => ({ id, name }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    };
   }
 
   async listByDriverAndDate(

@@ -26,6 +26,10 @@ import {
   type ICloudBackupProvider,
 } from './interfaces/cloud-backup-provider.interface';
 import { SystemLogsService } from '../system-logs/services/system-logs.service';
+import {
+  MAX_BACKUP_UPLOAD_BYTES,
+  MAX_BACKUP_UPLOAD_MB,
+} from './backup-upload.config';
 
 const execFileAsync = promisify(execFile);
 const CONFIG_KEY = 'backup_config';
@@ -394,6 +398,18 @@ export class BackupsService implements OnModuleInit {
       throw new NotFoundException(
         'El archivo de respaldo a restaurar no existe',
       );
+    }
+
+    if (options.tempFilePath) {
+      const uploadedStat = await fs.promises.stat(sourcePath);
+      if (uploadedStat.size === 0) {
+        throw new BadRequestException('El archivo de respaldo está vacío');
+      }
+      if (uploadedStat.size > MAX_BACKUP_UPLOAD_BYTES) {
+        throw new BadRequestException(
+          `El respaldo supera el límite de ${MAX_BACKUP_UPLOAD_MB} MB`,
+        );
+      }
     }
 
     // 1. Crear Snapshot de Seguridad preventivo obligatorio

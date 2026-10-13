@@ -80,12 +80,30 @@ export class OrdersService {
     return this.repo.listTodayOrActive(now);
   }
 
-  listAll() {
-    return this.repo.listAll();
-  }
-
-  listByDateRange(startDate: Date, endDate: Date) {
-    return this.repo.listByDateRange(startDate, endDate);
+  listHistory(params: {
+    startDate: Date;
+    endDate: Date;
+    page: number;
+    pageSize: number;
+    search?: string;
+    paymentMethodId?: string;
+    view?: 'all' | 'invoices';
+    statuses?: OrderStatusDto[];
+  }) {
+    const maxRangeMs = 366 * 24 * 60 * 60 * 1000;
+    if (
+      Number.isNaN(params.startDate.getTime()) ||
+      Number.isNaN(params.endDate.getTime()) ||
+      params.endDate < params.startDate
+    ) {
+      throw new BadRequestException('El rango de fechas no es válido.');
+    }
+    if (params.endDate.getTime() - params.startDate.getTime() > maxRangeMs) {
+      throw new BadRequestException(
+        'El rango máximo para una consulta histórica es de 366 días.',
+      );
+    }
+    return this.repo.listHistory(params);
   }
 
   listByDriverAndDate(driverId: string, startDate: Date, endDate: Date) {

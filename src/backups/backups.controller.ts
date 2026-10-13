@@ -5,24 +5,41 @@ import {
   Delete,
   Get,
   Param,
+  PayloadTooLargeException,
   Post,
   Put,
   Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiConsumes,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Permissions, UserRoleDto } from '../common';
 import { BackupsService } from './backups.service';
-import { BackupConfigDto, UpdateBackupConfigDto } from './dto/backup-config.dto';
+import {
+  BackupConfigDto,
+  UpdateBackupConfigDto,
+} from './dto/backup-config.dto';
 import { BackupItemDto } from './dto/backup-item.dto';
-import { RestoreBackupDto, RestoreBackupResponseDto } from './dto/restore-backup.dto';
+import {
+  RestoreBackupDto,
+  RestoreBackupResponseDto,
+} from './dto/restore-backup.dto';
+import {
+  backupUploadOptions,
+  isSqlBackupFilename,
+  MAX_BACKUP_UPLOAD_BYTES,
+  MAX_BACKUP_UPLOAD_MB,
+} from './backup-upload.config';
 
 @ApiTags('backups')
 @Roles(UserRoleDto.admin)
@@ -48,7 +65,9 @@ export class BackupsController {
 
   @Get('config')
   @Permissions('backups.read')
-  @ApiOperation({ summary: 'Obtener configuración de respaldos automáticos y retención' })
+  @ApiOperation({
+    summary: 'Obtener configuración de respaldos automáticos y retención',
+  })
   @ApiResponse({ status: 200, type: BackupConfigDto })
   async getConfig(): Promise<BackupConfigDto> {
     return this.backupsService.getConfig();
@@ -67,10 +86,7 @@ export class BackupsController {
   @Get(':filename/download')
   @Permissions('backups.read')
   @ApiOperation({ summary: 'Descargar archivo de respaldo' })
-  async download(
-    @Param('filename') filename: string,
-    @Res() res: Response,
-  ): Promise<void> {
+  download(@Param('filename') filename: string, @Res() res: Response): void {
     const filePath = this.backupsService.getBackupFilePath(filename);
     const sanitizedFilename = path.basename(filePath);
 
@@ -91,40 +107,44 @@ export class BackupsController {
       'Restaurar la base de datos desde un archivo existente o subido. Crea automáticamente un Snapshot de Seguridad preventivo.',
   })
   @ApiConsumes('multipart/form-data', 'application/json')
-  @UseInterceptors(FileInterceptor('file'))
+  @ApiResponse({
+    status: 413,
+    description: `El archivo supera el límite de ${MAX_BACKUP_UPLOAD_MB} MB`,
+  })
+  @UseInterceptors(FileInterceptor('file', backupUploadOptions))
   async restore(
     @Body() dto: RestoreBackupDto,
-    @UploadedFile() file?: any,
+    @UploadedFile() file?: Express.Multer.File,
   ): Promise<RestoreBackupResponseDto> {
     if (file) {
-      if (!file.originalname?.endsWith('.sql')) {
-        throw new BadRequestException('El archivo subido debe tener extensión .sql');
-      }
-
-      // Guardar en directorio temporal seguro
-      const tempPath = path.join(
-        os.tmpdir(),
-        `uploaded_backup_${Date.now()}_${path.basename(file.originalname)}`,
-      );
-
-      if (file.buffer) {
-        fs.writeFileSync(tempPath, file.buffer);
-      } else if (file.path) {
-        fs.copyFileSync(file.path, tempPath);
-      }
+      const tempPath = file.path;
 
       try {
+        if (!tempPath || !isSqlBackupFilename(file.originalname)) {
+          throw new BadRequestException(
+            'El archivo subido debe tener extensión .sql',
+          );
+        }
+
+        const stat = await fs.promises.stat(tempPath);
+        if (stat.size === 0) {
+          throw new BadRequestException('El archivo de respaldo está vacío');
+        }
+        if (stat.size > MAX_BACKUP_UPLOAD_BYTES) {
+          throw new PayloadTooLargeException(
+            `El respaldo supera el límite de ${MAX_BACKUP_UPLOAD_MB} MB`,
+          );
+        }
+
         const result = await this.backupsService.restoreBackup({
           tempFilePath: tempPath,
         });
         return result;
       } finally {
-        if (fs.existsSync(tempPath)) {
-          try {
-            fs.unlinkSync(tempPath);
-          } catch {
-            // ignore
-          }
+        if (tempPath) {
+          await fs.promises.unlink(tempPath).catch(() => {
+            // El archivo pudo haber sido retirado previamente por Multer.
+          });
         }
       }
     }
@@ -140,8 +160,12 @@ export class BackupsController {
 
   @Delete(':filename')
   @Permissions('backups.manage')
-  @ApiOperation({ summary: 'Eliminar un archivo de respaldo del almacenamiento local' })
-  async delete(@Param('filename') filename: string): Promise<{ success: boolean; message: string }> {
+  @ApiOperation({
+    summary: 'Eliminar un archivo de respaldo del almacenamiento local',
+  })
+  async delete(
+    @Param('filename') filename: string,
+  ): Promise<{ success: boolean; message: string }> {
     await this.backupsService.deleteBackup(filename);
     return {
       success: true,

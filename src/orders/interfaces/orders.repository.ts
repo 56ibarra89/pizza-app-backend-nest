@@ -7,10 +7,29 @@ import type { KitchenStatusDto } from '../dto/kitchen-status.dto';
 
 export const ORDERS_REPOSITORY = Symbol('ORDERS_REPOSITORY');
 
+export interface OrderHistoryPaymentOption {
+  id: string;
+  name: string;
+}
+
+export interface OrderHistoryPage {
+  items: OrderEntity[];
+  total: number;
+  paymentMethodOptions: OrderHistoryPaymentOption[];
+}
+
 export interface IOrdersRepository {
   listTodayOrActive(now: Date): Promise<OrderEntity[]>;
-  listAll(): Promise<OrderEntity[]>;
-  listByDateRange(startDate: Date, endDate: Date): Promise<OrderEntity[]>;
+  listHistory(params: {
+    startDate: Date;
+    endDate: Date;
+    page: number;
+    pageSize: number;
+    search?: string;
+    paymentMethodId?: string;
+    view?: 'all' | 'invoices';
+    statuses?: OrderStatusDto[];
+  }): Promise<OrderHistoryPage>;
   listByDriverAndDate(
     driverId: string,
     startDate: Date,

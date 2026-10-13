@@ -6,7 +6,15 @@ import { OrdersController } from './orders.controller';
 
 describe('OrdersController delivery access', () => {
   const listByDriverAndDate = jest.fn().mockResolvedValue([]);
-  const orders = { listByDriverAndDate } as unknown as OrdersService;
+  const listHistory = jest.fn().mockResolvedValue({
+    items: [],
+    total: 125,
+    paymentMethodOptions: [],
+  });
+  const orders = {
+    listByDriverAndDate,
+    listHistory,
+  } as unknown as OrdersService;
   const kitchens = {} as KitchensService;
   const controller = new OrdersController(orders, kitchens);
 
@@ -19,6 +27,27 @@ describe('OrdersController delivery access', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it('returns bounded metadata for historical queries', async () => {
+    const result = await controller.listHistory({
+      startDate: '2026-10-01T00:00:00.000Z',
+      endDate: '2026-10-12T23:59:59.999Z',
+      page: 2,
+      pageSize: 25,
+      view: 'invoices',
+    });
+
+    expect(listHistory).toHaveBeenCalledWith(
+      expect.objectContaining({ page: 2, pageSize: 25, view: 'invoices' }),
+    );
+    expect(result).toMatchObject({
+      items: [],
+      total: 125,
+      page: 2,
+      pageSize: 25,
+      totalPages: 5,
+    });
   });
 
   it('fuerza al motorizado a consultar únicamente sus propias órdenes', async () => {

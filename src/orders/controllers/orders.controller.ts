@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   ForbiddenException,
   Get,
@@ -22,6 +23,8 @@ import type { AuthenticatedUser } from '../../common/interfaces/authenticated-us
 import { KitchensService } from '../../kitchens/kitchens.service';
 import type { OrderEntity } from '../entities/order.entity';
 import { requiresKitchenPreparation } from '../validators/order-item-kind';
+import { ListOrderHistoryQueryDto } from '../dto/list-order-history-query.dto';
+import { OrderStatusDto } from '../dto/order-status.dto';
 
 @ApiTags('orders')
 @Controller('orders')
@@ -39,18 +42,42 @@ export class OrdersController {
     @Query('endDate') endDate?: string,
     @CurrentUser() user?: AuthenticatedUser,
   ) {
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      const list = await this.orders.listByDateRange(start, end);
-      return this.toVisibleOrderResponses(list, user);
+    if (startDate || endDate) {
+      throw new BadRequestException(
+        'Las consultas históricas deben utilizar /orders/history con paginación.',
+      );
     }
 
-    const list =
-      scope === 'all'
-        ? await this.orders.listAll()
-        : await this.orders.listTodayOrActive();
+    if (scope === 'all') {
+      throw new BadRequestException(
+        'La consulta completa de órdenes no está permitida; utiliza /orders/history.',
+      );
+    }
+
+    const list = await this.orders.listTodayOrActive();
     return this.toVisibleOrderResponses(list, user);
+  }
+
+  @Get('history')
+  async listHistory(@Query() query: ListOrderHistoryQueryDto) {
+    const result = await this.orders.listHistory({
+      startDate: new Date(query.startDate),
+      endDate: new Date(query.endDate),
+      page: query.page,
+      pageSize: query.pageSize,
+      search: query.search,
+      paymentMethodId: query.paymentMethodId,
+      view: query.view,
+      statuses: query.statuses as OrderStatusDto[] | undefined,
+    });
+    return {
+      items: result.items.map(toOrderResponseDto),
+      total: result.total,
+      page: query.page,
+      pageSize: query.pageSize,
+      totalPages: Math.ceil(result.total / query.pageSize),
+      paymentMethodOptions: result.paymentMethodOptions,
+    };
   }
 
   private async toVisibleOrderResponses(

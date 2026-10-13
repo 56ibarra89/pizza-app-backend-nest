@@ -28,6 +28,7 @@ import { DevicesModule } from './devices/devices.module';
 import { BackupsModule } from './backups/backups.module';
 import { SecurityModule } from './common/security/security.module';
 import { AccessControlModule } from './access-control/access-control.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -72,6 +73,7 @@ import { AccessControlModule } from './access-control/access-control.module';
     AdminDashboardModule,
     DevicesModule,
     BackupsModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [

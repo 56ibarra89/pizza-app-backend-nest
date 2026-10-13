@@ -282,6 +282,7 @@ model Order {
   @@index([customerSnapshotName])
   @@index([customerId])
   @@index([status])
+  @@index([status, timestamp])
   @@index([cancelledAt])
   @@index([cancellationCategory, cancelledAt])
   @@index([cancellationReasonId, cancelledAt])
