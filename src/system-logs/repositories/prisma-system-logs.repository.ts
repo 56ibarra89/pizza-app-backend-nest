@@ -1,65 +1,30 @@
 import { Injectable } from '@nestjs/common';
 import { LogLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import type { ISystemLogsRepository } from '../interfaces/system-logs.repository';
+import type {
+  ISystemLogsRepository,
+  SystemLogCreateParams,
+} from '../interfaces/system-logs.repository';
 import type { SystemLogEntity } from '../entities/system-log.entity';
 
 @Injectable()
 export class PrismaSystemLogsRepository implements ISystemLogsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(params: {
-    userId?: string;
-    user: string;
-    role?: string;
-    action: string;
-    details?: string;
-    level?: LogLevel;
-    module?: string;
-    operation?: string;
-    entity?: string;
-    entityId?: string;
-    source?: string;
-    requestId?: string;
-    ipAddress?: string;
-    userAgent?: string;
-    httpMethod?: string;
-    route?: string;
-    statusCode?: number;
-    success?: boolean;
-    durationMs?: number;
-    before?: Prisma.InputJsonValue;
-    after?: Prisma.InputJsonValue;
-    metadata?: Prisma.InputJsonValue;
-  }): Promise<SystemLogEntity> {
+  async create(params: SystemLogCreateParams): Promise<SystemLogEntity> {
     const created = await this.prisma.systemLog.create({
-      data: {
-        userId: params.userId,
-        user: params.user,
-        role: params.role,
-        action: params.action,
-        details: params.details,
-        level: params.level ?? LogLevel.INFO,
-        module: params.module,
-        operation: params.operation,
-        entity: params.entity,
-        entityId: params.entityId,
-        source: params.source,
-        requestId: params.requestId,
-        ipAddress: params.ipAddress,
-        userAgent: params.userAgent,
-        httpMethod: params.httpMethod,
-        route: params.route,
-        statusCode: params.statusCode,
-        success: params.success ?? true,
-        durationMs: params.durationMs,
-        before: params.before,
-        after: params.after,
-        metadata: params.metadata,
-      },
+      data: this.toCreateData(params),
     });
 
     return this.map(created);
+  }
+
+  async createMany(params: SystemLogCreateParams[]): Promise<number> {
+    if (params.length === 0) return 0;
+    const result = await this.prisma.systemLog.createMany({
+      data: params.map((entry) => this.toCreateData(entry)),
+    });
+    return result.count;
   }
 
   async findMany(params: {
@@ -216,6 +181,35 @@ export class PrismaSystemLogsRepository implements ISystemLogsRepository {
       before: row.before ?? undefined,
       after: row.after ?? undefined,
       metadata: row.metadata ?? undefined,
+    };
+  }
+
+  private toCreateData(
+    params: SystemLogCreateParams,
+  ): Prisma.SystemLogCreateManyInput {
+    return {
+      userId: params.userId,
+      user: params.user,
+      role: params.role,
+      action: params.action,
+      details: params.details,
+      level: params.level ?? LogLevel.INFO,
+      module: params.module,
+      operation: params.operation,
+      entity: params.entity,
+      entityId: params.entityId,
+      source: params.source,
+      requestId: params.requestId,
+      ipAddress: params.ipAddress,
+      userAgent: params.userAgent,
+      httpMethod: params.httpMethod,
+      route: params.route,
+      statusCode: params.statusCode,
+      success: params.success ?? true,
+      durationMs: params.durationMs,
+      before: params.before,
+      after: params.after,
+      metadata: params.metadata,
     };
   }
 }

@@ -7,6 +7,7 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const logger = new Logger('Bootstrap');
+  app.enableShutdownHooks();
 
   const apiHost = process.env.API_HOST?.trim() || '127.0.0.1';
   const isLoopback = ['127.0.0.1', 'localhost', '::1'].includes(apiHost);

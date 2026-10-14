@@ -1,8 +1,8 @@
 import type { CallHandler, ExecutionContext } from '@nestjs/common';
 import { lastValueFrom, of, throwError } from 'rxjs';
-import type { SystemLogsService } from '../services/system-logs.service';
 import { AutomaticAuditInterceptor } from './automatic-audit.interceptor';
 import type { AuditSnapshotService } from './audit-snapshot.service';
+import type { AuditWriteQueueService } from './audit-write-queue.service';
 
 function createContext(overrides: Record<string, unknown> = {}) {
   const request = {
@@ -29,15 +29,15 @@ function createContext(overrides: Record<string, unknown> = {}) {
 }
 
 describe('AutomaticAuditInterceptor', () => {
-  const createAutomatic = jest.fn().mockResolvedValue({ id: 1 });
-  const service = { createAutomatic } as unknown as SystemLogsService;
+  const enqueue = jest.fn().mockReturnValue(true);
+  const queue = { enqueue } as unknown as AuditWriteQueueService;
   const capture = jest.fn().mockResolvedValue({
     entity: 'product',
     entityId: 'product-id',
     before: { id: 'product-id', name: 'Pizza anterior' },
   });
   const snapshots = { capture } as unknown as AuditSnapshotService;
-  const interceptor = new AutomaticAuditInterceptor(service, snapshots);
+  const interceptor = new AutomaticAuditInterceptor(queue, snapshots);
 
   beforeEach(() => jest.clearAllMocks());
 
@@ -54,7 +54,7 @@ describe('AutomaticAuditInterceptor', () => {
       'X-Request-Id',
       expect.any(String),
     );
-    expect(createAutomatic).toHaveBeenCalledWith(
+    expect(enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'PRODUCTS_UPDATE',
         module: 'products',
@@ -84,7 +84,7 @@ describe('AutomaticAuditInterceptor', () => {
     await expect(
       lastValueFrom(interceptor.intercept(context, next)),
     ).rejects.toBe(originalError);
-    expect(createAutomatic).toHaveBeenCalledWith(
+    expect(enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'PRODUCTS_DELETE',
         operation: 'DELETE',
@@ -102,6 +102,6 @@ describe('AutomaticAuditInterceptor', () => {
 
     await lastValueFrom(interceptor.intercept(context, next));
 
-    expect(createAutomatic).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
   });
 });

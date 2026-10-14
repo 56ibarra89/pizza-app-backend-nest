@@ -6,12 +6,14 @@ import { PrismaSystemLogsRepository } from './repositories/prisma-system-logs.re
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AutomaticAuditInterceptor } from './audit/automatic-audit.interceptor';
 import { AuditSnapshotService } from './audit/audit-snapshot.service';
+import { AuditWriteQueueService } from './audit/audit-write-queue.service';
 
 @Module({
   controllers: [SystemLogsController],
   providers: [
     SystemLogsService,
     AuditSnapshotService,
+    AuditWriteQueueService,
     {
       provide: SYSTEM_LOGS_REPOSITORY,
       useClass: PrismaSystemLogsRepository,

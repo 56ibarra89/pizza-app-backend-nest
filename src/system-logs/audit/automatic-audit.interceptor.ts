@@ -8,11 +8,11 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Request, Response } from 'express';
-import { catchError, concatMap, from, Observable, of, throwError } from 'rxjs';
+import { catchError, concatMap, from, Observable, tap, throwError } from 'rxjs';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
-import { SystemLogsService } from '../services/system-logs.service';
 import { toAuditJson } from './audit-value.util';
 import { AuditSnapshotService } from './audit-snapshot.service';
+import { AuditWriteQueueService } from './audit-write-queue.service';
 
 type AuthenticatedRequest = Request & { user?: AuthenticatedUser };
 
@@ -93,7 +93,7 @@ export class AutomaticAuditInterceptor implements NestInterceptor {
   private readonly logger = new Logger(AutomaticAuditInterceptor.name);
 
   constructor(
-    private readonly systemLogs: SystemLogsService,
+    private readonly auditQueue: AuditWriteQueueService,
     private readonly snapshots: AuditSnapshotService,
   ) {}
 
@@ -145,77 +145,66 @@ export class AutomaticAuditInterceptor implements NestInterceptor {
     ).pipe(
       concatMap((snapshot) =>
         next.handle().pipe(
-          concatMap((responseBody) =>
-            from(
-              this.systemLogs.createAutomatic({
-                user: request.user!,
-                action,
-                module,
-                operation,
-                entity: snapshot.entity,
-                entityId:
-                  snapshot.entityId ?? resolveEntityId(request, responseBody),
-                source,
-                requestId,
-                ipAddress: resolveIp(request),
-                userAgent: request.get('user-agent'),
-                httpMethod: method,
-                route,
-                statusCode: response.statusCode,
-                success: true,
-                durationMs: Date.now() - startedAt,
-                before: toAuditJson(snapshot.before),
-                after: toAuditJson(responseBody),
-                metadata: toAuditJson({ requestedChanges: requestBody }),
-              }),
-            ).pipe(
-              concatMap(() => of(responseBody)),
-              catchError((auditError: unknown) => {
-                this.logger.error(
-                  `No se pudo guardar la auditoría ${requestId}: ${auditError instanceof Error ? auditError.message : String(auditError)}`,
-                );
-                return of(responseBody);
-              }),
-            ),
-          ),
+          tap((responseBody) => {
+            const enqueued = this.auditQueue.enqueue({
+              user: request.user!,
+              action,
+              module,
+              operation,
+              entity: snapshot.entity,
+              entityId:
+                snapshot.entityId ?? resolveEntityId(request, responseBody),
+              source,
+              requestId,
+              ipAddress: resolveIp(request),
+              userAgent: request.get('user-agent'),
+              httpMethod: method,
+              route,
+              statusCode: response.statusCode,
+              success: true,
+              durationMs: Date.now() - startedAt,
+              before: toAuditJson(snapshot.before),
+              after: toAuditJson(responseBody),
+              metadata: toAuditJson({ requestedChanges: requestBody }),
+            });
+            if (!enqueued) {
+              this.logger.error(`No se pudo encolar la auditoría ${requestId}`);
+            }
+          }),
           catchError((error: unknown) => {
             const statusCode =
               error instanceof HttpException ? error.getStatus() : 500;
-            return from(
-              this.systemLogs.createAutomatic({
-                user: request.user!,
-                action,
-                module,
-                operation,
-                entity: snapshot.entity,
-                entityId: snapshot.entityId ?? resolveEntityId(request),
-                source,
-                requestId,
-                ipAddress: resolveIp(request),
-                userAgent: request.get('user-agent'),
-                httpMethod: method,
-                route,
-                statusCode,
-                success: false,
-                durationMs: Date.now() - startedAt,
-                before: toAuditJson(snapshot.before),
-                metadata: toAuditJson({
-                  requestedChanges: requestBody,
-                  error:
-                    error instanceof Error
-                      ? { name: error.name, message: error.message }
-                      : String(error),
-                }),
+            const enqueued = this.auditQueue.enqueue({
+              user: request.user!,
+              action,
+              module,
+              operation,
+              entity: snapshot.entity,
+              entityId: snapshot.entityId ?? resolveEntityId(request),
+              source,
+              requestId,
+              ipAddress: resolveIp(request),
+              userAgent: request.get('user-agent'),
+              httpMethod: method,
+              route,
+              statusCode,
+              success: false,
+              durationMs: Date.now() - startedAt,
+              before: toAuditJson(snapshot.before),
+              metadata: toAuditJson({
+                requestedChanges: requestBody,
+                error:
+                  error instanceof Error
+                    ? { name: error.name, message: error.message }
+                    : String(error),
               }),
-            ).pipe(
-              catchError((auditError: unknown) => {
-                this.logger.error(
-                  `No se pudo guardar la auditoría fallida ${requestId}: ${auditError instanceof Error ? auditError.message : String(auditError)}`,
-                );
-                return of(undefined);
-              }),
-              concatMap(() => throwError(() => error)),
-            );
+            });
+            if (!enqueued) {
+              this.logger.error(
+                `No se pudo encolar la auditoría fallida ${requestId}`,
+              );
+            }
+            return throwError(() => error);
           }),
         ),
       ),

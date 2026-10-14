@@ -7,6 +7,7 @@ describe('SystemLogsService', () => {
   const create = jest.fn();
   const repo: jest.Mocked<ISystemLogsRepository> = {
     create,
+    createMany: jest.fn(),
     findMany: jest.fn(),
   };
   const service = new SystemLogsService(repo);

@@ -4,10 +4,32 @@ import { randomUUID } from 'node:crypto';
 import {
   SYSTEM_LOGS_REPOSITORY,
   type ISystemLogsRepository,
+  type SystemLogCreateParams,
 } from '../interfaces/system-logs.repository';
 import type { CreateSystemLogDto } from '../dto/create-system-log.dto';
 import type { GetSystemLogsQueryDto } from '../dto/get-system-logs-query.dto';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
+
+export interface AutomaticAuditParams {
+  user: AuthenticatedUser;
+  action: string;
+  module: string;
+  operation: string;
+  entity: string;
+  entityId?: string;
+  source: string;
+  requestId: string;
+  ipAddress?: string;
+  userAgent?: string;
+  httpMethod: string;
+  route: string;
+  statusCode: number;
+  success: boolean;
+  durationMs: number;
+  before?: Prisma.InputJsonValue;
+  after?: Prisma.InputJsonValue;
+  metadata?: Prisma.InputJsonValue;
+}
 
 @Injectable()
 export class SystemLogsService {
@@ -27,27 +49,18 @@ export class SystemLogsService {
     });
   }
 
-  createAutomatic(params: {
-    user: AuthenticatedUser;
-    action: string;
-    module: string;
-    operation: string;
-    entity: string;
-    entityId?: string;
-    source: string;
-    requestId: string;
-    ipAddress?: string;
-    userAgent?: string;
-    httpMethod: string;
-    route: string;
-    statusCode: number;
-    success: boolean;
-    durationMs: number;
-    before?: Prisma.InputJsonValue;
-    after?: Prisma.InputJsonValue;
-    metadata?: Prisma.InputJsonValue;
-  }) {
-    return this.repo.create({
+  createAutomatic(params: AutomaticAuditParams) {
+    return this.repo.create(this.toAutomaticLog(params));
+  }
+
+  createAutomaticBatch(params: AutomaticAuditParams[]) {
+    return this.repo.createMany(
+      params.map((entry) => this.toAutomaticLog(entry)),
+    );
+  }
+
+  private toAutomaticLog(params: AutomaticAuditParams): SystemLogCreateParams {
+    return {
       userId: params.user.id,
       user: params.user.username,
       role: params.user.role,
@@ -70,7 +83,7 @@ export class SystemLogsService {
       before: params.before,
       after: params.after,
       metadata: params.metadata,
-    });
+    };
   }
 
   createProcess(params: {
