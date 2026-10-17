@@ -52,6 +52,8 @@ import {
 import {
   DEFAULT_PAYMENT_METHODS_CONFIG,
   PAYMENT_METHODS_CONFIG_ID,
+  isValidPosReference,
+  normalizePosReference,
   normalizePaymentMethodsConfig,
   type PaymentMethodConfig,
 } from '../../common/payment-methods.config';
@@ -959,8 +961,21 @@ export class OrdersService {
           'El método de pago seleccionado ya no está disponible.',
         );
       }
-      const reference = payment.reference?.trim();
+      const rawReference = payment.reference?.trim();
+      const reference =
+        configured.type === 'CARD_POS' && rawReference
+          ? normalizePosReference(rawReference)
+          : rawReference;
       if (
+        configured.type === 'CARD_POS' &&
+        !isValidPosReference(reference ?? '')
+      ) {
+        throw new BadRequestException(
+          `${configured.name} requiere el código de autorización o referencia del voucher: 4 a 20 caracteres alfanuméricos o guiones, con al menos un número.`,
+        );
+      }
+      if (
+        configured.type !== 'CARD_POS' &&
         configured.requiresReference &&
         (!reference || reference.length < 4)
       ) {

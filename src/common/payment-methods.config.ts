@@ -11,6 +11,16 @@ export const PAYMENT_CURRENCIES = ['NIO', 'USD'] as const;
 export type PaymentMethodType = (typeof PAYMENT_METHOD_TYPES)[number];
 export type PaymentCurrency = (typeof PAYMENT_CURRENCIES)[number];
 
+export const POS_REFERENCE_MIN_LENGTH = 4;
+export const POS_REFERENCE_MAX_LENGTH = 20;
+const POS_REFERENCE_PATTERN = /^(?=.*\d)[A-Z0-9-]{4,20}$/;
+
+export const normalizePosReference = (value: string) =>
+  value.trim().toUpperCase();
+
+export const isValidPosReference = (value: string) =>
+  POS_REFERENCE_PATTERN.test(normalizePosReference(value));
+
 export interface PaymentMethodConfig {
   id: string;
   name: string;
@@ -101,11 +111,13 @@ export function normalizePaymentMethodsConfig(
         id: id.slice(0, 80),
         name: name.slice(0, 120),
         type,
-        currency,
+        currency: type === 'CARD_POS' ? 'NIO' : currency,
         requiresReference:
-          typeof candidate.requiresReference === 'boolean'
-            ? candidate.requiresReference
-            : false,
+          type === 'CARD_POS'
+            ? true
+            : typeof candidate.requiresReference === 'boolean'
+              ? candidate.requiresReference
+              : false,
         commissionRate: clampRate(candidate.commissionRate),
         isActive:
           typeof candidate.isActive === 'boolean' ? candidate.isActive : true,

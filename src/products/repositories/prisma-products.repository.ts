@@ -39,25 +39,66 @@ export class PrismaProductsRepository implements IProductsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async getCategories(): Promise<CategoryEntity[]> {
-    const categories = await this.prisma.category.findMany({
-      where: { deletedAt: null },
-      orderBy: { label: 'asc' },
-      include: {
-        extras: {
-          orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-          include: CATEGORY_EXTRAS_INCLUDE,
+    const [categories, categoryRevenue] = await Promise.all([
+      this.prisma.category.findMany({
+        where: { deletedAt: null },
+        orderBy: { label: 'asc' },
+        include: {
+          extras: {
+            orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+            include: CATEGORY_EXTRAS_INCLUDE,
+          },
+          products: {
+            where: { deletedAt: null },
+            orderBy: { name: 'asc' },
+            include: PRODUCT_BASE_INCLUDE,
+          },
         },
-        products: {
-          where: { deletedAt: null },
-          orderBy: { name: 'asc' },
-          include: PRODUCT_BASE_INCLUDE,
-        },
-      },
-    });
+      }),
+      this.prisma.$queryRaw<
+        Array<{ categoryId: string; totalRevenue: unknown }>
+      >`
+        WITH "reportableItems" AS (
+          SELECT
+            p."categoryId",
+            oi."orderId",
+            oi."price" * GREATEST(oi."quantity" - oi."giftQuantity", 0) AS "grossRevenue",
+            COALESCE(o."discountAmount", 0) AS "discountAmount"
+          FROM "OrderItem" oi
+          INNER JOIN "Order" o ON o.id = oi."orderId"
+          INNER JOIN "Product" p ON p.id = oi."productId"
+          WHERE o.status = 'PAID'
+        ),
+        "orderGross" AS (
+          SELECT "orderId", SUM("grossRevenue") AS "grossTotal"
+          FROM "reportableItems"
+          GROUP BY "orderId"
+        )
+        SELECT
+          ri."categoryId",
+          SUM(
+            GREATEST(
+              ri."grossRevenue" - CASE
+                WHEN og."grossTotal" > 0
+                  THEN ri."discountAmount" * ri."grossRevenue" / og."grossTotal"
+                ELSE 0
+              END,
+              0
+            )
+          ) AS "totalRevenue"
+        FROM "reportableItems" ri
+        INNER JOIN "orderGross" og ON og."orderId" = ri."orderId"
+        GROUP BY ri."categoryId"
+      `,
+    ]);
+    const revenueByCategory = new Map(
+      categoryRevenue.map((row) => [row.categoryId, Number(row.totalRevenue)]),
+    );
 
     return categories.map((c) => ({
       id: c.id,
       label: c.label,
+      totalRevenue: revenueByCategory.get(c.id) ?? 0,
       icon: c.icon ?? undefined,
       kitchenId: c.kitchenId ?? undefined,
       extras: c.extras.map((extra) => this.mapExtra(extra)),
@@ -74,6 +115,7 @@ export class PrismaProductsRepository implements IProductsRepository {
     return {
       id: created.id,
       label: created.label,
+      totalRevenue: 0,
       icon: created.icon ?? undefined,
       kitchenId: created.kitchenId ?? undefined,
       extras: [],
@@ -104,6 +146,7 @@ export class PrismaProductsRepository implements IProductsRepository {
     return {
       id: updated.id,
       label: updated.label,
+      totalRevenue: 0,
       icon: updated.icon ?? undefined,
       kitchenId: updated.kitchenId ?? undefined,
       extras: updated.extras.map((extra) => this.mapExtra(extra)),
