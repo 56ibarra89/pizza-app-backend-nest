@@ -37,6 +37,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       where: {
         OR: [
           { timestamp: { gte: startOfDay } },
+          { paidAt: { gte: startOfDay } },
           { status: { notIn: ['PAID', 'CANCELLED'] satisfies OrderStatus[] } },
         ],
       },
@@ -65,8 +66,11 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     view?: 'all' | 'invoices';
     statuses?: import('../dto/order-status.dto').OrderStatusDto[];
   }): Promise<OrderHistoryPage> {
+    const dateRange = { gte: params.startDate, lte: params.endDate };
     const baseConditions: Prisma.OrderWhereInput[] = [
-      { timestamp: { gte: params.startDate, lte: params.endDate } },
+      {
+        OR: [{ paidAt: dateRange }, { paidAt: null, timestamp: dateRange }],
+      },
     ];
     if (params.statuses?.length) {
       baseConditions.push({
@@ -133,8 +137,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           SELECT p."orderId"
           FROM "Payment" p
           INNER JOIN "Order" o ON o."id" = p."orderId"
-          WHERE o."timestamp" >= ${params.startDate}
-            AND o."timestamp" <= ${params.endDate}
+          WHERE COALESCE(o."paidAt", o."timestamp") >= ${params.startDate}
+            AND COALESCE(o."paidAt", o."timestamp") <= ${params.endDate}
           GROUP BY p."orderId"
           HAVING COUNT(*) > 1
         `,
@@ -230,11 +234,24 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     startDate: Date,
     endDate: Date,
   ): Promise<OrderEntity[]> {
+    const includeActive = endDate.getTime() >= Date.now() - 60_000;
     const list = await this.prisma.order.findMany({
       where: {
         driverId,
         status: { not: 'CANCELLED' },
-        createdAt: { gte: startDate, lte: endDate },
+        OR: [
+          { createdAt: { gte: startDate, lte: endDate } },
+          { paidAt: { gte: startDate, lte: endDate } },
+          ...(includeActive
+            ? [
+                {
+                  status: {
+                    notIn: ['PAID', 'CANCELLED'] satisfies OrderStatus[],
+                  },
+                },
+              ]
+            : []),
+        ],
       },
       include: {
         customer: { select: { id: true, name: true, phone: true } },
@@ -305,6 +322,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     linkedTables?: string[];
     customerTendered?: number;
     deliveryChange?: number;
+    certificateSerials?: string[];
   }): Promise<OrderEntity> {
     const uniqueLinkedTables = Array.from(
       new Set((data.linkedTables ?? []).filter(Boolean)),
@@ -330,6 +348,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         happyHourId: data.happyHourId ?? null,
         customerTendered: data.customerTendered ?? null,
         deliveryChange: data.deliveryChange ?? null,
+        pendingCertificateSerials: data.certificateSerials?.length
+          ? (data.certificateSerials as Prisma.InputJsonValue)
+          : undefined,
         ...(data.payments?.length
           ? {
               payments: {
@@ -464,7 +485,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       deliveryStartedAt?: Date | null;
       deliveredAt?: Date | null;
       deliverySlaAlertedAt?: Date | null;
+      certificateSerials?: string[] | null;
     },
+    tx?: Prisma.TransactionClient,
   ): Promise<OrderEntity> {
     const updateData: Prisma.OrderUpdateInput = {
       subTotal: data.subTotal === undefined ? undefined : data.subTotal,
@@ -577,6 +600,12 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         data.deliverySlaAlertedAt === undefined
           ? undefined
           : data.deliverySlaAlertedAt,
+      pendingCertificateSerials:
+        data.certificateSerials === undefined
+          ? undefined
+          : data.certificateSerials && data.certificateSerials.length > 0
+            ? data.certificateSerials
+            : Prisma.DbNull,
     };
 
     if (data.payments) {
@@ -611,30 +640,52 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     }
 
     if (data.items) {
+      const existingItems = data.items.filter(
+        (item): item is CartItemEntity & { id: number } =>
+          item.id !== undefined,
+      );
+      const newItems = data.items.filter((item) => item.id === undefined);
+      const itemData = (i: CartItemEntity) => ({
+        productId: i.productId,
+        name: i.name,
+        price: i.price,
+        size: i.size,
+        quantity: i.quantity,
+        note: i.note,
+        kitchenModifiers: i.kitchenModifiers
+          ? (i.kitchenModifiers as unknown as Prisma.InputJsonValue)
+          : undefined,
+        giftQuantity: i.giftQuantity ?? 0,
+        giftReason: i.giftReason,
+        isSentToKitchen: i.isSentToKitchen ?? false,
+        sentAt: i.sentAt ? new Date(i.sentAt) : undefined,
+        kitchenStatus: i.kitchenStatus
+          ? toDbKitchenStatus(i.kitchenStatus)
+          : undefined,
+        kitchenId: i.kitchenId,
+        isCombo: i.isCombo ?? false,
+        comboSelections: i.comboSelections
+          ? (i.comboSelections as unknown as Prisma.InputJsonValue)
+          : undefined,
+      });
+
       updateData.items = {
-        deleteMany: {},
-        create: data.items.map((i) => ({
-          productId: i.productId,
-          name: i.name,
-          price: i.price,
-          size: i.size,
-          quantity: i.quantity,
-          note: i.note,
-          kitchenModifiers: i.kitchenModifiers
-            ? (i.kitchenModifiers as unknown as Prisma.InputJsonValue)
-            : undefined,
-          giftQuantity: i.giftQuantity ?? 0,
-          giftReason: i.giftReason,
-          isSentToKitchen: i.isSentToKitchen ?? false,
-          sentAt: i.sentAt ? new Date(i.sentAt) : undefined,
-          kitchenStatus: i.kitchenStatus
-            ? toDbKitchenStatus(i.kitchenStatus)
-            : undefined,
-          kitchenId: i.kitchenId,
-          isCombo: i.isCombo ?? false,
-          comboSelections: i.comboSelections
-            ? (i.comboSelections as unknown as Prisma.InputJsonValue)
-            : undefined,
+        deleteMany:
+          existingItems.length > 0
+            ? { id: { notIn: existingItems.map((item) => item.id) } }
+            : {},
+        update: existingItems.map((i) => ({
+          where: { id: i.id },
+          data: {
+            ...itemData(i),
+            extras: {
+              deleteMany: {},
+              create: i.extras.map((e) => ({ name: e.name, price: e.price })),
+            },
+          },
+        })),
+        create: newItems.map((i) => ({
+          ...itemData(i),
           extras: {
             create: i.extras.map((e) => ({ name: e.name, price: e.price })),
           },
@@ -642,7 +693,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       };
     }
 
-    const updated = await this.prisma.order.update({
+    const updated = await (tx ?? this.prisma).order.update({
       where: { id },
       data: updateData,
       include: {
@@ -742,6 +793,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     total: Prisma.Decimal;
     status: import('@prisma/client').OrderStatus;
     timestamp: Date;
+    paidAt: Date | null;
+    pendingCertificateSerials: Prisma.JsonValue | null;
     invoiceCorrelativoId: string | null;
     invoiceDocumentType: import('@prisma/client').DocumentType | null;
     invoiceResolutionNumber: string | null;
@@ -871,6 +924,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       total: o.total.toNumber(),
       status: fromDbOrderStatus(o.status),
       timestamp: o.timestamp,
+      paidAt: o.paidAt ?? undefined,
       customerId: o.customerId ?? o.customer?.id ?? undefined,
       customerSnapshotName:
         o.customerSnapshotName ?? o.customer?.name ?? undefined,
@@ -881,6 +935,11 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       cuponId: o.cuponId ?? undefined,
       discountId: o.discountId ?? undefined,
       happyHourId: o.happyHourId ?? undefined,
+      certificateSerials: Array.isArray(o.pendingCertificateSerials)
+        ? o.pendingCertificateSerials.filter(
+            (serial): serial is string => typeof serial === 'string',
+          )
+        : undefined,
       cashierSnapshotName: o.cashierSnapshotName ?? undefined,
       cancelReason: o.cancelReason ?? undefined,
       cancellationReasonId: o.cancellationReasonId ?? undefined,

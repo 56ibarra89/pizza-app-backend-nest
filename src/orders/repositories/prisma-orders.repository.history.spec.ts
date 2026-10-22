@@ -27,9 +27,31 @@ describe('PrismaOrdersRepository history pagination', () => {
     const query = capturedQuery as {
       skip: number;
       take: number;
+      where?: {
+        AND?: Array<{
+          AND?: unknown[];
+        }>;
+      };
     };
     expect(query.skip).toBe(25);
     expect(query.take).toBe(25);
+    expect(query.where?.AND?.[0]?.AND).toContainEqual({
+      OR: [
+        {
+          paidAt: {
+            gte: new Date('2026-10-01T00:00:00.000Z'),
+            lte: new Date('2026-10-12T23:59:59.999Z'),
+          },
+        },
+        {
+          paidAt: null,
+          timestamp: {
+            gte: new Date('2026-10-01T00:00:00.000Z'),
+            lte: new Date('2026-10-12T23:59:59.999Z'),
+          },
+        },
+      ],
+    });
     expect(result).toMatchObject({ items: [], total: 42 });
   });
 });

@@ -96,6 +96,11 @@ export class ComboSelectionDto {
 
 export class CartItemDto {
   @IsOptional()
+  @IsInt()
+  @Min(1)
+  id?: number;
+
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   productId?: string;

@@ -88,12 +88,13 @@ export class ReportsService {
     const orders = await this.prisma.order.findMany({
       where: {
         status: 'PAID',
-        timestamp: { gte: params.startDate, lte: params.endDate },
+        paidAt: { gte: params.startDate, lte: params.endDate },
       },
       select: {
         total: true,
         discountAmount: true,
         timestamp: true,
+        paidAt: true,
         orderType: true,
         linkedTables: { select: { tableId: true }, take: 1 },
         payments: {
@@ -176,9 +177,10 @@ export class ReportsService {
       channels[channel].sales += orderTotal;
       channels[channel].ordersCount += 1;
 
+      const paidAt = order.paidAt ?? order.timestamp;
       const time = groupByDay
-        ? dayKey(order.timestamp, params.timezoneOffsetMinutes)
-        : hourKey(order.timestamp, params.timezoneOffsetMinutes);
+        ? dayKey(paidAt, params.timezoneOffsetMinutes)
+        : hourKey(paidAt, params.timezoneOffsetMinutes);
       const currentTime = times.get(time) ?? { sales: 0, ordersCount: 0 };
       times.set(time, {
         sales: currentTime.sales + orderTotal,

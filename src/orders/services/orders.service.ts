@@ -35,7 +35,7 @@ import type { OrderEntity } from '../entities/order.entity';
 import { requiresKitchenPreparation } from '../validators/order-item-kind';
 import { KitchensService } from '../../kitchens/kitchens.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { InvoiceIssuingService } from './invoice-issuing.service';
+import { CertificadoStatus, Prisma } from '@prisma/client';
 import { OrderTypeDto } from '../dto/order-type.dto';
 import {
   DEFAULT_SERVICE_SLA_CONFIG,
@@ -74,7 +74,6 @@ export class OrdersService {
     private readonly tableAssignments: OrderTableAssignmentsService,
     private readonly cancellationAuthorization: OrderCancellationAuthorizationService,
     private readonly kitchens: KitchensService,
-    private readonly invoiceIssuing: InvoiceIssuingService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -165,6 +164,17 @@ export class OrdersService {
     const promotion = await this.pricing.resolvePromotion(dto);
     const { items: pricedItems, totals } =
       await this.pricing.calculateWithPrices(items, promotion);
+    const certificateSerials = this.extractCertificateSerials(
+      pricedItems,
+      dto.certificateSerials,
+    );
+    const cuponId =
+      promotion.source === 'coupon' ? promotion.cuponId : undefined;
+
+    await this.assertPendingBenefitsAvailable({
+      cuponId,
+      certificateSerials,
+    });
 
     const created = await this.repo.create({
       id: dto.id,
@@ -186,7 +196,7 @@ export class OrdersService {
       customerAddress: dto.customerAddress,
       linkedTables: dto.linkedTables,
       isSentToKitchen,
-      cuponId: promotion.source === 'coupon' ? promotion.cuponId : undefined,
+      cuponId,
       discountId:
         promotion.source === 'discount' ? promotion.discountId : undefined,
       happyHourId:
@@ -195,30 +205,8 @@ export class OrdersService {
       payments: resolvedPayments,
       customerTendered: dto.customerTendered,
       deliveryChange: dto.deliveryChange,
+      certificateSerials,
     });
-
-    if (isDelivery) {
-      try {
-        await this.prisma.$transaction(async (tx) => {
-          await this.invoiceIssuing.issuePendingDeliveryInvoice(tx, {
-            orderId: created.id,
-            totals,
-            promotion,
-            customerSnapshotName: dto.customerSnapshotName,
-            customerAddress: dto.customerAddress,
-            orderType: dto.orderType,
-          });
-        });
-        const updated = await this.getById(created.id);
-        this.publishOrder(updated, 'created');
-        return updated;
-      } catch (error: unknown) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        this.logger.error(
-          `Error al generar factura para delivery ${created.id}: ${errorMsg}`,
-        );
-      }
-    }
 
     if (status === OrderStatusDto.paid) {
       try {
@@ -233,8 +221,7 @@ export class OrdersService {
             taxAmount: totals.taxAmount,
             discountAmount: totals.discountAmount,
             finalTotal: totals.total,
-            cuponId:
-              promotion.source === 'coupon' ? promotion.cuponId : undefined,
+            cuponId,
             discountId:
               promotion.source === 'discount'
                 ? promotion.discountId
@@ -245,7 +232,7 @@ export class OrdersService {
                 : undefined,
             promotionSource: dto.promotionSource,
             promotionCode: dto.promotionCode,
-            certificateSerials: dto.certificateSerials,
+            certificateSerials,
           },
           'system',
           false,
@@ -420,6 +407,7 @@ export class OrdersService {
       existing.status !== OrderStatusDto.paid
     ) {
       assertPaymentsMatchTotal(existing.total, existing.payments);
+      return this.finalize(id, { payments: existing.payments }, user);
     }
 
     const updateItemsKitchen =
@@ -441,7 +429,11 @@ export class OrdersService {
       : existing.items;
 
     const updateData: Parameters<IOrdersRepository['update']>[1] = {
-      status: nextStatus,
+      status:
+        existing.status === OrderStatusDto.paid &&
+        dto.status !== OrderStatusDto.cancelled
+          ? OrderStatusDto.paid
+          : nextStatus,
       items,
     };
     const becameReadyForPickup =
@@ -455,6 +447,16 @@ export class OrdersService {
     ) {
       updateData.deliveredAt = new Date();
     }
+
+    let cancellationEvent:
+      | {
+          orderId: string;
+          invoiceNum: string;
+          cashierName: string;
+          adminName: string;
+          reasonStr: string;
+        }
+      | undefined;
 
     if (cancellationPolicy) {
       const note = dto.cancelReason?.trim();
@@ -474,8 +476,8 @@ export class OrdersService {
       updateData.cancellationLossAmount = existing.total;
       updateData.cancelledById = authorizerAdmin?.id ?? user?.id;
       updateData.cancelledAt = new Date();
+      updateData.certificateSerials = null;
 
-      // Send email to all admins
       const cashierName = user
         ? `${user.firstName || ''} ${user.lastName || ''}`.trim()
         : 'Desconocido';
@@ -487,16 +489,47 @@ export class OrdersService {
         ? `#${existing.invoice.invoiceNumber}`
         : 'Sin Factura';
 
-      this.eventEmitter.emit('order.cancelled', {
+      cancellationEvent = {
         orderId: existing.id,
         invoiceNum,
         cashierName,
         adminName,
         reasonStr,
-      });
+      };
     }
 
-    const updated = await this.repo.update(id, updateData);
+    const shouldReversePaidBenefits =
+      Boolean(cancellationPolicy) && existing.status === OrderStatusDto.paid;
+    const updated = shouldReversePaidBenefits
+      ? await this.prisma.$transaction(async (tx) => {
+          await tx.certificado.updateMany({
+            where: {
+              redeemedOrderId: id,
+              status: CertificadoStatus.ENTREGADO,
+            },
+            data: {
+              status: CertificadoStatus.DISPONIBLE,
+              redeemedAt: null,
+              redeemedOrderId: null,
+            },
+          });
+          if (existing.cuponId) {
+            await tx.cupon.updateMany({
+              where: {
+                id: existing.cuponId,
+                currentUses: { gt: 0 },
+              },
+              data: {
+                currentUses: { decrement: 1 },
+              },
+            });
+          }
+          return this.repo.update(id, updateData, tx);
+        })
+      : await this.repo.update(id, updateData);
+    if (cancellationEvent) {
+      this.eventEmitter.emit('order.cancelled', cancellationEvent);
+    }
     if (becameReadyForPickup) {
       this.emitOrderReady(updated);
     }
@@ -732,7 +765,7 @@ export class OrdersService {
       where: {
         order: {
           status: 'PAID',
-          timestamp: { gte: startDate, lte: endDate },
+          paidAt: { gte: startDate, lte: endDate },
         },
       },
       select: {
@@ -821,14 +854,30 @@ export class OrdersService {
 
   async updateItems(id: string, dto: UpdateOrderItemsDto) {
     const existing = await this.getById(id);
+    const existingItemIds = new Set(
+      existing.items.flatMap((item) =>
+        typeof item.id === 'number' ? [item.id] : [],
+      ),
+    );
     const wasReadyForPickup = this.isReadyForPickup(existing.items);
     const isFinal =
       existing.status === OrderStatusDto.paid ||
       existing.status === OrderStatusDto.cancelled;
 
+    const seenItemIds = new Set<number>();
     const rawItems: CartItemEntity[] = dto.items.map((item) => {
+      let resolvedId: number | undefined;
+      if (
+        item.id !== undefined &&
+        existingItemIds.has(item.id) &&
+        !seenItemIds.has(item.id)
+      ) {
+        resolvedId = item.id;
+        seenItemIds.add(item.id);
+      }
       const mappedItem: CartItemEntity = {
         ...item,
+        id: resolvedId,
         giftQuantity: item.giftQuantity ?? 0,
       };
 
@@ -849,13 +898,30 @@ export class OrdersService {
     const becameReadyForPickup =
       !isFinal && !wasReadyForPickup && this.isReadyForPickup(mappedItems);
 
-    const promotion = await this.pricing.resolvePromotion(dto, {
-      cuponId: existing.cuponId,
-      discountId: existing.discountId,
-      happyHourId: existing.happyHourId,
-    });
+    const promotion = await this.pricing.resolvePromotion(
+      dto,
+      {
+        cuponId: existing.cuponId,
+        discountId: existing.discountId,
+        happyHourId: existing.happyHourId,
+      },
+      existing.timestamp,
+    );
     const { items: pricedItems, totals } =
       await this.pricing.calculateWithPrices(mappedItems, promotion);
+    const certificateSerials = this.extractCertificateSerials(
+      pricedItems,
+      dto.certificateSerials,
+    );
+    const cuponId = promotion.source === 'coupon' ? promotion.cuponId : null;
+
+    if (!isFinal) {
+      await this.assertPendingBenefitsAvailable({
+        cuponId: cuponId ?? undefined,
+        certificateSerials,
+        excludeOrderId: id,
+      });
+    }
 
     const updated = await this.repo.update(id, {
       items: pricedItems,
@@ -863,12 +929,13 @@ export class OrdersService {
       subTotal: totals.subTotal,
       discountAmount: totals.discountAmount,
       taxAmount: totals.taxAmount,
-      cuponId: promotion.source === 'coupon' ? promotion.cuponId : null,
+      cuponId,
       discountId: promotion.source === 'discount' ? promotion.discountId : null,
       happyHourId:
         promotion.source === 'happy-hour' ? promotion.happyHourId : null,
       status: nextStatus,
       isSentToKitchen: dto.isSentToKitchen,
+      certificateSerials,
     });
     if (becameReadyForPickup) {
       this.emitOrderReady(updated);
@@ -886,10 +953,36 @@ export class OrdersService {
     const existing = await this.getById(id);
     if (existing.status === OrderStatusDto.paid) return existing;
 
+    const certificateSerials = this.extractCertificateSerials(
+      existing.items,
+      dto.certificateSerials ?? existing.certificateSerials,
+    );
+    await this.assertPendingBenefitsAvailable({
+      cuponId: dto.cuponId ?? existing.cuponId,
+      certificateSerials,
+      excludeOrderId: id,
+    });
+
+    const { customerId } =
+      dto.customerId || dto.customerPhone || dto.customerSnapshotName
+        ? await this.referenceResolver.resolve({
+            customerId: dto.customerId ?? existing.customerId,
+            customerSnapshotName:
+              dto.customerSnapshotName ?? existing.customerSnapshotName,
+            customerPhone: dto.customerPhone ?? existing.customerPhone,
+            customerAddress: dto.customerAddress ?? existing.customerAddress,
+          })
+        : { customerId: existing.customerId };
+
     const resolvedPayments = await this.resolvePayments(dto.payments);
     await this.finalization.finalize(
       existing,
-      resolvedPayments ? { ...dto, payments: resolvedPayments } : dto,
+      {
+        ...dto,
+        ...(customerId ? { customerId } : {}),
+        ...(resolvedPayments ? { payments: resolvedPayments } : {}),
+        ...(certificateSerials.length > 0 ? { certificateSerials } : {}),
+      },
       user,
     );
     const finalized = await this.getById(id);
@@ -897,6 +990,113 @@ export class OrdersService {
       this.publishOrder(finalized, 'updated');
     }
     return finalized;
+  }
+
+  private extractCertificateSerials(
+    items: readonly CartItemEntity[],
+    explicitSerials?: readonly string[],
+  ): string[] {
+    const fromItems = items.flatMap((item) => {
+      const note = item.note?.trim();
+      if (!note || !note.toLowerCase().startsWith('vale:')) return [];
+      return [note.slice('vale:'.length).trim()];
+    });
+    const raw =
+      explicitSerials !== undefined
+        ? [...explicitSerials, ...fromItems]
+        : fromItems;
+    return Array.from(
+      new Set(
+        raw
+          .map((serial) => serial.trim().toUpperCase())
+          .filter((serial) => serial.length > 0),
+      ),
+    ).sort();
+  }
+
+  private async assertPendingBenefitsAvailable(params: {
+    cuponId?: number;
+    certificateSerials: readonly string[];
+    excludeOrderId?: string;
+  }): Promise<void> {
+    if (params.certificateSerials.length > 0) {
+      const certificates = await this.prisma.certificado.findMany({
+        where: {
+          serial: { in: [...params.certificateSerials] },
+          deletedAt: null,
+        },
+        select: { serial: true, status: true },
+      });
+      const bySerial = new Map(
+        certificates.map((cert) => [cert.serial.toUpperCase(), cert.status]),
+      );
+      for (const serial of params.certificateSerials) {
+        const status = bySerial.get(serial);
+        if (!status) {
+          throw new BadRequestException(`Certificado no encontrado: ${serial}`);
+        }
+        if (status !== CertificadoStatus.DISPONIBLE) {
+          throw new BadRequestException(
+            `El certificado ${serial} no está disponible`,
+          );
+        }
+      }
+
+      const activeOrdersWithCerts = await this.prisma.order.findMany({
+        where: {
+          status: { notIn: ['PAID', 'CANCELLED'] },
+          NOT: { pendingCertificateSerials: { equals: Prisma.DbNull } },
+          ...(params.excludeOrderId
+            ? { id: { not: params.excludeOrderId } }
+            : {}),
+        },
+        select: { pendingCertificateSerials: true },
+      });
+
+      const reservedSerials = new Set(
+        activeOrdersWithCerts.flatMap((order) =>
+          Array.isArray(order.pendingCertificateSerials)
+            ? order.pendingCertificateSerials
+                .filter((s): s is string => typeof s === 'string')
+                .map((s) => s.trim().toUpperCase())
+            : [],
+        ),
+      );
+
+      for (const serial of params.certificateSerials) {
+        if (reservedSerials.has(serial)) {
+          throw new BadRequestException(
+            `El certificado ${serial} ya está reservado en otra orden en curso.`,
+          );
+        }
+      }
+    }
+
+    if (params.cuponId !== undefined) {
+      const coupon = await this.prisma.cupon.findUnique({
+        where: { id: params.cuponId },
+        select: { maxUses: true, currentUses: true, deletedAt: true },
+      });
+      if (!coupon || coupon.deletedAt) {
+        throw new BadRequestException('Cupón no encontrado');
+      }
+      if (coupon.maxUses > 0) {
+        const reservedCouponCount = await this.prisma.order.count({
+          where: {
+            cuponId: params.cuponId,
+            status: { notIn: ['PAID', 'CANCELLED'] },
+            ...(params.excludeOrderId
+              ? { id: { not: params.excludeOrderId } }
+              : {}),
+          },
+        });
+        if (coupon.currentUses + reservedCouponCount >= coupon.maxUses) {
+          throw new BadRequestException(
+            'El cupón agotó su cantidad de usos (incluyendo órdenes en curso).',
+          );
+        }
+      }
+    }
   }
 
   private async resolveCancellationPolicy(

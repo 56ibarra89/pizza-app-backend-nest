@@ -4,6 +4,7 @@ import type { OrderStatusDto } from '../dto/order-status.dto';
 import type { OrderTypeDto } from '../dto/order-type.dto';
 import type { PaymentMethodDto } from '../dto/payment-method.dto';
 import type { KitchenStatusDto } from '../dto/kitchen-status.dto';
+import type { Prisma } from '@prisma/client';
 
 export const ORDERS_REPOSITORY = Symbol('ORDERS_REPOSITORY');
 
@@ -74,6 +75,7 @@ export interface IOrdersRepository {
     driverId?: string;
     customerTendered?: number;
     deliveryChange?: number;
+    certificateSerials?: string[];
   }): Promise<OrderEntity>;
 
   delete(id: string): Promise<void>;
@@ -129,7 +131,9 @@ export interface IOrdersRepository {
       deliveryStartedAt?: Date | null;
       deliveredAt?: Date | null;
       deliverySlaAlertedAt?: Date | null;
+      certificateSerials?: string[] | null;
     },
+    tx?: Prisma.TransactionClient,
   ): Promise<OrderEntity>;
 
   updateItemsKitchenStatus(params: {

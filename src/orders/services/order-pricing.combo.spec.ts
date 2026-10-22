@@ -147,4 +147,68 @@ describe('OrderPricingService combo extras', () => {
       ]),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
+
+  it('honors an already-assigned happy hour promotion when finalizing after the window ends', async () => {
+    const happyHours = {
+      findById: jest.fn().mockResolvedValue({
+        id: 5,
+        name: 'Hora Feliz Tarde',
+        promotionType: 'PORCENTAJE',
+        promotionValue: { toNumber: () => 20 },
+        status: 'ACTIVO',
+        daysOfWeek: ['MONDAY'],
+        startMinutes: 960,
+        endMinutes: 1080,
+        products: [],
+        categories: [],
+      }),
+    };
+    const service = new OrderPricingService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      happyHours as never,
+    );
+
+    const resolved = await service.resolvePromotion(
+      {},
+      { happyHourId: 5 },
+      new Date('2026-10-20T23:30:00.000Z'),
+    );
+
+    expect(resolved).toMatchObject({ source: 'happy-hour', happyHourId: 5 });
+  });
+
+  it('rejects a new happy hour promotion when applied outside the active window', async () => {
+    const happyHours = {
+      findById: jest.fn().mockResolvedValue({
+        id: 5,
+        name: 'Hora Feliz Tarde',
+        promotionType: 'PORCENTAJE',
+        promotionValue: { toNumber: () => 20 },
+        status: 'ACTIVO',
+        daysOfWeek: ['MONDAY'],
+        startMinutes: 960,
+        endMinutes: 1080,
+        products: [],
+        categories: [],
+      }),
+    };
+    const service = new OrderPricingService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      happyHours as never,
+    );
+
+    await expect(
+      service.resolvePromotion(
+        { happyHourId: 5 },
+        undefined,
+        new Date('2026-10-20T23:30:00.000Z'),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
 });

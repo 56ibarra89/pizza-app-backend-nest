@@ -23,7 +23,15 @@ export class FinalizeOrderDto {
 
   @IsOptional()
   @IsString()
+  customerId?: string;
+
+  @IsOptional()
+  @IsString()
   customerSnapshotName?: string;
+
+  @IsOptional()
+  @IsString()
+  customerPhone?: string;
 
   @IsOptional()
   @IsEnum(OrderTypeDto)

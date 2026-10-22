@@ -1,10 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import {
-  LogLevel,
-  PaymentMethod,
-  Prisma,
-  ShiftStatus,
-} from '@prisma/client';
+import { LogLevel, PaymentMethod, Prisma, ShiftStatus } from '@prisma/client';
 import type { PrismaService } from '../../prisma/prisma.service';
 import { PrismaShiftsRepository } from './prisma-shifts.repository';
 import { UserRoleDto } from '../../users/dto/user-role.dto';
@@ -76,6 +71,7 @@ describe('PrismaShiftsRepository.close', () => {
     const systemLogCreate = jest.fn(
       (input: { data: Record<string, unknown> }) => Promise.resolve(input),
     );
+    const orderFindMany = jest.fn(() => Promise.resolve([]));
     const tx = {
       shift: {
         findUnique: jest.fn(() => Promise.resolve(existingShift)),
@@ -97,7 +93,7 @@ describe('PrismaShiftsRepository.close', () => {
           ]),
         ),
       },
-      order: { findMany: jest.fn(() => Promise.resolve([])) },
+      order: { findMany: orderFindMany },
       systemLog: { create: systemLogCreate },
     };
     const transaction = jest.fn(
@@ -112,7 +108,7 @@ describe('PrismaShiftsRepository.close', () => {
       } as any,
     );
 
-    return { repository, shiftUpdate, systemLogCreate };
+    return { repository, shiftUpdate, systemLogCreate, orderFindMany };
   };
 
   const closeParams = {
@@ -194,5 +190,23 @@ describe('PrismaShiftsRepository.close', () => {
     const logged = systemLogCreate.mock.calls[0]?.[0];
     expect(logged?.data.action).toBe('SHIFT_CLOSED_HANDOVER_WITH_DISCREPANCY');
     expect(logged?.data.level).toBe(LogLevel.WARN);
+  });
+
+  it('revisa órdenes pendientes de cualquier turno en el cierre final', async () => {
+    const { repository, orderFindMany } = createHarness();
+
+    await repository.close({
+      ...closeParams,
+      closingAmount: 1100,
+      closeType: 'END_OF_DAY',
+    });
+
+    expect(orderFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          status: { notIn: ['PAID', 'CANCELLED'] },
+        },
+      }),
+    );
   });
 });

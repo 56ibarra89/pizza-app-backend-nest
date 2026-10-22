@@ -30,6 +30,7 @@ export function toOrderResponseDto(order: OrderEntity) {
     status: order.status,
     driverId: order.driverId,
     timestamp: order.timestamp.toISOString(),
+    paidAt: order.paidAt?.toISOString(),
     customerTendered: order.customerTendered,
     deliveryChange: order.deliveryChange,
     kitchenReadyAt: order.kitchenReadyAt?.toISOString(),
@@ -43,6 +44,7 @@ export function toOrderResponseDto(order: OrderEntity) {
     cuponId: order.cuponId,
     discountId: order.discountId,
     happyHourId: order.happyHourId,
+    certificateSerials: order.certificateSerials,
     promotionSource: order.cuponId
       ? 'coupon'
       : order.discountId

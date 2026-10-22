@@ -32,6 +32,7 @@ export interface OrderEntity {
   total: number;
   status: OrderStatusDto;
   timestamp: Date;
+  paidAt?: Date;
 
   customerSnapshotName?: string;
   customerPhone?: string;
@@ -42,6 +43,7 @@ export interface OrderEntity {
   cuponId?: number;
   discountId?: number;
   happyHourId?: number;
+  certificateSerials?: string[];
 
   cashierSnapshotName?: string;
   customerTendered?: number;

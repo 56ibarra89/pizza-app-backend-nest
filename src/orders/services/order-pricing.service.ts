@@ -147,7 +147,16 @@ export class OrderPricingService {
       if (hasCoupon) source = 'coupon';
       else if (hasDiscount) source = 'discount';
       else if (hasHappyHour) source = 'happy-hour';
-      else if (fallback) return this.resolvePromotion(fallback, undefined, now);
+      else if (
+        fallback &&
+        (fallback.cuponId !== undefined ||
+          Boolean(fallback.promotionCode?.trim()) ||
+          fallback.discountId !== undefined ||
+          fallback.happyHourId !== undefined ||
+          (fallback.promotionSource !== undefined &&
+            fallback.promotionSource !== 'none'))
+      )
+        return this.resolvePromotion(fallback, fallback, now);
       else source = 'none';
     }
 
@@ -194,6 +203,11 @@ export class OrderPricingService {
     const rule = await this.happyHours.findById(input.happyHourId);
     if (!rule) {
       throw new BadRequestException('PromociÃ³n Hora Feliz no encontrada');
+    }
+    if (fallback?.happyHourId === rule.id) {
+      if (rule.status !== PromoActiveStatus.ACTIVO)
+        throw new BadRequestException('La promoción Hora Feliz no está activa');
+      return { source, happyHourId: rule.id, rule };
     }
     this.assertHappyHourIsActive(rule, now);
     return { source, happyHourId: rule.id, rule };

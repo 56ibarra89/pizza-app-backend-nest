@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsEnum,
@@ -61,4 +62,10 @@ export class UpdateOrderItemsDto {
   @IsOptional()
   @IsBoolean()
   isSentToKitchen?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  certificateSerials?: string[];
 }
