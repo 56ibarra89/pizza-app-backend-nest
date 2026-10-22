@@ -15,6 +15,7 @@ import type { UpdateOrderStatusDto } from '../dto/update-order-status.dto';
 import type { UpdateOrderItemsDto } from '../dto/update-order-items.dto';
 import type { FinalizeOrderDto } from '../dto/finalize-order.dto';
 import { OrderStatusDto } from '../dto/order-status.dto';
+import { OrderPromotionSourceDto } from '../dto/order-promotion-source.dto';
 import { KitchenStatusDto } from '../dto/kitchen-status.dto';
 import type { CartItemEntity } from '../entities/order-item.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -898,6 +899,50 @@ export class OrdersService {
     const becameReadyForPickup =
       !isFinal && !wasReadyForPickup && this.isReadyForPickup(mappedItems);
 
+    if (isFinal) {
+      const existingById = new Map(
+        existing.items.flatMap((item) =>
+          typeof item.id === 'number' ? [[item.id, item] as const] : [],
+        ),
+      );
+      const lockedItems: CartItemEntity[] = mappedItems.map((item, idx) => {
+        const prev =
+          (item.id !== undefined ? existingById.get(item.id) : undefined) ??
+          existing.items[idx];
+        return prev
+          ? {
+              ...prev,
+              isSentToKitchen: item.isSentToKitchen,
+              sentAt: item.sentAt ?? prev.sentAt,
+              kitchenStatus: item.kitchenStatus ?? prev.kitchenStatus,
+              comboSelections: item.comboSelections ?? prev.comboSelections,
+            }
+          : item;
+      });
+      const updated = await this.repo.update(id, {
+        items: lockedItems,
+        total: existing.total,
+        subTotal: existing.subTotal ?? null,
+        discountAmount: existing.discountAmount ?? null,
+        taxAmount: existing.taxAmount ?? null,
+        cuponId: existing.cuponId ?? null,
+        discountId: existing.discountId ?? null,
+        happyHourId: existing.happyHourId ?? null,
+        status: existing.status,
+        isSentToKitchen: dto.isSentToKitchen ?? existing.isSentToKitchen,
+        certificateSerials: null,
+      });
+      if (
+        existing.status === OrderStatusDto.paid &&
+        !wasReadyForPickup &&
+        this.isReadyForPickup(lockedItems)
+      ) {
+        this.emitOrderReady(updated);
+      }
+      this.publishOrder(updated, 'updated');
+      return updated;
+    }
+
     const promotion = await this.pricing.resolvePromotion(
       dto,
       {
@@ -915,13 +960,11 @@ export class OrdersService {
     );
     const cuponId = promotion.source === 'coupon' ? promotion.cuponId : null;
 
-    if (!isFinal) {
-      await this.assertPendingBenefitsAvailable({
-        cuponId: cuponId ?? undefined,
-        certificateSerials,
-        excludeOrderId: id,
-      });
-    }
+    await this.assertPendingBenefitsAvailable({
+      cuponId: cuponId ?? undefined,
+      certificateSerials,
+      excludeOrderId: id,
+    });
 
     const updated = await this.repo.update(id, {
       items: pricedItems,
@@ -957,8 +1000,13 @@ export class OrdersService {
       existing.items,
       dto.certificateSerials ?? existing.certificateSerials,
     );
+    const effectiveCuponId =
+      dto.promotionSource &&
+      dto.promotionSource !== OrderPromotionSourceDto.coupon
+        ? undefined
+        : (dto.cuponId ?? existing.cuponId);
     await this.assertPendingBenefitsAvailable({
-      cuponId: dto.cuponId ?? existing.cuponId,
+      cuponId: effectiveCuponId,
       certificateSerials,
       excludeOrderId: id,
     });

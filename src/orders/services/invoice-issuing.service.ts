@@ -79,11 +79,13 @@ export class InvoiceIssuingService {
     { orderId, dto, totals, promotion }: IssueInvoiceParams,
   ): Promise<void> {
     const cuponId =
-      promotion.source === 'coupon' ? promotion.cuponId : undefined;
+      promotion.source === 'coupon' ? (promotion.cuponId ?? null) : null;
     const discountId =
-      promotion.source === 'discount' ? promotion.discountId : undefined;
+      promotion.source === 'discount' ? (promotion.discountId ?? null) : null;
     const happyHourId =
-      promotion.source === 'happy-hour' ? promotion.happyHourId : undefined;
+      promotion.source === 'happy-hour'
+        ? (promotion.happyHourId ?? null)
+        : null;
     const lockedOrders = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT id
       FROM "Order"
@@ -124,7 +126,7 @@ export class InvoiceIssuingService {
       const now = new Date();
       const shiftId = await this.requireActiveShiftId(tx);
 
-      if (cuponId !== undefined) {
+      if (cuponId !== null) {
         await this.consumeCoupon(tx, cuponId, now);
       }
       await this.consumeCertificates(tx, certificateSerials, orderId, now);
@@ -175,7 +177,7 @@ export class InvoiceIssuingService {
     }
 
     const now = new Date();
-    if (cuponId !== undefined) {
+    if (cuponId !== null) {
       await this.consumeCoupon(tx, cuponId, now);
     }
     await this.consumeCertificates(tx, certificateSerials, orderId, now);

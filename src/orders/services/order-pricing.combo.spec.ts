@@ -211,4 +211,72 @@ describe('OrderPricingService combo extras', () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
+
+  it('allows additional non-2x1 items on an order with a preserved 2x1 happy hour while rejecting excessive gifts', async () => {
+    const service = createService();
+    const twoForOnePromo = {
+      source: 'happy-hour' as const,
+      happyHourId: 7,
+      rule: {
+        id: 7,
+        name: '2x1 Pizzas',
+        promotionType: 'DOSXUNO' as const,
+        promotionValue: null,
+        status: 'ACTIVO' as const,
+        daysOfWeek: ['MONDAY' as const],
+        startMinutes: 960,
+        endMinutes: 1080,
+        appliesTo: 'Todos',
+        products: [],
+        categories: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: null,
+      },
+    };
+
+    const validResult = await service.calculateWithPrices(
+      [
+        {
+          productId: pizza.id,
+          name: pizza.name,
+          price: 200,
+          size: 'único',
+          quantity: 2,
+          giftQuantity: 1,
+          giftReason: 'happy-hour-2x1',
+          extras: [],
+        },
+        {
+          productId: pizza.id,
+          name: pizza.name,
+          price: 200,
+          size: 'único',
+          quantity: 2,
+          giftQuantity: 0,
+          extras: [],
+        },
+      ],
+      twoForOnePromo,
+    );
+    expect(validResult.totals.subTotal).toBe(600);
+
+    await expect(
+      service.calculateWithPrices(
+        [
+          {
+            productId: pizza.id,
+            name: pizza.name,
+            price: 200,
+            size: 'único',
+            quantity: 2,
+            giftQuantity: 2,
+            giftReason: 'happy-hour-2x1',
+            extras: [],
+          },
+        ],
+        twoForOnePromo,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
 });

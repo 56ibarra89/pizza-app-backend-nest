@@ -252,11 +252,21 @@ export class OrderPricingService {
 
       if (isTwoForOnePromotion && isEligible) {
         const expectedGiftQuantity = Math.floor(item.quantity / 2);
-        if ((item.giftQuantity ?? 0) !== expectedGiftQuantity) {
+        const giftQuantity = item.giftQuantity ?? 0;
+        const isCurrentTwoForOneItem = item.giftReason === 'happy-hour-2x1';
+        if (
+          giftQuantity < 0 ||
+          giftQuantity > expectedGiftQuantity ||
+          (isCurrentTwoForOneItem && expectedGiftQuantity === 0)
+        ) {
           throw new BadRequestException(
             `La cantidad de regalo 2x1 no es vÃ¡lida para ${item.name}`,
           );
         }
+      } else if (item.giftReason === 'happy-hour-2x1') {
+        throw new BadRequestException(
+          `La cantidad de regalo 2x1 no es vÃ¡lida para ${item.name}`,
+        );
       }
 
       const billableQuantity = Math.max(
