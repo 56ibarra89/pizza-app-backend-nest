@@ -646,27 +646,27 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       );
       const newItems = data.items.filter((item) => item.id === undefined);
       const itemData = (i: CartItemEntity) => ({
-        productId: i.productId,
+        productId: i.productId ?? null,
         name: i.name,
         price: i.price,
         size: i.size,
         quantity: i.quantity,
-        note: i.note,
+        note: i.note ?? null,
         kitchenModifiers: i.kitchenModifiers
           ? (i.kitchenModifiers as unknown as Prisma.InputJsonValue)
-          : undefined,
+          : Prisma.DbNull,
         giftQuantity: i.giftQuantity ?? 0,
-        giftReason: i.giftReason,
+        giftReason: i.giftReason ?? null,
         isSentToKitchen: i.isSentToKitchen ?? false,
-        sentAt: i.sentAt ? new Date(i.sentAt) : undefined,
+        sentAt: i.sentAt ? new Date(i.sentAt) : null,
         kitchenStatus: i.kitchenStatus
           ? toDbKitchenStatus(i.kitchenStatus)
-          : undefined,
-        kitchenId: i.kitchenId,
+          : null,
+        kitchenId: i.kitchenId ?? null,
         isCombo: i.isCombo ?? false,
         comboSelections: i.comboSelections
           ? (i.comboSelections as unknown as Prisma.InputJsonValue)
-          : undefined,
+          : Prisma.DbNull,
       });
 
       updateData.items = {
