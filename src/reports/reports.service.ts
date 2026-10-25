@@ -44,6 +44,7 @@ const isSupplementalItem = (name: string): boolean => {
   const normalized = name.trim().toLocaleLowerCase('es');
   return (
     normalized === 'delivery' ||
+    normalized.startsWith('delivery ') ||
     normalized === 'empaque' ||
     normalized.startsWith('empaque ') ||
     normalized === 'pago parcial' ||

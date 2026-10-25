@@ -17,7 +17,10 @@ import {
 import { CouponPromotionsService } from '../../promotions/services/coupon-promotions.service';
 import type { CartItemEntity } from '../entities/order-item.entity';
 import type { ProductEntity } from '../../products/entities/product.entity';
-import { isSplitBillOrderItem } from '../validators/order-item-kind';
+import {
+  isDeliveryChargeOrderItem,
+  isSplitBillOrderItem,
+} from '../validators/order-item-kind';
 import type {
   OrderPromotionInput,
   OrderPromotionSource,
@@ -304,10 +307,7 @@ export class OrderPricingService {
         : 0;
     const discountAmount =
       overrideDiscountAmount !== undefined
-        ? Math.min(
-            Math.max(0, overrideDiscountAmount),
-            Math.max(0, subTotal),
-          )
+        ? Math.min(Math.max(0, overrideDiscountAmount), Math.max(0, subTotal))
         : calculatedDiscountAmount;
     const taxableTotal = Math.max(0, subTotal - discountAmount);
 
@@ -579,7 +579,7 @@ export class OrderPricingService {
       };
     }
 
-    if (normalizedName === 'delivery' || isSplitBillOrderItem(item)) {
+    if (isDeliveryChargeOrderItem(item) || isSplitBillOrderItem(item)) {
       return { unitPrice: item.price, isDiscountable: false };
     }
 

@@ -12,7 +12,8 @@ export function isPackagingOrderItem(item: NamedOrderItem): boolean {
 }
 
 export function isDeliveryChargeOrderItem(item: NamedOrderItem): boolean {
-  return normalizeItemName(item) === 'delivery';
+  const name = normalizeItemName(item);
+  return name === 'delivery' || name.startsWith('delivery ');
 }
 
 export function isSplitBillCreditOrderItem(item: NamedOrderItem): boolean {
