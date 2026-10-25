@@ -549,7 +549,7 @@ export class OrdersService {
             );
           }
           if (splitRestore) {
-            await this.lockUnchangedSplitParent(tx, splitRestore.parent);
+            await this.lockUnchangedSplitParent(tx, splitRestore.parent, true);
             restoredSplitParent = await this.repo.update(
               splitRestore.parent.id,
               splitRestore.update,
@@ -902,10 +902,14 @@ export class OrdersService {
   }
 
   async updateTables(id: string, tableIds: string[]) {
-    await this.tableAssignments.replace(id, tableIds);
+    const affectedOrderIds = await this.tableAssignments.replace(id, tableIds);
+    const affectedOrders = await Promise.all(
+      affectedOrderIds.map((orderId) => this.getById(orderId)),
+    );
+    affectedOrders.forEach((order) => this.publishOrder(order, 'updated'));
 
-    const updated = await this.getById(id);
-    this.publishOrder(updated, 'updated');
+    const updated = affectedOrders.find((order) => order.id === id);
+    if (!updated) throw new NotFoundException('Orden no encontrada');
     return updated;
   }
 
@@ -1173,6 +1177,7 @@ export class OrdersService {
     const nowMs = Date.now();
     let remainingParentItems: CartItemEntity[] = [];
     let childRawItems: CartItemEntity[] = [];
+    let settlesAmountSplit = false;
 
     if (dto.mode === 'items') {
       const subtracted = this.subtractSubAccountItems(
@@ -1236,13 +1241,7 @@ export class OrdersService {
       const remainingBalanceAfter = Number(
         (existing.total - subAccountAmount).toFixed(2),
       );
-
-      if (remainingBalanceAfter <= 0.05) {
-        return this.finalizeSplitParent(existing, dto, user, [
-          ...existing.items,
-          ...supplementalRawItems,
-        ]);
-      }
+      settlesAmountSplit = remainingBalanceAfter <= 0.05;
 
       childRawItems = [
         ...coreSubRawItems.map((item) => ({
@@ -1257,7 +1256,15 @@ export class OrdersService {
 
       const creditItem: CartItemEntity = {
         name: `Abono subcuenta (${dto.accountName})`,
-        price: -Math.abs(subBaseSubtotal),
+        price: -Math.abs(
+          settlesAmountSplit
+            ? Math.max(
+                0,
+                (existing.subTotal ?? subBaseSubtotal) -
+                  (existing.discountAmount ?? 0),
+              )
+            : subBaseSubtotal,
+        ),
         size: 'único',
         quantity: 1,
         giftQuantity: 0,
@@ -1379,12 +1386,20 @@ export class OrdersService {
           )
         : unadjustedParent;
 
+    const pendingParentCertificateSerials =
+      this.extractCertificateSerials(pricedParentItems);
     const childCertificateSerials = this.extractCertificateSerials(
       pricedChildItems,
-      dto.certificateSerials,
+      settlesAmountSplit
+        ? [
+            ...(dto.certificateSerials ?? []),
+            ...pendingParentCertificateSerials,
+          ]
+        : dto.certificateSerials,
     );
-    const parentCertificateSerials =
-      this.extractCertificateSerials(pricedParentItems);
+    const parentCertificateSerials = settlesAmountSplit
+      ? []
+      : pendingParentCertificateSerials;
     const childCuponId =
       childPromotion.source === 'coupon' ? childPromotion.cuponId : undefined;
     const parentCuponId =
@@ -1414,10 +1429,9 @@ export class OrdersService {
         cashierSnapshotName,
       });
 
-    const nextParentStatus = this.deriveGlobalStatus(
-      pricedParentItems,
-      existing.orderType,
-    );
+    const nextParentStatus = settlesAmountSplit
+      ? OrderStatusDto.paid
+      : this.deriveGlobalStatus(pricedParentItems, existing.orderType);
 
     const { paidOrder, parentOrder } = await this.prisma.$transaction(
       async (tx) => {
@@ -1496,7 +1510,9 @@ export class OrdersService {
           totals: childTotals,
           promotion: childPromotion,
           skipCouponConsumption:
-            childCuponId !== undefined && childCuponId === parentCuponId,
+            !settlesAmountSplit &&
+            childCuponId !== undefined &&
+            childCuponId === parentCuponId,
         });
 
         const finalizedChild = await this.repo.findById(createdChild.id, tx);
@@ -1622,9 +1638,7 @@ export class OrdersService {
     return { paidOrder: finalized, parentOrder: finalized };
   }
 
-  private async prepareSplitCancellationRestore(
-    child: OrderEntity,
-  ): Promise<
+  private async prepareSplitCancellationRestore(child: OrderEntity): Promise<
     | {
         parent: OrderEntity;
         update: Parameters<IOrdersRepository['update']>[1];
@@ -1635,7 +1649,7 @@ export class OrdersService {
     const parent = await this.repo.findById(child.parentOrderId);
     if (
       !parent ||
-      parent.status === OrderStatusDto.paid ||
+      (parent.status === OrderStatusDto.paid && Boolean(parent.invoice)) ||
       parent.status === OrderStatusDto.cancelled
     ) {
       return undefined;
@@ -1661,17 +1675,25 @@ export class OrdersService {
         restoredDiscount += child.discountAmount ?? 0;
       }
     } else {
-      const expectedCreditName = `abono subcuenta (${child.splitAccountName ?? ''})`
-        .trim()
-        .toLocaleLowerCase('es');
-      const creditIndex = [...parent.items]
+      const expectedCreditName =
+        `abono subcuenta (${child.splitAccountName ?? ''})`
+          .trim()
+          .toLocaleLowerCase('es');
+      const matchingCredits = [...parent.items]
         .map((item, index) => ({ item, index }))
-        .reverse()
-        .find(
+        .filter(
           ({ item }) =>
             isSplitBillCreditOrderItem(item) &&
             item.name.trim().toLocaleLowerCase('es') === expectedCreditName,
-        )?.index;
+        );
+      const expectedCreditAmount = Math.abs(child.subTotal ?? child.total);
+      const creditIndex =
+        [...matchingCredits]
+          .reverse()
+          .find(
+            ({ item }) =>
+              Math.abs(Math.abs(item.price) - expectedCreditAmount) <= 0.02,
+          )?.index ?? matchingCredits.at(-1)?.index;
       if (creditIndex === undefined) {
         throw new ConflictException(
           'No se encontró el abono correspondiente en la orden principal.',
@@ -1689,7 +1711,8 @@ export class OrdersService {
       },
       parent.timestamp,
     );
-    const normalizedItems = await this.pricing.normalizeComboItems(restoredItems);
+    const normalizedItems =
+      await this.pricing.normalizeComboItems(restoredItems);
     const { items, totals } = await this.pricing.calculateWithPrices(
       normalizedItems,
       promotion,
@@ -1712,18 +1735,31 @@ export class OrdersService {
   private async lockUnchangedSplitParent(
     tx: Prisma.TransactionClient,
     existing: OrderEntity,
+    allowSettledAggregate = false,
   ): Promise<void> {
     const rows = await tx.$queryRaw<
-      Array<{ id: string; status: string; updatedAt: Date }>
+      Array<{
+        id: string;
+        status: string;
+        updatedAt: Date;
+        invoiceNumber: string | null;
+      }>
     >`
-      SELECT id, status, "updatedAt"
+      SELECT id, status, "updatedAt", "invoiceNumber"
       FROM "Order"
       WHERE id = ${existing.id}
       FOR UPDATE
     `;
     const locked = rows[0];
     if (!locked) throw new NotFoundException('Orden no encontrada');
-    if (locked.status === 'PAID' || locked.status === 'CANCELLED') {
+    const isAllowedPaidAggregate =
+      allowSettledAggregate &&
+      locked.status === 'PAID' &&
+      !locked.invoiceNumber;
+    if (
+      locked.status === 'CANCELLED' ||
+      (locked.status === 'PAID' && !isAllowedPaidAggregate)
+    ) {
       throw new ConflictException('La orden ya fue cobrada o anulada.');
     }
     if (

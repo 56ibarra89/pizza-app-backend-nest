@@ -106,6 +106,32 @@ describe('OrdersService split checkout safeguards', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('allows locking a paid aggregate parent without an invoice for child cancellation', async () => {
+    const { service } = createService();
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([
+        {
+          id: parentOrder.id,
+          status: 'PAID',
+          updatedAt,
+          invoiceNumber: null,
+        },
+      ]),
+    };
+
+    await expect(
+      (
+        service as unknown as {
+          lockUnchangedSplitParent(
+            transaction: unknown,
+            order: OrderEntity,
+            allowSettledAggregate: boolean,
+          ): Promise<void>;
+        }
+      ).lockUnchangedSplitParent(tx, parentOrder, true),
+    ).resolves.toBeUndefined();
+  });
+
   it('rejects gift quantities that are not available in the parent order', () => {
     const { service } = createService();
 
@@ -178,20 +204,25 @@ describe('OrdersService split checkout safeguards', () => {
       giftQuantity: 0,
       extras: [],
     };
-    const validate = (
-      service as unknown as {
-        assertSplitBillCreditsUnchanged(
-          existing: OrderEntity['items'],
-          incoming: OrderEntity['items'],
-        ): void;
-      }
-    ).assertSplitBillCreditsUnchanged.bind(service);
+    const privateService = service as unknown as {
+      assertSplitBillCreditsUnchanged(
+        existing: OrderEntity['items'],
+        incoming: OrderEntity['items'],
+      ): void;
+    };
 
-    expect(() => validate([credit], [])).toThrow(BadRequestException);
-    expect(() => validate([credit], [{ ...credit, quantity: 2 }])).toThrow(
-      BadRequestException,
-    );
-    expect(() => validate([credit], [credit])).not.toThrow();
+    expect(() =>
+      privateService.assertSplitBillCreditsUnchanged([credit], []),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      privateService.assertSplitBillCreditsUnchanged(
+        [credit],
+        [{ ...credit, quantity: 2 }],
+      ),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      privateService.assertSplitBillCreditsUnchanged([credit], [credit]),
+    ).not.toThrow();
   });
 
   it('removes the matching parent credit when a custom split invoice is cancelled', async () => {
@@ -212,16 +243,20 @@ describe('OrdersService split checkout safeguards', () => {
     const repo = { findById: jest.fn().mockResolvedValue(parentWithCredit) };
     const pricing = {
       resolvePromotion: jest.fn().mockResolvedValue({ source: 'none' }),
-      normalizeComboItems: jest.fn(async (items) => items),
-      calculateWithPrices: jest.fn(async (items) => ({
-        items,
-        totals: {
-          subTotal: 200,
-          discountAmount: 0,
-          taxAmount: 30,
-          total: 230,
-        },
-      })),
+      normalizeComboItems: jest.fn((items: OrderEntity['items']) =>
+        Promise.resolve(items),
+      ),
+      calculateWithPrices: jest.fn((items: OrderEntity['items']) =>
+        Promise.resolve({
+          items,
+          totals: {
+            subTotal: 200,
+            discountAmount: 0,
+            taxAmount: 30,
+            total: 230,
+          },
+        }),
+      ),
     };
     const service = new OrdersService(
       repo as never,
@@ -253,5 +288,76 @@ describe('OrdersService split checkout safeguards', () => {
     ).prepareSplitCancellationRestore(child);
 
     expect(restore.update.items).toEqual(parentOrder.items);
+  });
+
+  it('uses the paid child amount to disambiguate repeated split account names', async () => {
+    const firstCredit = {
+      id: 9,
+      name: 'Abono subcuenta (Persona 1)',
+      price: -150,
+      size: 'único',
+      quantity: 1,
+      giftQuantity: 0,
+      extras: [],
+    };
+    const secondCredit = { ...firstCredit, id: 10, price: -200 };
+    const parentWithRepeatedName: OrderEntity = {
+      ...parentOrder,
+      status: OrderStatusDto.paid,
+      items: [...parentOrder.items, firstCredit, secondCredit],
+      total: 0,
+    };
+    const repo = {
+      findById: jest.fn().mockResolvedValue(parentWithRepeatedName),
+    };
+    const pricing = {
+      resolvePromotion: jest.fn().mockResolvedValue({ source: 'none' }),
+      normalizeComboItems: jest.fn((items: OrderEntity['items']) =>
+        Promise.resolve(items),
+      ),
+      calculateWithPrices: jest.fn((items: OrderEntity['items']) =>
+        Promise.resolve({
+          items,
+          totals: {
+            subTotal: 50,
+            discountAmount: 0,
+            taxAmount: 7.5,
+            total: 57.5,
+          },
+        }),
+      ),
+    };
+    const service = new OrdersService(
+      repo as never,
+      { emit: jest.fn() } as never,
+      pricing as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const firstChild: OrderEntity = {
+      ...parentOrder,
+      id: 'child-order',
+      parentOrderId: parentOrder.id,
+      splitAccountName: 'Persona 1',
+      splitMode: 'custom',
+      status: OrderStatusDto.paid,
+      subTotal: 150,
+      total: 172.5,
+    };
+
+    const restore = await (
+      service as unknown as {
+        prepareSplitCancellationRestore(order: OrderEntity): Promise<{
+          update: { items?: OrderEntity['items'] };
+        }>;
+      }
+    ).prepareSplitCancellationRestore(firstChild);
+
+    expect(restore.update.items).toEqual([...parentOrder.items, secondCredit]);
   });
 });
