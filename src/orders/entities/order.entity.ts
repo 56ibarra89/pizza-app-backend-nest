@@ -32,7 +32,12 @@ export interface OrderEntity {
   total: number;
   status: OrderStatusDto;
   timestamp: Date;
+  updatedAt?: Date;
   paidAt?: Date;
+  parentOrderId?: string;
+  splitAccountName?: string;
+  splitMode?: string;
+  couponConsumptionRecorded?: boolean;
 
   customerSnapshotName?: string;
   customerPhone?: string;

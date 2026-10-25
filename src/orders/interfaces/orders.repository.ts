@@ -36,47 +36,56 @@ export interface IOrdersRepository {
     startDate: Date,
     endDate: Date,
   ): Promise<OrderEntity[]>;
-  findById(id: string): Promise<OrderEntity | null>;
+  findById(
+    id: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<OrderEntity | null>;
 
-  create(data: {
-    id?: string;
-    shiftId?: string;
-    customerId?: string;
-    items: CartItemEntity[];
-    subTotal?: number;
-    discountAmount?: number;
-    taxAmount?: number;
-    total: number;
-    status: OrderStatusDto;
-    timestamp: Date;
-    customerSnapshotName?: string;
-    customerAddress?: string;
-    orderType?: OrderTypeDto;
-    cuponId?: number;
-    discountId?: number;
-    happyHourId?: number;
-    payments?: Array<{
-      method: PaymentMethodDto;
-      amount: number;
-      reference?: string;
-      methodConfigId?: string;
-      methodSnapshotName?: string;
-      methodType?: string;
-      currency?: string;
-      originalAmount?: number;
-      exchangeRate?: number;
-      commissionRate?: number;
-      commissionAmount?: number;
-    }>;
-    cashierId?: string;
-    cashierSnapshotName?: string;
-    isSentToKitchen?: boolean;
-    linkedTables?: string[];
-    driverId?: string;
-    customerTendered?: number;
-    deliveryChange?: number;
-    certificateSerials?: string[];
-  }): Promise<OrderEntity>;
+  create(
+    data: {
+      id?: string;
+      shiftId?: string;
+      customerId?: string;
+      items: CartItemEntity[];
+      subTotal?: number;
+      discountAmount?: number;
+      taxAmount?: number;
+      total: number;
+      status: OrderStatusDto;
+      timestamp: Date;
+      customerSnapshotName?: string;
+      customerAddress?: string;
+      orderType?: OrderTypeDto;
+      cuponId?: number;
+      discountId?: number;
+      happyHourId?: number;
+      payments?: Array<{
+        method: PaymentMethodDto;
+        amount: number;
+        reference?: string;
+        methodConfigId?: string;
+        methodSnapshotName?: string;
+        methodType?: string;
+        currency?: string;
+        originalAmount?: number;
+        exchangeRate?: number;
+        commissionRate?: number;
+        commissionAmount?: number;
+      }>;
+      cashierId?: string;
+      cashierSnapshotName?: string;
+      isSentToKitchen?: boolean;
+      linkedTables?: string[];
+      driverId?: string;
+      customerTendered?: number;
+      deliveryChange?: number;
+      certificateSerials?: string[];
+      parentOrderId?: string;
+      splitAccountName?: string;
+      splitMode?: string;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<OrderEntity>;
 
   delete(id: string): Promise<void>;
 
@@ -143,4 +152,9 @@ export interface IOrdersRepository {
     kitchenId?: string;
     itemId?: number;
   }): Promise<void>;
+
+  updateOperationalStatus(
+    id: string,
+    data: { status: OrderStatusDto; kitchenReadyAt?: Date },
+  ): Promise<Date>;
 }

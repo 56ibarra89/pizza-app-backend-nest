@@ -243,6 +243,10 @@ model Order {
   invoiceIssuedAt                DateTime?
   paidAt                         DateTime?
   pendingCertificateSerials      Json?
+  parentOrderId                  String?
+  splitAccountName               String?
+  splitMode                      String?
+  couponConsumptionRecorded      Boolean             @default(false)
   discountAmount                 Decimal?            @db.Decimal(12, 2)
   customerTendered               Decimal?            @db.Decimal(12, 2)
   deliveryChange                 Decimal?            @db.Decimal(12, 2)
@@ -279,6 +283,8 @@ model Order {
   items                          OrderItem[]
   linkedTables                   OrderTable[]
   payments                       Payment[]
+  parentOrder                    Order?              @relation("OrderSplitChildren", fields: [parentOrderId], references: [id], onDelete: SetNull)
+  splitOrders                    Order[]             @relation("OrderSplitChildren")
 
   @@index([timestamp])
   @@index([shiftId])
@@ -300,6 +306,7 @@ model Order {
   @@index([invoiceCorrelativoId])
   @@index([invoiceIssuedAt])
   @@index([paidAt])
+  @@index([parentOrderId])
   @@index([invoiceIssuedNumber])
 }
 

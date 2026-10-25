@@ -15,6 +15,7 @@ import { CreateOrderDto } from '../dto/create-order.dto';
 import { UpdateOrderStatusDto } from '../dto/update-order-status.dto';
 import { UpdateOrderItemsDto } from '../dto/update-order-items.dto';
 import { FinalizeOrderDto } from '../dto/finalize-order.dto';
+import { SplitOrderCheckoutDto } from '../dto/split-order-checkout.dto';
 import { toOrderResponseDto } from '../mappers/orders.mapper';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -332,6 +333,27 @@ export class OrdersController {
   ) {
     const updated = await this.orders.finalize(id, dto, user);
     return toOrderResponseDto(updated);
+  }
+
+  @Post(':id/split-checkout')
+  @Permissions('orders.finalize')
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.mesero,
+    UserRoleDto.despachador,
+  )
+  async splitCheckout(
+    @Param('id') id: string,
+    @Body() dto: SplitOrderCheckoutDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const result = await this.orders.splitCheckout(id, dto, user);
+    return {
+      paidOrder: toOrderResponseDto(result.paidOrder),
+      parentOrder: toOrderResponseDto(result.parentOrder),
+    };
   }
 
   private async getVisibleOrderResponse(

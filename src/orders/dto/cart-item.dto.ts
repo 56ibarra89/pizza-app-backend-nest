@@ -11,10 +11,12 @@ import {
   IsString,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { SelectedExtraDto } from './selected-extra.dto';
 import { KitchenStatusDto } from './kitchen-status.dto';
+import { isSplitBillCreditOrderItem } from '../validators/order-item-kind';
 
 export enum KitchenModifierKindDto {
   REMOVE = 'REMOVE',
@@ -110,6 +112,11 @@ export class CartItemDto {
   name!: string;
 
   @IsNumber()
+  @ValidateIf(
+    (item: CartItemDto) =>
+      Boolean(item.productId) ||
+      !isSplitBillCreditOrderItem({ name: item.name ?? '' }),
+  )
   @Min(0)
   price!: number;
 

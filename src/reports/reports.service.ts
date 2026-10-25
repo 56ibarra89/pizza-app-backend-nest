@@ -45,7 +45,11 @@ const isSupplementalItem = (name: string): boolean => {
   return (
     normalized === 'delivery' ||
     normalized === 'empaque' ||
-    normalized.startsWith('empaque ')
+    normalized.startsWith('empaque ') ||
+    normalized === 'pago parcial' ||
+    normalized.startsWith('pago parcial ') ||
+    normalized === 'abono subcuenta' ||
+    normalized.startsWith('abono subcuenta ')
   );
 };
 

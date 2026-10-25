@@ -17,6 +17,7 @@ import {
 import { CouponPromotionsService } from '../../promotions/services/coupon-promotions.service';
 import type { CartItemEntity } from '../entities/order-item.entity';
 import type { ProductEntity } from '../../products/entities/product.entity';
+import { isSplitBillOrderItem } from '../validators/order-item-kind';
 import type {
   OrderPromotionInput,
   OrderPromotionSource,
@@ -41,6 +42,8 @@ interface PricedItem {
   categoryId?: string;
   extras?: CartItemEntity['extras'];
 }
+
+type ProductCache = Map<string, Promise<ProductEntity>>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -106,10 +109,11 @@ export class OrderPricingService {
   async normalizeComboItems(
     items: CartItemEntity[],
   ): Promise<CartItemEntity[]> {
+    const productCache: ProductCache = new Map();
     return Promise.all(
       items.map(async (item) => {
         if (!item.isCombo || !item.productId) return item;
-        const combo = await this.productsService.getProductById(item.productId);
+        const combo = await this.getProduct(item.productId, productCache);
         if (!combo.isCombo) {
           throw new BadRequestException('El producto indicado no es un combo');
         }
@@ -118,6 +122,7 @@ export class OrderPricingService {
           comboSelections: await this.normalizeComboSelections(
             combo,
             item.comboSelections ?? [],
+            productCache,
           ),
         };
       }),
@@ -216,24 +221,36 @@ export class OrderPricingService {
   async calculate(
     items: readonly CartItemEntity[],
     promotion: ResolvedOrderPromotion = { source: 'none' },
+    overrideDiscountAmount?: number,
   ): Promise<OrderTotals> {
-    return (await this.calculateWithPrices(items, promotion)).totals;
+    return (
+      await this.calculateWithPrices(items, promotion, overrideDiscountAmount)
+    ).totals;
   }
 
   async calculateWithPrices(
     items: readonly CartItemEntity[],
     promotion: ResolvedOrderPromotion = { source: 'none' },
+    overrideDiscountAmount?: number,
   ): Promise<{ items: CartItemEntity[]; totals: OrderTotals }> {
-    const packagingConfig =
-      await this.appConfigService.getByIdOrDefault('packaging_sizes');
+    const [packagingConfig, taxConfig] = await Promise.all([
+      this.appConfigService.getByIdOrDefault('packaging_sizes'),
+      this.appConfigService.getByIdOrDefault('app_factura_tax_config'),
+    ]);
     const packagingSizes = readPackagingSizes(packagingConfig.data);
+    const productCache: ProductCache = new Map();
+    const resolvedPrices = await Promise.all(
+      items.map((item) =>
+        this.resolveItemPrice(item, packagingSizes, productCache),
+      ),
+    );
 
     let subTotal = 0;
     let eligibleSubTotal = 0;
     const pricedItems: CartItemEntity[] = [];
 
-    for (const item of items) {
-      const pricedItem = await this.resolveItemPrice(item, packagingSizes);
+    for (const [index, item] of items.entries()) {
+      const pricedItem = resolvedPrices[index];
       pricedItems.push({
         ...item,
         price: pricedItem.unitPrice,
@@ -281,15 +298,19 @@ export class OrderPricingService {
       }
     }
 
-    const discountAmount = await this.calculateDiscount(
-      promotion,
-      eligibleSubTotal,
-    );
+    const calculatedDiscountAmount =
+      overrideDiscountAmount === undefined
+        ? await this.calculateDiscount(promotion, eligibleSubTotal)
+        : 0;
+    const discountAmount =
+      overrideDiscountAmount !== undefined
+        ? Math.min(
+            Math.max(0, overrideDiscountAmount),
+            Math.max(0, subTotal),
+          )
+        : calculatedDiscountAmount;
     const taxableTotal = Math.max(0, subTotal - discountAmount);
 
-    const taxConfig = await this.appConfigService.getByIdOrDefault(
-      'app_factura_tax_config',
-    );
     const { taxes, isExonerated } = readTaxConfig(taxConfig.data);
     const taxPercentage = isExonerated ? 0 : (taxes[0]?.percentage ?? 0);
     const taxAmount =
@@ -299,6 +320,46 @@ export class OrderPricingService {
       items: pricedItems,
       totals: {
         subTotal,
+        discountAmount,
+        taxAmount,
+        total: Math.max(0, taxableTotal + taxAmount),
+      },
+    };
+  }
+
+  async applyDiscountOverride(
+    calculation: { items: CartItemEntity[]; totals: OrderTotals },
+    overrideDiscountAmount: number,
+  ): Promise<{ items: CartItemEntity[]; totals: OrderTotals }> {
+    const discountAmount = Math.min(
+      Math.max(0, overrideDiscountAmount),
+      Math.max(0, calculation.totals.subTotal),
+    );
+    const taxableTotal = Math.max(
+      0,
+      calculation.totals.subTotal - discountAmount,
+    );
+    const originalTaxableTotal = Math.max(
+      0,
+      calculation.totals.subTotal - calculation.totals.discountAmount,
+    );
+    let taxPercentage: number;
+    if (originalTaxableTotal > 0.001) {
+      taxPercentage =
+        (calculation.totals.taxAmount / originalTaxableTotal) * 100;
+    } else {
+      const taxConfig = await this.appConfigService.getByIdOrDefault(
+        'app_factura_tax_config',
+      );
+      const { taxes, isExonerated } = readTaxConfig(taxConfig.data);
+      taxPercentage = isExonerated ? 0 : (taxes[0]?.percentage ?? 0);
+    }
+    const taxAmount =
+      taxPercentage > 0 ? taxableTotal * (taxPercentage / 100) : 0;
+    return {
+      items: calculation.items,
+      totals: {
+        subTotal: calculation.totals.subTotal,
         discountAmount,
         taxAmount,
         total: Math.max(0, taxableTotal + taxAmount),
@@ -461,9 +522,10 @@ export class OrderPricingService {
   private async resolveItemPrice(
     item: CartItemEntity,
     packagingSizes: readonly PackagingSizeConfig[],
+    productCache: ProductCache,
   ): Promise<PricedItem> {
     if (item.productId) {
-      const product = await this.productsService.getProductById(item.productId);
+      const product = await this.getProduct(item.productId, productCache);
       const price = product.prices.find(
         (candidate) => candidate.size.toLowerCase() === item.size.toLowerCase(),
       );
@@ -473,7 +535,7 @@ export class OrderPricingService {
         );
       }
       let unitPrice = product.isCombo
-        ? await this.resolveComboPrice(product, item)
+        ? await this.resolveComboPrice(product, item, productCache)
         : price!.price;
       const authoritativeExtras: CartItemEntity['extras'] = [];
 
@@ -517,7 +579,7 @@ export class OrderPricingService {
       };
     }
 
-    if (normalizedName === 'delivery') {
+    if (normalizedName === 'delivery' || isSplitBillOrderItem(item)) {
       return { unitPrice: item.price, isDiscountable: false };
     }
 
@@ -527,10 +589,12 @@ export class OrderPricingService {
   private async resolveComboPrice(
     combo: ProductEntity,
     item: CartItemEntity,
+    productCache: ProductCache,
   ): Promise<number> {
     const selections = await this.normalizeComboSelections(
       combo,
       item.comboSelections ?? [],
+      productCache,
     );
     const selectionsSurcharge = selections.reduce((total, selection) => {
       const extras = (selection.extras ?? []).reduce(
@@ -548,6 +612,7 @@ export class OrderPricingService {
   private async normalizeComboSelections(
     combo: ProductEntity,
     selections: NonNullable<CartItemEntity['comboSelections']>,
+    productCache: ProductCache,
   ): Promise<NonNullable<CartItemEntity['comboSelections']>> {
     const groups = combo.comboGroups ?? [];
     const knownGroupIds = new Set(groups.map((group) => group.id));
@@ -585,8 +650,9 @@ export class OrderPricingService {
           );
         }
 
-        const component = await this.productsService.getProductById(
+        const component = await this.getProduct(
           selection.productId,
+          productCache,
         );
         const selectedSize =
           selection.size ?? option.size ?? component.prices[0]?.size;
@@ -644,5 +710,16 @@ export class OrderPricingService {
     }
 
     return normalized;
+  }
+
+  private getProduct(
+    productId: string,
+    cache: ProductCache,
+  ): Promise<ProductEntity> {
+    const cached = cache.get(productId);
+    if (cached) return cached;
+    const request = this.productsService.getProductById(productId);
+    cache.set(productId, request);
+    return request;
   }
 }

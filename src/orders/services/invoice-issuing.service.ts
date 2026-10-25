@@ -27,6 +27,7 @@ interface IssueInvoiceParams {
   dto: FinalizeOrderDto;
   totals: OrderTotals;
   promotion: ResolvedOrderPromotion;
+  skipCouponConsumption?: boolean;
 }
 
 interface DgiConfig {
@@ -76,7 +77,13 @@ function readDgiConfig(value: Prisma.JsonValue | null): DgiConfig {
 export class InvoiceIssuingService {
   async issue(
     tx: Prisma.TransactionClient,
-    { orderId, dto, totals, promotion }: IssueInvoiceParams,
+    {
+      orderId,
+      dto,
+      totals,
+      promotion,
+      skipCouponConsumption,
+    }: IssueInvoiceParams,
   ): Promise<void> {
     const cuponId =
       promotion.source === 'coupon' ? (promotion.cuponId ?? null) : null;
@@ -126,7 +133,7 @@ export class InvoiceIssuingService {
       const now = new Date();
       const shiftId = await this.requireActiveShiftId(tx);
 
-      if (cuponId !== null) {
+      if (cuponId !== null && !skipCouponConsumption) {
         await this.consumeCoupon(tx, cuponId, now);
       }
       await this.consumeCertificates(tx, certificateSerials, orderId, now);
@@ -171,13 +178,15 @@ export class InvoiceIssuingService {
           cuponId,
           discountId,
           happyHourId,
+          couponConsumptionRecorded:
+            cuponId !== null && !skipCouponConsumption,
         },
       });
       return;
     }
 
     const now = new Date();
-    if (cuponId !== null) {
+    if (cuponId !== null && !skipCouponConsumption) {
       await this.consumeCoupon(tx, cuponId, now);
     }
     await this.consumeCertificates(tx, certificateSerials, orderId, now);
@@ -299,6 +308,8 @@ export class InvoiceIssuingService {
         cuponId,
         discountId,
         happyHourId,
+        couponConsumptionRecorded:
+          cuponId !== null && !skipCouponConsumption,
         shiftId,
         paidAt: now,
         pendingCertificateSerials: Prisma.DbNull,

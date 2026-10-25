@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -14,6 +15,7 @@ import type { CreateOrderDto } from '../dto/create-order.dto';
 import type { UpdateOrderStatusDto } from '../dto/update-order-status.dto';
 import type { UpdateOrderItemsDto } from '../dto/update-order-items.dto';
 import type { FinalizeOrderDto } from '../dto/finalize-order.dto';
+import type { SplitOrderCheckoutDto } from '../dto/split-order-checkout.dto';
 import { OrderStatusDto } from '../dto/order-status.dto';
 import { OrderPromotionSourceDto } from '../dto/order-promotion-source.dto';
 import { KitchenStatusDto } from '../dto/kitchen-status.dto';
@@ -33,7 +35,14 @@ import {
   type OrderSynchronizationMutation,
 } from '../events/order-synchronized.event';
 import type { OrderEntity } from '../entities/order.entity';
-import { requiresKitchenPreparation } from '../validators/order-item-kind';
+import {
+  isDeliveryChargeOrderItem,
+  isPackagingOrderItem,
+  isSplitBillCreditOrderItem,
+  isSplitBillOrderItem,
+  isSplitBillPartialPaymentItem,
+  requiresKitchenPreparation,
+} from '../validators/order-item-kind';
 import { KitchensService } from '../../kitchens/kitchens.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CertificadoStatus, Prisma } from '@prisma/client';
@@ -130,6 +139,11 @@ export class OrdersService {
   }
 
   async create(dto: CreateOrderDto, user?: AuthenticatedUser) {
+    if (dto.items.some((item) => isSplitBillCreditOrderItem(item))) {
+      throw new BadRequestException(
+        'Los abonos de subcuenta solo pueden ser generados por el flujo de división de cuenta.',
+      );
+    }
     const resolvedPayments = await this.resolvePayments(dto.payments);
     const isDelivery = dto.orderType === OrderTypeDto.delivery;
     const status = isDelivery
@@ -300,6 +314,17 @@ export class OrdersService {
       | undefined;
 
     if (dto.status === OrderStatusDto.cancelled) {
+      const paidSplitOrders = await this.prisma.order.count({
+        where: {
+          parentOrderId: existing.id,
+          status: 'PAID',
+        },
+      });
+      if (paidSplitOrders > 0) {
+        throw new BadRequestException(
+          'Debe anular primero las facturas de las subcuentas antes de anular la cuenta principal.',
+        );
+      }
       cancellationPolicy = await this.resolveCancellationPolicy(existing, dto);
       if (cancellationPolicy.requiresSupervisor) {
         authorizerAdmin = await this.cancellationAuthorization.authorize(
@@ -340,12 +365,20 @@ export class OrdersService {
           ? existing.status
           : derived;
       this.logger.debug(`Estado global derivado: ${nextGlobalStatus}`);
-      const updated = await this.repo.update(id, {
+      const kitchenReadyAt =
+        !wasReadyForPickup && this.isReadyForPickup(reloaded.items)
+          ? new Date()
+          : undefined;
+      const updatedAt = await this.repo.updateOperationalStatus(id, {
         status: nextGlobalStatus,
-        ...(!wasReadyForPickup && this.isReadyForPickup(reloaded.items)
-          ? { kitchenReadyAt: new Date() }
-          : {}),
+        kitchenReadyAt,
       });
+      const updated: OrderEntity = {
+        ...reloaded,
+        status: nextGlobalStatus,
+        updatedAt,
+        ...(kitchenReadyAt ? { kitchenReadyAt } : {}),
+      };
       if (!wasReadyForPickup && this.isReadyForPickup(reloaded.items)) {
         this.emitOrderReady(updated);
       }
@@ -501,8 +534,28 @@ export class OrdersService {
 
     const shouldReversePaidBenefits =
       Boolean(cancellationPolicy) && existing.status === OrderStatusDto.paid;
+    const splitRestore = shouldReversePaidBenefits
+      ? await this.prepareSplitCancellationRestore(existing)
+      : undefined;
+    let restoredSplitParent: OrderEntity | undefined;
     const updated = shouldReversePaidBenefits
       ? await this.prisma.$transaction(async (tx) => {
+          const lockedChild = await tx.$queryRaw<Array<{ status: string }>>`
+            SELECT status FROM "Order" WHERE id = ${id} FOR UPDATE
+          `;
+          if (lockedChild[0]?.status !== 'PAID') {
+            throw new ConflictException(
+              'La factura cambió mientras se procesaba su anulación.',
+            );
+          }
+          if (splitRestore) {
+            await this.lockUnchangedSplitParent(tx, splitRestore.parent);
+            restoredSplitParent = await this.repo.update(
+              splitRestore.parent.id,
+              splitRestore.update,
+              tx,
+            );
+          }
           await tx.certificado.updateMany({
             where: {
               redeemedOrderId: id,
@@ -514,7 +567,7 @@ export class OrdersService {
               redeemedOrderId: null,
             },
           });
-          if (existing.cuponId) {
+          if (existing.cuponId && existing.couponConsumptionRecorded) {
             await tx.cupon.updateMany({
               where: {
                 id: existing.cuponId,
@@ -528,6 +581,9 @@ export class OrdersService {
           return this.repo.update(id, updateData, tx);
         })
       : await this.repo.update(id, updateData);
+    if (restoredSplitParent) {
+      this.publishOrder(restoredSplitParent, 'updated');
+    }
     if (cancellationEvent) {
       this.eventEmitter.emit('order.cancelled', cancellationEvent);
     }
@@ -891,6 +947,7 @@ export class OrdersService {
             kitchenStatus: undefined,
           };
     });
+    this.assertSplitBillCreditsUnchanged(existing.items, rawItems);
     const mappedItems = await this.pricing.normalizeComboItems(rawItems);
     const nextStatus = isFinal
       ? existing.status
@@ -952,8 +1009,24 @@ export class OrdersService {
       },
       existing.timestamp,
     );
-    const { items: pricedItems, totals } =
-      await this.pricing.calculateWithPrices(mappedItems, promotion);
+    const unadjusted = await this.pricing.calculateWithPrices(
+      mappedItems,
+      promotion,
+    );
+    const hasSplitAdjustedDiscount =
+      typeof existing.discountAmount === 'number' &&
+      existing.discountAmount >= 0 &&
+      dto.discountAmount !== undefined &&
+      Math.abs(dto.discountAmount - existing.discountAmount) < 0.01 &&
+      ((promotion.source === 'none' && existing.discountAmount > 0) ||
+        (promotion.source !== 'none' &&
+          existing.discountAmount + 0.01 < unadjusted.totals.discountAmount));
+    const { items: pricedItems, totals } = hasSplitAdjustedDiscount
+      ? await this.pricing.applyDiscountOverride(
+          unadjusted,
+          existing.discountAmount ?? 0,
+        )
+      : unadjusted;
     const certificateSerials = this.extractCertificateSerials(
       pricedItems,
       dto.certificateSerials,
@@ -1038,6 +1111,822 @@ export class OrdersService {
       this.publishOrder(finalized, 'updated');
     }
     return finalized;
+  }
+
+  async splitCheckout(
+    id: string,
+    dto: SplitOrderCheckoutDto,
+    user?: AuthenticatedUser,
+  ): Promise<{ paidOrder: OrderEntity; parentOrder: OrderEntity }> {
+    if (user?.role === UserRoleDto.cocinero) {
+      throw new ForbiddenException('Los cocineros no pueden facturar órdenes.');
+    }
+
+    const existing = await this.getById(id);
+    if (
+      existing.status === OrderStatusDto.paid ||
+      existing.status === OrderStatusDto.cancelled
+    ) {
+      throw new BadRequestException('La orden ya fue cobrada o anulada.');
+    }
+    if (
+      dto.mode === 'items' &&
+      existing.items.some(isSplitBillCreditOrderItem)
+    ) {
+      throw new BadRequestException(
+        'No se puede cambiar a división por productos después de registrar abonos por monto.',
+      );
+    }
+
+    if (!dto.payments?.length) {
+      throw new BadRequestException(
+        'Debe especificar al menos un método de pago para cobrar la subcuenta.',
+      );
+    }
+
+    const supplementalRawItems: CartItemEntity[] = [];
+    const coreSubRawItems: CartItemEntity[] = [];
+    for (const rawItem of dto.items) {
+      const mapped: CartItemEntity = {
+        ...rawItem,
+        giftQuantity: rawItem.giftQuantity ?? 0,
+      };
+      if (isPackagingOrderItem(mapped) || isDeliveryChargeOrderItem(mapped)) {
+        supplementalRawItems.push({
+          ...mapped,
+          id: undefined,
+          isSentToKitchen: false,
+          sentAt: undefined,
+          kitchenStatus: undefined,
+        });
+      } else {
+        coreSubRawItems.push(mapped);
+      }
+    }
+
+    if (coreSubRawItems.length === 0) {
+      throw new BadRequestException(
+        'La subcuenta debe incluir al menos un ítem a cobrar.',
+      );
+    }
+
+    const nowMs = Date.now();
+    let remainingParentItems: CartItemEntity[] = [];
+    let childRawItems: CartItemEntity[] = [];
+
+    if (dto.mode === 'items') {
+      const subtracted = this.subtractSubAccountItems(
+        existing.items,
+        coreSubRawItems,
+        nowMs,
+      );
+      remainingParentItems = subtracted.remainingParentItems;
+      const hasRemainingProductItems = remainingParentItems.some(
+        (item) => !isSplitBillOrderItem(item) && item.quantity > 0,
+      );
+
+      if (!hasRemainingProductItems) {
+        return this.finalizeSplitParent(existing, dto, user, [
+          ...existing.items,
+          ...supplementalRawItems,
+        ]);
+      }
+
+      childRawItems = [...subtracted.matchedCoreItems, ...supplementalRawItems];
+    } else {
+      if (
+        coreSubRawItems.length !== 1 ||
+        !isSplitBillPartialPaymentItem(coreSubRawItems[0])
+      ) {
+        throw new BadRequestException(
+          'La subcuenta por monto debe contener únicamente su ítem de pago parcial.',
+        );
+      }
+      if (dto.subAccountAmount === undefined) {
+        throw new BadRequestException(
+          'Debe especificar el monto de la subcuenta.',
+        );
+      }
+      const coreTotals = await this.pricing.calculate(coreSubRawItems, {
+        source: 'none',
+      });
+      const subBaseSubtotal = Number(coreTotals.subTotal.toFixed(2));
+      const authoritativeSubAccountAmount = Number(coreTotals.total.toFixed(2));
+      if (subBaseSubtotal <= 0 || authoritativeSubAccountAmount <= 0) {
+        throw new BadRequestException(
+          'El monto de la subcuenta debe ser mayor a cero.',
+        );
+      }
+      if (
+        Math.abs(
+          Math.round(authoritativeSubAccountAmount * 100) -
+            Math.round(dto.subAccountAmount * 100),
+        ) > 1
+      ) {
+        throw new BadRequestException(
+          'El monto de la subcuenta no coincide con el total calculado.',
+        );
+      }
+      if (authoritativeSubAccountAmount - existing.total > 0.01) {
+        throw new BadRequestException(
+          'El monto de la subcuenta supera el saldo pendiente de la mesa.',
+        );
+      }
+      const subAccountAmount = authoritativeSubAccountAmount;
+      const remainingBalanceAfter = Number(
+        (existing.total - subAccountAmount).toFixed(2),
+      );
+
+      if (remainingBalanceAfter <= 0.05) {
+        return this.finalizeSplitParent(existing, dto, user, [
+          ...existing.items,
+          ...supplementalRawItems,
+        ]);
+      }
+
+      childRawItems = [
+        ...coreSubRawItems.map((item) => ({
+          ...item,
+          id: undefined,
+          isSentToKitchen: false,
+          sentAt: undefined,
+          kitchenStatus: undefined,
+        })),
+        ...supplementalRawItems,
+      ];
+
+      const creditItem: CartItemEntity = {
+        name: `Abono subcuenta (${dto.accountName})`,
+        price: -Math.abs(subBaseSubtotal),
+        size: 'único',
+        quantity: 1,
+        giftQuantity: 0,
+        extras: [],
+        isSentToKitchen: false,
+      };
+      remainingParentItems = [...existing.items, creditItem];
+    }
+
+    const normalizedChildItems =
+      await this.pricing.normalizeComboItems(childRawItems);
+    const hasExplicitChildPromotion =
+      dto.promotionSource !== undefined ||
+      dto.cuponId !== undefined ||
+      dto.discountId !== undefined ||
+      dto.happyHourId !== undefined ||
+      Boolean(dto.promotionCode?.trim());
+    const childPromotion =
+      dto.mode === 'items'
+        ? await this.pricing.resolvePromotion(
+            dto,
+            {
+              cuponId: existing.cuponId,
+              discountId: existing.discountId,
+              happyHourId: existing.happyHourId,
+            },
+            existing.timestamp,
+          )
+        : await this.pricing.resolvePromotion(
+            dto,
+            undefined,
+            existing.timestamp,
+          );
+
+    const explicitPromotionMatchesParent =
+      (childPromotion.source === 'coupon' &&
+        childPromotion.cuponId === existing.cuponId) ||
+      (childPromotion.source === 'discount' &&
+        childPromotion.discountId === existing.discountId) ||
+      (childPromotion.source === 'happy-hour' &&
+        childPromotion.happyHourId === existing.happyHourId);
+    const usesParentDiscountPool =
+      dto.mode === 'items' &&
+      (!hasExplicitChildPromotion || explicitPromotionMatchesParent);
+
+    const unadjustedChild = await this.pricing.calculateWithPrices(
+      normalizedChildItems,
+      childPromotion,
+    );
+    const useChildDiscountOverride =
+      usesParentDiscountPool &&
+      typeof dto.discountAmount === 'number' &&
+      dto.discountAmount >= 0 &&
+      ((childPromotion.source === 'none' && dto.discountAmount > 0) ||
+        (childPromotion.source !== 'none' &&
+          Math.abs(unadjustedChild.totals.discountAmount - dto.discountAmount) >
+            0.01));
+    if (
+      usesParentDiscountPool &&
+      typeof dto.discountAmount === 'number' &&
+      dto.discountAmount - (existing.discountAmount ?? 0) > 0.01
+    ) {
+      throw new BadRequestException(
+        'El descuento de la subcuenta supera el descuento pendiente de la orden.',
+      );
+    }
+    const { items: pricedChildItems, totals: childTotals } =
+      useChildDiscountOverride
+        ? await this.pricing.applyDiscountOverride(
+            unadjustedChild,
+            dto.discountAmount ?? 0,
+          )
+        : unadjustedChild;
+
+    const reconciledDtoPayments = this.reconcileSplitPayments(
+      dto.payments,
+      childTotals.total,
+      dto.finalTotal,
+    );
+    const resolvedPayments = await this.resolvePayments(reconciledDtoPayments);
+    assertPaymentsMatchTotal(childTotals.total, resolvedPayments ?? []);
+
+    const parentPromotion = await this.pricing.resolvePromotion(
+      {},
+      {
+        cuponId: existing.cuponId,
+        discountId: existing.discountId,
+        happyHourId: existing.happyHourId,
+      },
+      existing.timestamp,
+    );
+    const unadjustedParent = await this.pricing.calculateWithPrices(
+      remainingParentItems,
+      parentPromotion,
+    );
+    const expectedRemainingDiscount =
+      dto.mode === 'items' && usesParentDiscountPool
+        ? Math.max(
+            0,
+            Number(
+              (
+                (existing.discountAmount ?? 0) - childTotals.discountAmount
+              ).toFixed(2),
+            ),
+          )
+        : (existing.discountAmount ?? 0);
+    const useParentDiscountOverride =
+      typeof existing.discountAmount === 'number' &&
+      existing.discountAmount > 0 &&
+      ((parentPromotion.source === 'none' && expectedRemainingDiscount > 0) ||
+        (parentPromotion.source !== 'none' &&
+          expectedRemainingDiscount + 0.01 <
+            unadjustedParent.totals.discountAmount));
+    const { items: pricedParentItems, totals: parentTotals } =
+      useParentDiscountOverride
+        ? await this.pricing.applyDiscountOverride(
+            unadjustedParent,
+            expectedRemainingDiscount,
+          )
+        : unadjustedParent;
+
+    const childCertificateSerials = this.extractCertificateSerials(
+      pricedChildItems,
+      dto.certificateSerials,
+    );
+    const parentCertificateSerials =
+      this.extractCertificateSerials(pricedParentItems);
+    const childCuponId =
+      childPromotion.source === 'coupon' ? childPromotion.cuponId : undefined;
+    const parentCuponId =
+      parentPromotion.source === 'coupon' ? parentPromotion.cuponId : null;
+
+    await this.assertPendingBenefitsAvailable({
+      cuponId:
+        childCuponId !== undefined && childCuponId !== existing.cuponId
+          ? childCuponId
+          : undefined,
+      certificateSerials: childCertificateSerials,
+      excludeOrderId: existing.id,
+    });
+
+    const customerSnapshotName =
+      dto.customerSnapshotName ||
+      existing.customerSnapshotName ||
+      (dto.customerPhone ? `Cliente ${dto.customerPhone}` : undefined);
+    const cashierSnapshotName = existing.cashierSnapshotName || user?.username;
+    const { customerId, cashierId, shiftId } =
+      await this.referenceResolver.resolve({
+        customerId: dto.customerId ?? existing.customerId,
+        customerSnapshotName,
+        customerPhone: dto.customerPhone ?? existing.customerPhone,
+        customerAddress: dto.customerAddress ?? existing.customerAddress,
+        cashierId: user?.id,
+        cashierSnapshotName,
+      });
+
+    const nextParentStatus = this.deriveGlobalStatus(
+      pricedParentItems,
+      existing.orderType,
+    );
+
+    const { paidOrder, parentOrder } = await this.prisma.$transaction(
+      async (tx) => {
+        await this.lockUnchangedSplitParent(tx, existing);
+        const updatedParent = await this.repo.update(
+          existing.id,
+          {
+            items: pricedParentItems,
+            total: parentTotals.total,
+            subTotal: parentTotals.subTotal,
+            discountAmount: parentTotals.discountAmount,
+            taxAmount: parentTotals.taxAmount,
+            cuponId: parentCuponId,
+            discountId:
+              parentPromotion.source === 'discount'
+                ? parentPromotion.discountId
+                : null,
+            happyHourId:
+              parentPromotion.source === 'happy-hour'
+                ? parentPromotion.happyHourId
+                : null,
+            status: nextParentStatus,
+            certificateSerials: parentCertificateSerials,
+          },
+          tx,
+        );
+
+        const createdChild = await this.repo.create(
+          {
+            shiftId,
+            customerId: customerId ?? existing.customerId,
+            items: pricedChildItems,
+            subTotal: childTotals.subTotal,
+            discountAmount: childTotals.discountAmount,
+            taxAmount: childTotals.taxAmount,
+            total: childTotals.total,
+            timestamp: new Date(nowMs),
+            status: OrderStatusDto.pending,
+            customerSnapshotName,
+            cashierId: cashierId ?? user?.id,
+            cashierSnapshotName,
+            orderType: dto.orderType ?? existing.orderType,
+            customerAddress: dto.customerAddress ?? existing.customerAddress,
+            linkedTables: existing.linkedTables,
+            isSentToKitchen: pricedChildItems.some(
+              (item) =>
+                requiresKitchenPreparation(item) && item.isSentToKitchen,
+            ),
+            cuponId: childCuponId,
+            discountId:
+              childPromotion.source === 'discount'
+                ? childPromotion.discountId
+                : undefined,
+            happyHourId:
+              childPromotion.source === 'happy-hour'
+                ? childPromotion.happyHourId
+                : undefined,
+            payments: resolvedPayments,
+            certificateSerials: childCertificateSerials,
+            parentOrderId: existing.id,
+            splitAccountName: dto.accountName.trim(),
+            splitMode: dto.mode,
+          },
+          tx,
+        );
+
+        await this.finalization.issueInTransaction(tx, {
+          orderId: createdChild.id,
+          dto: {
+            ...dto,
+            ...(customerId ? { customerId } : {}),
+            customerSnapshotName,
+            payments: resolvedPayments,
+            certificateSerials: childCertificateSerials,
+          },
+          totals: childTotals,
+          promotion: childPromotion,
+          skipCouponConsumption:
+            childCuponId !== undefined && childCuponId === parentCuponId,
+        });
+
+        const finalizedChild = await this.repo.findById(createdChild.id, tx);
+        if (!finalizedChild) {
+          throw new NotFoundException(
+            'No se pudo cargar la orden de la subcuenta.',
+          );
+        }
+
+        return {
+          paidOrder: finalizedChild,
+          parentOrder: updatedParent,
+        };
+      },
+    );
+
+    this.publishOrder(parentOrder, 'updated');
+    this.publishOrder(paidOrder, 'created');
+    return { paidOrder, parentOrder };
+  }
+
+  private async finalizeSplitParent(
+    existing: OrderEntity,
+    dto: SplitOrderCheckoutDto,
+    user: AuthenticatedUser | undefined,
+    rawItems: CartItemEntity[],
+  ): Promise<{ paidOrder: OrderEntity; parentOrder: OrderEntity }> {
+    const normalizedItems = await this.pricing.normalizeComboItems(rawItems);
+    const hasExplicitPromotionSelection =
+      dto.promotionSource !== undefined ||
+      dto.cuponId !== undefined ||
+      dto.discountId !== undefined ||
+      dto.happyHourId !== undefined ||
+      Boolean(dto.promotionCode?.trim());
+    const promotion = await this.pricing.resolvePromotion(
+      dto,
+      {
+        cuponId: existing.cuponId,
+        discountId: existing.discountId,
+        happyHourId: existing.happyHourId,
+      },
+      existing.timestamp,
+    );
+    const { items: pricedItems, totals } =
+      !hasExplicitPromotionSelection &&
+      typeof existing.discountAmount === 'number'
+        ? await this.pricing.calculateWithPrices(
+            normalizedItems,
+            promotion,
+            existing.discountAmount,
+          )
+        : await this.pricing.calculateWithPrices(normalizedItems, promotion);
+    const certificateSerials = this.extractCertificateSerials(
+      pricedItems,
+      dto.certificateSerials,
+    );
+    await this.assertPendingBenefitsAvailable({
+      cuponId: promotion.source === 'coupon' ? promotion.cuponId : undefined,
+      certificateSerials,
+      excludeOrderId: existing.id,
+    });
+
+    const customerSnapshotName =
+      dto.customerSnapshotName ||
+      existing.customerSnapshotName ||
+      (dto.customerPhone ? `Cliente ${dto.customerPhone}` : undefined);
+    const cashierSnapshotName = existing.cashierSnapshotName || user?.username;
+    const { customerId } = await this.referenceResolver.resolve({
+      customerId: dto.customerId ?? existing.customerId,
+      customerSnapshotName,
+      customerPhone: dto.customerPhone ?? existing.customerPhone,
+      customerAddress: dto.customerAddress ?? existing.customerAddress,
+      cashierId: user?.id,
+      cashierSnapshotName,
+    });
+    const reconciledPayments = this.reconcileSplitPayments(
+      dto.payments ?? [],
+      totals.total,
+      dto.finalTotal,
+    );
+    const resolvedPayments = await this.resolvePayments(reconciledPayments);
+    assertPaymentsMatchTotal(totals.total, resolvedPayments ?? []);
+
+    const finalized = await this.prisma.$transaction(async (tx) => {
+      await this.lockUnchangedSplitParent(tx, existing);
+      await this.repo.update(
+        existing.id,
+        {
+          items: pricedItems,
+          total: totals.total,
+          subTotal: totals.subTotal,
+          discountAmount: totals.discountAmount,
+          taxAmount: totals.taxAmount,
+          cuponId: promotion.source === 'coupon' ? promotion.cuponId : null,
+          discountId:
+            promotion.source === 'discount' ? promotion.discountId : null,
+          happyHourId:
+            promotion.source === 'happy-hour' ? promotion.happyHourId : null,
+          certificateSerials,
+        },
+        tx,
+      );
+      await this.finalization.issueInTransaction(tx, {
+        orderId: existing.id,
+        dto: {
+          ...dto,
+          ...(customerId ? { customerId } : {}),
+          customerSnapshotName,
+          payments: resolvedPayments,
+          certificateSerials,
+        },
+        totals,
+        promotion,
+      });
+      const paidParent = await this.repo.findById(existing.id, tx);
+      if (!paidParent) {
+        throw new NotFoundException('No se pudo cargar la orden cobrada.');
+      }
+      return paidParent;
+    });
+
+    this.publishOrder(finalized, 'updated');
+    return { paidOrder: finalized, parentOrder: finalized };
+  }
+
+  private async prepareSplitCancellationRestore(
+    child: OrderEntity,
+  ): Promise<
+    | {
+        parent: OrderEntity;
+        update: Parameters<IOrdersRepository['update']>[1];
+      }
+    | undefined
+  > {
+    if (!child.parentOrderId || !child.splitMode) return undefined;
+    const parent = await this.repo.findById(child.parentOrderId);
+    if (
+      !parent ||
+      parent.status === OrderStatusDto.paid ||
+      parent.status === OrderStatusDto.cancelled
+    ) {
+      return undefined;
+    }
+
+    let restoredItems: CartItemEntity[];
+    let restoredDiscount = parent.discountAmount ?? 0;
+    if (child.splitMode === 'items') {
+      const productItems = child.items
+        .filter(
+          (item) =>
+            !isPackagingOrderItem(item) &&
+            !isDeliveryChargeOrderItem(item) &&
+            !isSplitBillOrderItem(item),
+        )
+        .map((item) => ({ ...item, id: undefined }));
+      restoredItems = [...parent.items, ...productItems];
+      const sharesParentPromotion =
+        child.cuponId === parent.cuponId &&
+        child.discountId === parent.discountId &&
+        child.happyHourId === parent.happyHourId;
+      if (sharesParentPromotion) {
+        restoredDiscount += child.discountAmount ?? 0;
+      }
+    } else {
+      const expectedCreditName = `abono subcuenta (${child.splitAccountName ?? ''})`
+        .trim()
+        .toLocaleLowerCase('es');
+      const creditIndex = [...parent.items]
+        .map((item, index) => ({ item, index }))
+        .reverse()
+        .find(
+          ({ item }) =>
+            isSplitBillCreditOrderItem(item) &&
+            item.name.trim().toLocaleLowerCase('es') === expectedCreditName,
+        )?.index;
+      if (creditIndex === undefined) {
+        throw new ConflictException(
+          'No se encontró el abono correspondiente en la orden principal.',
+        );
+      }
+      restoredItems = parent.items.filter((_, index) => index !== creditIndex);
+    }
+
+    const promotion = await this.pricing.resolvePromotion(
+      {},
+      {
+        cuponId: parent.cuponId,
+        discountId: parent.discountId,
+        happyHourId: parent.happyHourId,
+      },
+      parent.timestamp,
+    );
+    const normalizedItems = await this.pricing.normalizeComboItems(restoredItems);
+    const { items, totals } = await this.pricing.calculateWithPrices(
+      normalizedItems,
+      promotion,
+      restoredDiscount,
+    );
+    return {
+      parent,
+      update: {
+        items,
+        total: totals.total,
+        subTotal: totals.subTotal,
+        discountAmount: totals.discountAmount,
+        taxAmount: totals.taxAmount,
+        status: this.deriveGlobalStatus(items, parent.orderType),
+        certificateSerials: this.extractCertificateSerials(items),
+      },
+    };
+  }
+
+  private async lockUnchangedSplitParent(
+    tx: Prisma.TransactionClient,
+    existing: OrderEntity,
+  ): Promise<void> {
+    const rows = await tx.$queryRaw<
+      Array<{ id: string; status: string; updatedAt: Date }>
+    >`
+      SELECT id, status, "updatedAt"
+      FROM "Order"
+      WHERE id = ${existing.id}
+      FOR UPDATE
+    `;
+    const locked = rows[0];
+    if (!locked) throw new NotFoundException('Orden no encontrada');
+    if (locked.status === 'PAID' || locked.status === 'CANCELLED') {
+      throw new ConflictException('La orden ya fue cobrada o anulada.');
+    }
+    if (
+      !existing.updatedAt ||
+      locked.updatedAt.getTime() !== existing.updatedAt.getTime()
+    ) {
+      throw new ConflictException(
+        'La orden cambió mientras se procesaba la subcuenta. Actualiza la mesa e inténtalo nuevamente.',
+      );
+    }
+  }
+
+  private subtractSubAccountItems(
+    parentItems: readonly CartItemEntity[],
+    subItems: readonly CartItemEntity[],
+    nowMs: number,
+  ): {
+    remainingParentItems: CartItemEntity[];
+    matchedCoreItems: CartItemEntity[];
+  } {
+    const pool: CartItemEntity[] = parentItems.map((item) => ({
+      ...item,
+      extras: [...(item.extras ?? [])],
+    }));
+    const matchedCoreItems: CartItemEntity[] = [];
+
+    for (const subItem of subItems) {
+      let qtyNeeded = subItem.quantity;
+      let giftNeeded = Math.max(0, subItem.giftQuantity ?? 0);
+
+      const candidates = pool.filter((candidate) => {
+        if (candidate.quantity <= 0 || isSplitBillOrderItem(candidate)) {
+          return false;
+        }
+        if (subItem.id !== undefined && candidate.id === subItem.id) {
+          return true;
+        }
+        return (
+          candidate.name.toLowerCase() === subItem.name.toLowerCase() &&
+          candidate.size.toLowerCase() === subItem.size.toLowerCase() &&
+          Math.abs(candidate.price - subItem.price) < 0.01 &&
+          JSON.stringify(candidate.extras ?? []) ===
+            JSON.stringify(subItem.extras ?? [])
+        );
+      });
+
+      candidates.sort((a, b) => {
+        const aExact = subItem.id !== undefined && a.id === subItem.id ? 0 : 1;
+        const bExact = subItem.id !== undefined && b.id === subItem.id ? 0 : 1;
+        return aExact - bExact;
+      });
+
+      for (const candidate of candidates) {
+        if (qtyNeeded <= 0) break;
+        const takeQty = Math.min(qtyNeeded, candidate.quantity);
+        const takeGift = Math.min(
+          giftNeeded,
+          candidate.giftQuantity ?? 0,
+          takeQty,
+        );
+
+        candidate.quantity -= takeQty;
+        candidate.giftQuantity = Math.max(
+          0,
+          (candidate.giftQuantity ?? 0) - takeGift,
+        );
+        if (candidate.giftReason === 'happy-hour-2x1') {
+          candidate.giftQuantity = Math.min(
+            candidate.giftQuantity,
+            Math.floor(candidate.quantity / 2),
+          );
+          if (candidate.giftQuantity === 0) {
+            candidate.giftReason = undefined;
+            if (candidate.note === '2x1 Happy Hour') {
+              candidate.note = undefined;
+            }
+          }
+        }
+
+        const isKitchen = requiresKitchenPreparation(candidate);
+        const wasSent = Boolean(candidate.isSentToKitchen);
+        const resolvedChildGiftReason =
+          candidate.giftReason === 'happy-hour-2x1' ||
+          subItem.giftReason === 'happy-hour-2x1'
+            ? takeGift > 0 && Math.floor(takeQty / 2) >= takeGift
+              ? 'happy-hour-2x1'
+              : undefined
+            : (subItem.giftReason ?? candidate.giftReason);
+        const resolvedChildGiftQty =
+          resolvedChildGiftReason === 'happy-hour-2x1'
+            ? Math.min(takeGift, Math.floor(takeQty / 2))
+            : takeGift;
+
+        matchedCoreItems.push({
+          ...candidate,
+          ...subItem,
+          id: undefined,
+          productId: subItem.productId ?? candidate.productId,
+          categoryId: subItem.categoryId ?? candidate.categoryId,
+          kitchenId: subItem.kitchenId ?? candidate.kitchenId,
+          isCombo: subItem.isCombo ?? candidate.isCombo,
+          comboSelections: subItem.comboSelections ?? candidate.comboSelections,
+          kitchenModifiers:
+            subItem.kitchenModifiers ?? candidate.kitchenModifiers,
+          quantity: takeQty,
+          giftQuantity: resolvedChildGiftQty,
+          giftReason: resolvedChildGiftReason,
+          note:
+            resolvedChildGiftQty === 0 &&
+            (subItem.note ?? candidate.note) === '2x1 Happy Hour'
+              ? undefined
+              : (subItem.note ?? candidate.note),
+          isSentToKitchen: isKitchen ? true : false,
+          sentAt: isKitchen ? (candidate.sentAt ?? nowMs) : undefined,
+          kitchenStatus: isKitchen
+            ? wasSent
+              ? KitchenStatusDto.delivered
+              : KitchenStatusDto.pending
+            : undefined,
+        });
+
+        qtyNeeded -= takeQty;
+        giftNeeded -= takeGift;
+      }
+
+      if (qtyNeeded > 0 || giftNeeded > 0) {
+        throw new BadRequestException(
+          `La cantidad o regalía seleccionada de ${subItem.name} supera la disponible en la orden.`,
+        );
+      }
+    }
+
+    return {
+      remainingParentItems: pool.filter((item) => item.quantity > 0),
+      matchedCoreItems,
+    };
+  }
+
+  private reconcileSplitPayments(
+    payments: OrderPaymentDto[],
+    targetTotal: number,
+    clientTotal?: number,
+  ): OrderPaymentDto[] {
+    if (!payments.length) return payments;
+    const paidSum = payments.reduce((sum, p) => sum + p.amount, 0);
+    if (clientTotal !== undefined && Math.abs(paidSum - clientTotal) >= 0.02) {
+      return payments;
+    }
+    const delta = Number((targetTotal - paidSum).toFixed(2));
+    if (Math.abs(delta) < 0.01 || Math.abs(delta) > 1) {
+      return payments;
+    }
+    const adjustIdx = [...payments]
+      .map((payment, idx) => ({ payment, idx }))
+      .reverse()
+      .find(({ payment }) => payment.amount + delta > 0)?.idx;
+    if (adjustIdx === undefined) return payments;
+    return payments.map((payment, idx) =>
+      idx === adjustIdx
+        ? {
+            ...payment,
+            amount: Number((payment.amount + delta).toFixed(2)),
+          }
+        : payment,
+    );
+  }
+
+  private assertSplitBillCreditsUnchanged(
+    existingItems: readonly CartItemEntity[],
+    incomingItems: readonly CartItemEntity[],
+  ): void {
+    const existingCredits = existingItems.filter(isSplitBillCreditOrderItem);
+    const incomingCredits = incomingItems.filter(isSplitBillCreditOrderItem);
+    if (existingCredits.length !== incomingCredits.length) {
+      throw new BadRequestException(
+        'Los abonos de subcuenta no se pueden agregar ni eliminar al editar una orden.',
+      );
+    }
+
+    const incomingById = new Map(
+      incomingCredits.flatMap((item) =>
+        item.id === undefined ? [] : [[item.id, item] as const],
+      ),
+    );
+    for (const credit of existingCredits) {
+      const incoming =
+        credit.id === undefined ? undefined : incomingById.get(credit.id);
+      const unchanged =
+        incoming !== undefined &&
+        incoming.productId === undefined &&
+        incoming.name === credit.name &&
+        incoming.price === credit.price &&
+        incoming.size === credit.size &&
+        incoming.quantity === 1 &&
+        credit.quantity === 1 &&
+        (incoming.giftQuantity ?? 0) === 0 &&
+        incoming.extras.length === 0;
+      if (!unchanged) {
+        throw new BadRequestException(
+          'Los abonos de subcuenta no se pueden modificar al editar una orden.',
+        );
+      }
+    }
   }
 
   private extractCertificateSerials(

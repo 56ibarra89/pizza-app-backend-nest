@@ -267,8 +267,11 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     return list.map((o) => this.mapOrder(o));
   }
 
-  async findById(id: string): Promise<OrderEntity | null> {
-    const found = await this.prisma.order.findUnique({
+  async findById(
+    id: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<OrderEntity | null> {
+    const found = await (tx ?? this.prisma).order.findUnique({
       where: { id },
       include: {
         customer: { select: { id: true, name: true, phone: true } },
@@ -283,52 +286,58 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     return found ? this.mapOrder(found) : null;
   }
 
-  async create(data: {
-    id?: string;
-    shiftId?: string;
-    customerId?: string;
-    items: CartItemEntity[];
-    subTotal?: number;
-    discountAmount?: number;
-    taxAmount?: number;
-    total: number;
-    status: import('../dto/order-status.dto').OrderStatusDto;
-    timestamp: Date;
-    customerSnapshotName?: string;
-    customerAddress?: string;
-    orderType?: import('../dto/order-type.dto').OrderTypeDto;
-    cuponId?: number;
-    discountId?: number;
-    happyHourId?: number;
-    payments?: {
-      method: import('../dto/payment-method.dto').PaymentMethodDto;
-      amount: number;
-      reference?: string;
-      methodConfigId?: string;
-      methodSnapshotName?: string;
-      methodType?: string;
-      currency?: string;
-      originalAmount?: number;
-      exchangeRate?: number;
-      commissionRate?: number;
-      commissionAmount?: number;
+  async create(
+    data: {
+      id?: string;
+      shiftId?: string;
+      customerId?: string;
+      items: CartItemEntity[];
+      subTotal?: number;
+      discountAmount?: number;
+      taxAmount?: number;
+      total: number;
+      status: import('../dto/order-status.dto').OrderStatusDto;
+      timestamp: Date;
+      customerSnapshotName?: string;
+      customerAddress?: string;
+      orderType?: import('../dto/order-type.dto').OrderTypeDto;
+      cuponId?: number;
+      discountId?: number;
+      happyHourId?: number;
+      payments?: {
+        method: import('../dto/payment-method.dto').PaymentMethodDto;
+        amount: number;
+        reference?: string;
+        methodConfigId?: string;
+        methodSnapshotName?: string;
+        methodType?: string;
+        currency?: string;
+        originalAmount?: number;
+        exchangeRate?: number;
+        commissionRate?: number;
+        commissionAmount?: number;
+        cashierId?: string;
+        cashierSnapshotName?: string;
+      }[];
       cashierId?: string;
       cashierSnapshotName?: string;
-    }[];
-    cashierId?: string;
-    cashierSnapshotName?: string;
-    driverId?: string;
-    isSentToKitchen?: boolean;
-    linkedTables?: string[];
-    customerTendered?: number;
-    deliveryChange?: number;
-    certificateSerials?: string[];
-  }): Promise<OrderEntity> {
+      driverId?: string;
+      isSentToKitchen?: boolean;
+      linkedTables?: string[];
+      customerTendered?: number;
+      deliveryChange?: number;
+      certificateSerials?: string[];
+      parentOrderId?: string;
+      splitAccountName?: string;
+      splitMode?: string;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<OrderEntity> {
     const uniqueLinkedTables = Array.from(
       new Set((data.linkedTables ?? []).filter(Boolean)),
     );
 
-    const created = await this.prisma.order.create({
+    const created = await (tx ?? this.prisma).order.create({
       data: {
         ...(data.id ? { id: data.id } : {}),
         shiftId: data.shiftId ?? null,
@@ -351,6 +360,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         pendingCertificateSerials: data.certificateSerials?.length
           ? (data.certificateSerials as Prisma.InputJsonValue)
           : undefined,
+        parentOrderId: data.parentOrderId ?? null,
+        splitAccountName: data.splitAccountName ?? null,
+        splitMode: data.splitMode ?? null,
         ...(data.payments?.length
           ? {
               payments: {
@@ -645,6 +657,47 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           item.id !== undefined,
       );
       const newItems = data.items.filter((item) => item.id === undefined);
+      const currentExtrasByItemId = new Map<
+        number,
+        Array<{ name: string; price: number }>
+      >();
+      if (existingItems.length > 0) {
+        const currentItems = await (tx ?? this.prisma).orderItem.findMany({
+          where: {
+            orderId: id,
+            id: { in: existingItems.map((item) => item.id) },
+          },
+          select: {
+            id: true,
+            extras: { select: { name: true, price: true } },
+          },
+        });
+        for (const item of currentItems) {
+          currentExtrasByItemId.set(
+            item.id,
+            item.extras.map((extra) => ({
+              name: extra.name,
+              price: extra.price.toNumber(),
+            })),
+          );
+        }
+      }
+      const extrasChanged = (item: CartItemEntity & { id: number }) => {
+        const current = [...(currentExtrasByItemId.get(item.id) ?? [])].sort(
+          (left, right) => left.name.localeCompare(right.name),
+        );
+        const next = [...item.extras].sort((left, right) =>
+          left.name.localeCompare(right.name),
+        );
+        return (
+          current.length !== next.length ||
+          current.some(
+            (extra, index) =>
+              extra.name !== next[index]?.name ||
+              Math.abs(extra.price - (next[index]?.price ?? 0)) > 0.001,
+          )
+        );
+      };
       const itemData = (i: CartItemEntity) => ({
         productId: i.productId ?? null,
         name: i.name,
@@ -678,10 +731,17 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           where: { id: i.id },
           data: {
             ...itemData(i),
-            extras: {
-              deleteMany: {},
-              create: i.extras.map((e) => ({ name: e.name, price: e.price })),
-            },
+            ...(extrasChanged(i)
+              ? {
+                  extras: {
+                    deleteMany: {},
+                    create: i.extras.map((e) => ({
+                      name: e.name,
+                      price: e.price,
+                    })),
+                  },
+                }
+              : {}),
           },
         })),
         create: newItems.map((i) => ({
@@ -731,6 +791,18 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       where: whereClause,
     });
 
+    const regularItemIds = items
+      .filter((item) => !item.isCombo || !Array.isArray(item.comboSelections))
+      .map((item) => item.id);
+    if (regularItemIds.length > 0) {
+      await this.prisma.orderItem.updateMany({
+        where: { id: { in: regularItemIds } },
+        data: {
+          kitchenStatus: toDbKitchenStatus(params.kitchenStatus),
+        },
+      });
+    }
+
     for (const item of items) {
       if (item.isCombo && Array.isArray(item.comboSelections)) {
         const selections =
@@ -774,15 +846,26 @@ export class PrismaOrdersRepository implements IOrdersRepository {
               updatedSelections as unknown as Prisma.InputJsonValue,
           },
         });
-      } else {
-        await this.prisma.orderItem.update({
-          where: { id: item.id },
-          data: {
-            kitchenStatus: toDbKitchenStatus(params.kitchenStatus),
-          },
-        });
       }
     }
+  }
+
+  async updateOperationalStatus(
+    id: string,
+    data: {
+      status: import('../dto/order-status.dto').OrderStatusDto;
+      kitchenReadyAt?: Date;
+    },
+  ): Promise<Date> {
+    const updated = await this.prisma.order.update({
+      where: { id },
+      data: {
+        status: toDbOrderStatus(data.status),
+        kitchenReadyAt: data.kitchenReadyAt,
+      },
+      select: { updatedAt: true },
+    });
+    return updated.updatedAt;
   }
 
   private mapOrder(o: {
@@ -793,7 +876,12 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     total: Prisma.Decimal;
     status: import('@prisma/client').OrderStatus;
     timestamp: Date;
+    updatedAt: Date;
     paidAt: Date | null;
+    parentOrderId: string | null;
+    splitAccountName: string | null;
+    splitMode: string | null;
+    couponConsumptionRecorded: boolean;
     pendingCertificateSerials: Prisma.JsonValue | null;
     invoiceCorrelativoId: string | null;
     invoiceDocumentType: import('@prisma/client').DocumentType | null;
@@ -924,7 +1012,12 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       total: o.total.toNumber(),
       status: fromDbOrderStatus(o.status),
       timestamp: o.timestamp,
+      updatedAt: o.updatedAt,
       paidAt: o.paidAt ?? undefined,
+      parentOrderId: o.parentOrderId ?? undefined,
+      splitAccountName: o.splitAccountName ?? undefined,
+      splitMode: o.splitMode ?? undefined,
+      couponConsumptionRecorded: o.couponConsumptionRecorded,
       customerId: o.customerId ?? o.customer?.id ?? undefined,
       customerSnapshotName:
         o.customerSnapshotName ?? o.customer?.name ?? undefined,

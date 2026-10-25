@@ -279,4 +279,35 @@ describe('OrderPricingService combo extras', () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
+
+  it('keeps split-bill credit items non-discountable and respects overrideDiscountAmount', async () => {
+    const service = createService();
+    const result = await service.calculateWithPrices(
+      [
+        {
+          productId: pizza.id,
+          name: pizza.name,
+          price: 200,
+          size: 'único',
+          quantity: 2,
+          giftQuantity: 0,
+          extras: [],
+        },
+        {
+          name: 'Abono subcuenta (Persona 1)',
+          price: -180,
+          size: 'único',
+          quantity: 1,
+          giftQuantity: 0,
+          extras: [],
+        },
+      ],
+      { source: 'none' },
+      20,
+    );
+
+    expect(result.totals.subTotal).toBe(220);
+    expect(result.totals.discountAmount).toBe(20);
+    expect(result.totals.total).toBe(200);
+  });
 });

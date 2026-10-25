@@ -121,6 +121,57 @@ describe('InvoiceIssuingService', () => {
     expect(tx.order.update).not.toHaveBeenCalled();
   });
 
+  it('does not consume the parent coupon again when issuing a split invoice', async () => {
+    let capturedOrderUpdate: unknown;
+    const tx = {
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValueOnce([{ id: 'order-child' }])
+        .mockResolvedValueOnce([{ id: 'correlative-1' }]),
+      order: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'order-child',
+          status: 'PENDING',
+          cashierId: 'cashier-1',
+          cashierSnapshotName: 'Caja',
+          invoiceNumber: null,
+          pendingCertificateSerials: null,
+        }),
+        update: jest.fn((args: unknown) => {
+          capturedOrderUpdate = args;
+          return Promise.resolve({});
+        }),
+      },
+      shift: { findFirst: jest.fn().mockResolvedValue({ id: 'shift-open' }) },
+      cupon: { update: jest.fn().mockResolvedValue({}) },
+      correlativo: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'correlative-1',
+          prefix: 'T-',
+          currentNumber: 1,
+          endNumber: 999,
+          status: 'ACTIVO',
+          resolutionNumber: 'RES-1',
+        }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      systemLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+
+    await new InvoiceIssuingService().issue(tx as never, {
+      orderId: 'order-child',
+      dto: {},
+      totals,
+      promotion: { source: 'coupon', cuponId: 7 },
+      skipCouponConsumption: true,
+    });
+
+    expect(tx.cupon.update).not.toHaveBeenCalled();
+    expect(capturedOrderUpdate).toMatchObject({
+      data: { couponConsumptionRecorded: false },
+    });
+  });
+
   it('falls back to pendingCertificateSerials when dto.certificateSerials is empty and persists customerId', async () => {
     const queryRaw = jest
       .fn()
