@@ -1385,9 +1385,12 @@ export class OrdersService {
             expectedRemainingDiscount,
           )
         : unadjustedParent;
+    const finalParentItems = settlesAmountSplit
+      ? this.ensureKitchenItemsSentOnSettlement(pricedParentItems, nowMs)
+      : pricedParentItems;
 
     const pendingParentCertificateSerials =
-      this.extractCertificateSerials(pricedParentItems);
+      this.extractCertificateSerials(finalParentItems);
     const childCertificateSerials = this.extractCertificateSerials(
       pricedChildItems,
       settlesAmountSplit
@@ -1400,10 +1403,19 @@ export class OrdersService {
     const parentCertificateSerials = settlesAmountSplit
       ? []
       : pendingParentCertificateSerials;
-    const childCuponId =
-      childPromotion.source === 'coupon' ? childPromotion.cuponId : undefined;
     const parentCuponId =
       parentPromotion.source === 'coupon' ? parentPromotion.cuponId : null;
+    const effectiveChildPromotion =
+      childPromotion.source === 'none' &&
+      settlesAmountSplit &&
+      !hasExplicitChildPromotion &&
+      parentPromotion.source === 'coupon'
+        ? parentPromotion
+        : childPromotion;
+    const childCuponId =
+      effectiveChildPromotion.source === 'coupon'
+        ? effectiveChildPromotion.cuponId
+        : undefined;
 
     await this.assertPendingBenefitsAvailable({
       cuponId:
@@ -1431,7 +1443,7 @@ export class OrdersService {
 
     const nextParentStatus = settlesAmountSplit
       ? OrderStatusDto.paid
-      : this.deriveGlobalStatus(pricedParentItems, existing.orderType);
+      : this.deriveGlobalStatus(finalParentItems, existing.orderType);
 
     const { paidOrder, parentOrder } = await this.prisma.$transaction(
       async (tx) => {
@@ -1439,7 +1451,7 @@ export class OrdersService {
         const updatedParent = await this.repo.update(
           existing.id,
           {
-            items: pricedParentItems,
+            items: finalParentItems,
             total: parentTotals.total,
             subTotal: parentTotals.subTotal,
             discountAmount: parentTotals.discountAmount,
@@ -1454,6 +1466,11 @@ export class OrdersService {
                 ? parentPromotion.happyHourId
                 : null,
             status: nextParentStatus,
+            paidAt: settlesAmountSplit ? new Date(nowMs) : undefined,
+            isSentToKitchen: finalParentItems.some(
+              (item) =>
+                requiresKitchenPreparation(item) && item.isSentToKitchen,
+            ),
             certificateSerials: parentCertificateSerials,
           },
           tx,
@@ -1482,12 +1499,12 @@ export class OrdersService {
             ),
             cuponId: childCuponId,
             discountId:
-              childPromotion.source === 'discount'
-                ? childPromotion.discountId
+              effectiveChildPromotion.source === 'discount'
+                ? effectiveChildPromotion.discountId
                 : undefined,
             happyHourId:
-              childPromotion.source === 'happy-hour'
-                ? childPromotion.happyHourId
+              effectiveChildPromotion.source === 'happy-hour'
+                ? effectiveChildPromotion.happyHourId
                 : undefined,
             payments: resolvedPayments,
             certificateSerials: childCertificateSerials,
@@ -1508,7 +1525,7 @@ export class OrdersService {
             certificateSerials: childCertificateSerials,
           },
           totals: childTotals,
-          promotion: childPromotion,
+          promotion: effectiveChildPromotion,
           skipCouponConsumption:
             !settlesAmountSplit &&
             childCuponId !== undefined &&
@@ -1556,7 +1573,7 @@ export class OrdersService {
       },
       existing.timestamp,
     );
-    const { items: pricedItems, totals } =
+    const { items: rawPricedItems, totals } =
       !hasExplicitPromotionSelection &&
       typeof existing.discountAmount === 'number'
         ? await this.pricing.calculateWithPrices(
@@ -1565,6 +1582,10 @@ export class OrdersService {
             existing.discountAmount,
           )
         : await this.pricing.calculateWithPrices(normalizedItems, promotion);
+    const pricedItems = this.ensureKitchenItemsSentOnSettlement(
+      rawPricedItems,
+      Date.now(),
+    );
     const certificateSerials = this.extractCertificateSerials(
       pricedItems,
       dto.certificateSerials,
@@ -1611,6 +1632,9 @@ export class OrdersService {
             promotion.source === 'discount' ? promotion.discountId : null,
           happyHourId:
             promotion.source === 'happy-hour' ? promotion.happyHourId : null,
+          isSentToKitchen: pricedItems.some(
+            (item) => requiresKitchenPreparation(item) && item.isSentToKitchen,
+          ),
           certificateSerials,
         },
         tx,
@@ -1727,9 +1751,35 @@ export class OrdersService {
         discountAmount: totals.discountAmount,
         taxAmount: totals.taxAmount,
         status: this.deriveGlobalStatus(items, parent.orderType),
+        paidAt: null,
         certificateSerials: this.extractCertificateSerials(items),
       },
     };
+  }
+
+  private ensureKitchenItemsSentOnSettlement(
+    items: readonly CartItemEntity[],
+    nowMs: number,
+  ): CartItemEntity[] {
+    return items.map((item) => {
+      if (!requiresKitchenPreparation(item)) {
+        return {
+          ...item,
+          isSentToKitchen: false,
+          sentAt: undefined,
+          kitchenStatus: undefined,
+        };
+      }
+      if (item.isSentToKitchen) {
+        return item;
+      }
+      return {
+        ...item,
+        isSentToKitchen: true,
+        sentAt: item.sentAt ?? nowMs,
+        kitchenStatus: item.kitchenStatus ?? KitchenStatusDto.pending,
+      };
+    });
   }
 
   private async lockUnchangedSplitParent(

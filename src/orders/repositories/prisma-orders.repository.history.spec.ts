@@ -52,6 +52,13 @@ describe('PrismaOrdersRepository history pagination', () => {
         },
       ],
     });
+    expect(query.where?.AND?.[0]?.AND).toContainEqual({
+      NOT: {
+        status: 'PAID',
+        invoiceNumber: null,
+        splitOrders: { some: {} },
+      },
+    });
     expect(result).toMatchObject({ items: [], total: 42 });
   });
 });

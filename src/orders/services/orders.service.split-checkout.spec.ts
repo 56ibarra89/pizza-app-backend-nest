@@ -353,11 +353,186 @@ describe('OrdersService split checkout safeguards', () => {
     const restore = await (
       service as unknown as {
         prepareSplitCancellationRestore(order: OrderEntity): Promise<{
-          update: { items?: OrderEntity['items'] };
+          update: { items?: OrderEntity['items']; paidAt?: Date | null };
         }>;
       }
     ).prepareSplitCancellationRestore(firstChild);
 
     expect(restore.update.items).toEqual([...parentOrder.items, secondCredit]);
+    expect(restore.update.paidAt).toBeNull();
+  });
+
+  it('consumes the parent coupon and sends unsent parent kitchen items when the final amount split settles the table', async () => {
+    const parentWithCoupon: OrderEntity = {
+      ...parentOrder,
+      cuponId: 7,
+      subTotal: 100,
+      discountAmount: 20,
+      taxAmount: 12,
+      total: 92,
+      items: [
+        {
+          ...parentOrder.items[0],
+          quantity: 1,
+          isSentToKitchen: false,
+        },
+      ],
+    };
+    const repo = {
+      findById: jest
+        .fn()
+        .mockResolvedValueOnce(parentWithCoupon)
+        .mockResolvedValueOnce({
+          ...parentWithCoupon,
+          id: 'child-final',
+          status: OrderStatusDto.paid,
+          cuponId: 7,
+          invoice: { invoiceNumber: 'OCT26-00099' },
+        }),
+      update: jest.fn().mockImplementation((_id: string, data: unknown) =>
+        Promise.resolve({
+          ...parentWithCoupon,
+          ...(data as Record<string, unknown>),
+        }),
+      ),
+      create: jest.fn().mockResolvedValue({ id: 'child-final' }),
+    };
+    const pricing = {
+      calculate: jest.fn().mockResolvedValue({
+        subTotal: 80,
+        discountAmount: 0,
+        taxAmount: 12,
+        total: 92,
+      }),
+      normalizeComboItems: jest.fn((items: OrderEntity['items']) =>
+        Promise.resolve(items),
+      ),
+      resolvePromotion: jest
+        .fn()
+        .mockImplementation(
+          (_input: unknown, fallback?: { cuponId?: number }) =>
+            Promise.resolve(
+              fallback?.cuponId
+                ? { source: 'coupon', cuponId: fallback.cuponId }
+                : { source: 'none' },
+            ),
+        ),
+      calculateWithPrices: jest
+        .fn()
+        .mockImplementation(
+          (items: OrderEntity['items'], promotion: { source: string }) =>
+            Promise.resolve(
+              promotion.source === 'coupon'
+                ? {
+                    items,
+                    totals: {
+                      subTotal: 20,
+                      discountAmount: 20,
+                      taxAmount: 0,
+                      total: 0,
+                    },
+                  }
+                : {
+                    items,
+                    totals: {
+                      subTotal: 80,
+                      discountAmount: 0,
+                      taxAmount: 12,
+                      total: 92,
+                    },
+                  },
+            ),
+        ),
+    };
+    const finalization = {
+      issueInTransaction: jest.fn().mockResolvedValue(undefined),
+    };
+    const referenceResolver = {
+      resolve: jest.fn().mockResolvedValue({
+        customerId: undefined,
+        cashierId: 'cashier-1',
+        shiftId: 'shift-1',
+      }),
+    };
+    const prisma = {
+      appConfig: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
+      $transaction: jest.fn(
+        <T>(callback: (tx: unknown) => Promise<T>): Promise<T> =>
+          callback({
+            $queryRaw: jest.fn().mockResolvedValue([
+              {
+                id: parentWithCoupon.id,
+                status: 'PENDING',
+                updatedAt,
+                invoiceNumber: null,
+              },
+            ]),
+          }),
+      ),
+    };
+    const service = new OrdersService(
+      repo as never,
+      { emit: jest.fn() } as never,
+      pricing as never,
+      finalization as never,
+      {} as never,
+      referenceResolver as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      prisma as never,
+    );
+
+    await service.splitCheckout('parent-order', {
+      mode: 'equal',
+      accountName: 'Persona 2',
+      subAccountAmount: 92,
+      items: [
+        {
+          name: 'Pago parcial (Persona 2)',
+          price: 80,
+          size: 'único',
+          quantity: 1,
+          extras: [],
+        },
+      ],
+      payments: [{ method: 'EFECTIVO' as never, amount: 92 }],
+    });
+
+    const parentUpdateCall = repo.update.mock.calls[0] as [
+      string,
+      {
+        status?: OrderStatusDto;
+        paidAt?: Date | null;
+        isSentToKitchen?: boolean;
+        items?: OrderEntity['items'];
+      },
+    ];
+    expect(parentUpdateCall[0]).toBe('parent-order');
+    expect(parentUpdateCall[1].status).toBe(OrderStatusDto.paid);
+    expect(parentUpdateCall[1].paidAt).toBeInstanceOf(Date);
+    expect(parentUpdateCall[1].isSentToKitchen).toBe(true);
+    expect(parentUpdateCall[1].items?.[0]).toMatchObject({
+      name: 'Pizza',
+      isSentToKitchen: true,
+      kitchenStatus: 'pending',
+    });
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cuponId: 7,
+        parentOrderId: 'parent-order',
+      }),
+      expect.anything(),
+    );
+    expect(finalization.issueInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        orderId: 'child-final',
+        promotion: { source: 'coupon', cuponId: 7 },
+        skipCouponConsumption: false,
+      }),
+    );
   });
 });

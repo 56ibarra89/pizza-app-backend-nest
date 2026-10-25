@@ -98,6 +98,7 @@ export interface IOrdersRepository {
       taxAmount?: number | null;
       total?: number;
       status?: OrderStatusDto;
+      paidAt?: Date | null;
       shiftId?: string | null;
       customerId?: string | null;
       customerSnapshotName?: string | null;

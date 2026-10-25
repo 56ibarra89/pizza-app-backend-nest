@@ -71,6 +71,13 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       {
         OR: [{ paidAt: dateRange }, { paidAt: null, timestamp: dateRange }],
       },
+      {
+        NOT: {
+          status: 'PAID',
+          invoiceNumber: null,
+          splitOrders: { some: {} },
+        },
+      },
     ];
     if (params.statuses?.length) {
       baseConditions.push({
@@ -451,6 +458,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       taxAmount?: number | null;
       total?: number;
       status?: import('../dto/order-status.dto').OrderStatusDto;
+      paidAt?: Date | null;
       shiftId?: string | null;
       customerId?: string | null;
       customerSnapshotName?: string | null;
@@ -508,6 +516,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       taxAmount: data.taxAmount === undefined ? undefined : data.taxAmount,
       total: data.total,
       status: data.status ? toDbOrderStatus(data.status) : undefined,
+      paidAt: data.paidAt === undefined ? undefined : data.paidAt,
       shift:
         data.shiftId === undefined
           ? undefined

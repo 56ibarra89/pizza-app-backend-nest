@@ -99,6 +99,7 @@ export class ReportsService {
         discountAmount: true,
         timestamp: true,
         paidAt: true,
+        invoiceNumber: true,
         orderType: true,
         linkedTables: { select: { tableId: true }, take: 1 },
         payments: {
@@ -134,6 +135,7 @@ export class ReportsService {
     let cashSales = 0;
     let cardSales = 0;
     let appSales = 0;
+    let totalOrders = 0;
     let totalDiscounts = 0;
     let discountedOrdersCount = 0;
     const products = new Map<string, TopProductDto>();
@@ -168,77 +170,93 @@ export class ReportsService {
     for (const order of orders) {
       const orderTotal = Number(order.total);
       const discount = Number(order.discountAmount ?? 0);
-      totalSales += orderTotal;
+      const isSettledSplitAggregate =
+        !order.invoiceNumber &&
+        orderTotal === 0 &&
+        order.payments.length === 0 &&
+        order.items.some((item) => {
+          const normalized = item.name.trim().toLocaleLowerCase('es');
+          return (
+            normalized === 'abono subcuenta' ||
+            normalized.startsWith('abono subcuenta ')
+          );
+        });
+
       if (Number.isFinite(discount) && discount > 0) {
         totalDiscounts += discount;
         discountedOrdersCount += 1;
       }
 
-      const channel = toChannelType(
-        order.orderType,
-        order.linkedTables.length > 0,
-      );
-      channels[channel].sales += orderTotal;
-      channels[channel].ordersCount += 1;
+      if (!isSettledSplitAggregate) {
+        totalOrders += 1;
+        totalSales += orderTotal;
 
-      const paidAt = order.paidAt ?? order.timestamp;
-      const time = groupByDay
-        ? dayKey(paidAt, params.timezoneOffsetMinutes)
-        : hourKey(paidAt, params.timezoneOffsetMinutes);
-      const currentTime = times.get(time) ?? { sales: 0, ordersCount: 0 };
-      times.set(time, {
-        sales: currentTime.sales + orderTotal,
-        ordersCount: currentTime.ordersCount + 1,
-      });
+        const channel = toChannelType(
+          order.orderType,
+          order.linkedTables.length > 0,
+        );
+        channels[channel].sales += orderTotal;
+        channels[channel].ordersCount += 1;
 
-      const orderPayments = order.payments.length
-        ? order.payments
-        : [
-            {
-              method: 'EFECTIVO' as const,
-              amount: order.total,
-              methodConfigId: null,
-              methodSnapshotName: null,
-              methodType: null,
-              currency: null,
-              originalAmount: null,
-            },
-          ];
-      for (const payment of orderPayments) {
-        const amount = Number(payment.amount);
-        const type = payment.methodType || legacyPaymentType(payment.method);
-        if (
-          type === 'CASH' ||
-          (!payment.methodType && payment.method === 'EFECTIVO')
-        ) {
-          cashSales += amount;
-        } else if (
-          type === 'CARD_POS' ||
-          (!payment.methodType && payment.method === 'TARJETA')
-        ) {
-          cardSales += amount;
-        } else {
-          appSales += amount;
+        const paidAt = order.paidAt ?? order.timestamp;
+        const time = groupByDay
+          ? dayKey(paidAt, params.timezoneOffsetMinutes)
+          : hourKey(paidAt, params.timezoneOffsetMinutes);
+        const currentTime = times.get(time) ?? { sales: 0, ordersCount: 0 };
+        times.set(time, {
+          sales: currentTime.sales + orderTotal,
+          ordersCount: currentTime.ordersCount + 1,
+        });
+
+        const orderPayments = order.payments.length
+          ? order.payments
+          : [
+              {
+                method: 'EFECTIVO' as const,
+                amount: order.total,
+                methodConfigId: null,
+                methodSnapshotName: null,
+                methodType: null,
+                currency: null,
+                originalAmount: null,
+              },
+            ];
+        for (const payment of orderPayments) {
+          const amount = Number(payment.amount);
+          const type = payment.methodType || legacyPaymentType(payment.method);
+          if (
+            type === 'CASH' ||
+            (!payment.methodType && payment.method === 'EFECTIVO')
+          ) {
+            cashSales += amount;
+          } else if (
+            type === 'CARD_POS' ||
+            (!payment.methodType && payment.method === 'TARJETA')
+          ) {
+            cardSales += amount;
+          } else {
+            appSales += amount;
+          }
+
+          const id = payment.methodConfigId || `legacy:${payment.method}`;
+          const row = payments.get(id) ?? {
+            id,
+            name:
+              payment.methodSnapshotName?.trim() ||
+              legacyPaymentName(payment.method),
+            type,
+            currency: payment.currency || 'NIO',
+            amount: 0,
+            transactionCount: 0,
+          };
+          row.amount += amount;
+          row.transactionCount += 1;
+          if (payment.originalAmount !== null) {
+            row.originalAmount =
+              (row.originalAmount ?? 0) + Number(payment.originalAmount);
+          }
+          payments.set(id, row);
         }
-
-        const id = payment.methodConfigId || `legacy:${payment.method}`;
-        const row = payments.get(id) ?? {
-          id,
-          name:
-            payment.methodSnapshotName?.trim() ||
-            legacyPaymentName(payment.method),
-          type,
-          currency: payment.currency || 'NIO',
-          amount: 0,
-          transactionCount: 0,
-        };
-        row.amount += amount;
-        row.transactionCount += 1;
-        if (payment.originalAmount !== null) {
-          row.originalAmount =
-            (row.originalAmount ?? 0) + Number(payment.originalAmount);
-        }
-        payments.set(id, row);
       }
 
       const reportableItems = order.items.filter(
@@ -299,7 +317,7 @@ export class ReportsService {
       paymentBreakdown: [...payments.values()].sort(
         (a, b) => b.amount - a.amount,
       ),
-      totalOrders: orders.length,
+      totalOrders,
       totalDiscounts,
       discountedOrdersCount,
       topProducts: [...products.values()].sort(

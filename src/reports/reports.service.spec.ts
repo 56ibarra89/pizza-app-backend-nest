@@ -104,6 +104,141 @@ describe('ReportsService', () => {
     });
   });
 
+  it('preserves topProducts and discounts from settled split aggregates without inflating order or payment counts', async () => {
+    findMany.mockResolvedValue([
+      {
+        total: new Prisma.Decimal(0),
+        discountAmount: new Prisma.Decimal(40),
+        timestamp: new Date('2026-10-12T18:00:00.000Z'),
+        paidAt: new Date('2026-10-12T18:30:00.000Z'),
+        invoiceNumber: null,
+        orderType: 'LOCAL',
+        linkedTables: [{ tableId: 'F1-M1' }],
+        payments: [],
+        items: [
+          {
+            productId: 'pizza-1',
+            name: 'Pizza Suprema',
+            price: new Prisma.Decimal(100),
+            quantity: 2,
+            giftQuantity: 0,
+            product: {
+              categoryId: 'pizzas',
+              category: { label: 'Pizzas' },
+            },
+          },
+          {
+            productId: null,
+            name: 'Abono subcuenta (Persona 1)',
+            price: new Prisma.Decimal(-80),
+            quantity: 1,
+            giftQuantity: 0,
+            product: null,
+          },
+          {
+            productId: null,
+            name: 'Abono subcuenta (Persona 2)',
+            price: new Prisma.Decimal(-80),
+            quantity: 1,
+            giftQuantity: 0,
+            product: null,
+          },
+        ],
+      },
+      {
+        total: new Prisma.Decimal(92),
+        discountAmount: new Prisma.Decimal(0),
+        timestamp: new Date('2026-10-12T18:20:00.000Z'),
+        paidAt: new Date('2026-10-12T18:20:00.000Z'),
+        invoiceNumber: 'OCT26-00001',
+        orderType: 'LOCAL',
+        linkedTables: [{ tableId: 'F1-M1' }],
+        payments: [
+          {
+            method: 'TARJETA',
+            amount: new Prisma.Decimal(92),
+            methodConfigId: null,
+            methodSnapshotName: 'POS Tarjeta',
+            methodType: 'CARD_POS',
+            currency: 'NIO',
+            originalAmount: null,
+          },
+        ],
+        items: [
+          {
+            productId: null,
+            name: 'Pago parcial (Persona 1)',
+            price: new Prisma.Decimal(80),
+            quantity: 1,
+            giftQuantity: 0,
+            product: null,
+          },
+        ],
+      },
+      {
+        total: new Prisma.Decimal(92),
+        discountAmount: new Prisma.Decimal(0),
+        timestamp: new Date('2026-10-12T18:30:00.000Z'),
+        paidAt: new Date('2026-10-12T18:30:00.000Z'),
+        invoiceNumber: 'OCT26-00002',
+        orderType: 'LOCAL',
+        linkedTables: [{ tableId: 'F1-M1' }],
+        payments: [
+          {
+            method: 'TARJETA',
+            amount: new Prisma.Decimal(92),
+            methodConfigId: null,
+            methodSnapshotName: 'POS Tarjeta',
+            methodType: 'CARD_POS',
+            currency: 'NIO',
+            originalAmount: null,
+          },
+        ],
+        items: [
+          {
+            productId: null,
+            name: 'Pago parcial (Persona 2)',
+            price: new Prisma.Decimal(80),
+            quantity: 1,
+            giftQuantity: 0,
+            product: null,
+          },
+        ],
+      },
+    ]);
+
+    const report = await service.getSalesReport({
+      startDate: new Date('2026-10-12T06:00:00.000Z'),
+      endDate: new Date('2026-10-13T05:59:59.999Z'),
+      timezoneOffsetMinutes: 360,
+    });
+
+    expect(report).toMatchObject({
+      totalSales: 184,
+      cardSales: 184,
+      cashSales: 0,
+      totalOrders: 2,
+      totalDiscounts: 40,
+      discountedOrdersCount: 1,
+    });
+    expect(report.paymentBreakdown).toEqual([
+      expect.objectContaining({
+        type: 'CARD_POS',
+        amount: 184,
+        transactionCount: 2,
+      }),
+    ]);
+    expect(report.topProducts).toEqual([
+      {
+        name: 'Pizza Suprema',
+        quantity: 2,
+        totalRevenue: 160,
+        categoryId: 'pizzas',
+        categoryName: 'Pizzas',
+      },
+    ]);
+  });
+
   it('rejects invalid or excessive ranges before querying the database', async () => {
     await expect(
       service.getSalesReport({
