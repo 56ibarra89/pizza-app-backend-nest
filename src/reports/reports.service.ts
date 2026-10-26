@@ -69,7 +69,11 @@ const shiftedDate = (date: Date, timezoneOffsetMinutes: number): Date =>
 
 const dayKey = (date: Date, timezoneOffsetMinutes: number): string => {
   const local = shiftedDate(date, timezoneOffsetMinutes);
-  return `${String(local.getUTCDate()).padStart(2, '0')} ${SPANISH_MONTHS[local.getUTCMonth()]}`;
+  return [
+    local.getUTCFullYear(),
+    String(local.getUTCMonth() + 1).padStart(2, '0'),
+    String(local.getUTCDate()).padStart(2, '0'),
+  ].join('-');
 };
 
 const hourKey = (date: Date, timezoneOffsetMinutes: number): string => {
@@ -93,9 +97,17 @@ export class ReportsService {
     const orders = await this.prisma.order.findMany({
       where: {
         status: 'PAID',
-        paidAt: { gte: params.startDate, lte: params.endDate },
+        OR: [
+          { paidAt: { gte: params.startDate, lte: params.endDate } },
+          {
+            paidAt: null,
+            timestamp: { gte: params.startDate, lte: params.endDate },
+          },
+        ],
       },
       select: {
+        id: true,
+        parentOrderId: true,
         total: true,
         discountAmount: true,
         timestamp: true,
@@ -138,7 +150,7 @@ export class ReportsService {
     let appSales = 0;
     let totalOrders = 0;
     let totalDiscounts = 0;
-    let discountedOrdersCount = 0;
+    const discountedOrderGroups = new Set<string>();
     const products = new Map<string, TopProductDto>();
     const payments = new Map<string, PaymentBreakdownRowDto>();
     const times = new Map<string, { sales: number; ordersCount: number }>();
@@ -185,7 +197,7 @@ export class ReportsService {
 
       if (Number.isFinite(discount) && discount > 0) {
         totalDiscounts += discount;
-        discountedOrdersCount += 1;
+        discountedOrderGroups.add(order.parentOrderId ?? order.id);
       }
 
       if (!isSettledSplitAggregate) {
@@ -320,7 +332,7 @@ export class ReportsService {
       ),
       totalOrders,
       totalDiscounts,
-      discountedOrdersCount,
+      discountedOrdersCount: discountedOrderGroups.size,
       topProducts: [...products.values()].sort(
         (a, b) => b.quantity - a.quantity,
       ),
@@ -366,12 +378,20 @@ export class ReportsService {
     }
 
     const result: SalesByTimeDto[] = [];
+    const spansYears =
+      new Date(startDayUtc).getUTCFullYear() !==
+      new Date(endDayUtc).getUTCFullYear();
     for (let cursor = startDayUtc; cursor <= endDayUtc; cursor += DAY_MS) {
       const date = new Date(cursor);
-      const time = `${String(date.getUTCDate()).padStart(2, '0')} ${SPANISH_MONTHS[date.getUTCMonth()]}`;
+      const key = [
+        date.getUTCFullYear(),
+        String(date.getUTCMonth() + 1).padStart(2, '0'),
+        String(date.getUTCDate()).padStart(2, '0'),
+      ].join('-');
+      const time = `${String(date.getUTCDate()).padStart(2, '0')} ${SPANISH_MONTHS[date.getUTCMonth()]}${spansYears ? ` ${date.getUTCFullYear()}` : ''}`;
       result.push({
         time,
-        ...(times.get(time) ?? { sales: 0, ordersCount: 0 }),
+        ...(times.get(key) ?? { sales: 0, ordersCount: 0 }),
       });
     }
     return result;

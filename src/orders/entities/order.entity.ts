@@ -34,6 +34,7 @@ export interface OrderEntity {
   timestamp: Date;
   updatedAt?: Date;
   paidAt?: Date;
+  shiftId?: string;
   parentOrderId?: string;
   splitAccountName?: string;
   splitMode?: string;

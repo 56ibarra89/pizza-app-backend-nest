@@ -314,6 +314,17 @@ export class OrdersService {
       | undefined;
 
     if (dto.status === OrderStatusDto.cancelled) {
+      if (existing.status === OrderStatusDto.paid && existing.shiftId) {
+        const sourceShift = await this.prisma.shift.findUnique({
+          where: { id: existing.shiftId },
+          select: { status: true },
+        });
+        if (sourceShift?.status !== 'OPEN') {
+          throw new BadRequestException(
+            'No se puede anular una factura perteneciente a un turno cerrado.',
+          );
+        }
+      }
       const paidSplitOrders = await this.prisma.order.count({
         where: {
           parentOrderId: existing.id,
@@ -537,6 +548,10 @@ export class OrdersService {
     const splitRestore = shouldReversePaidBenefits
       ? await this.prepareSplitCancellationRestore(existing)
       : undefined;
+    if (splitRestore) {
+      updateData.cancellationLossAmount = 0;
+      updateData.cancellationCountsAsWaste = false;
+    }
     let restoredSplitParent: OrderEntity | undefined;
     const updated = shouldReversePaidBenefits
       ? await this.prisma.$transaction(async (tx) => {
@@ -568,15 +583,35 @@ export class OrdersService {
             },
           });
           if (existing.cuponId && existing.couponConsumptionRecorded) {
-            await tx.cupon.updateMany({
-              where: {
-                id: existing.cuponId,
-                currentUses: { gt: 0 },
-              },
-              data: {
-                currentUses: { decrement: 1 },
-              },
-            });
+            const replacementSibling = existing.parentOrderId
+              ? await tx.order.findFirst({
+                  where: {
+                    parentOrderId: existing.parentOrderId,
+                    id: { not: existing.id },
+                    status: 'PAID',
+                    cuponId: existing.cuponId,
+                  },
+                  select: { id: true, couponConsumptionRecorded: true },
+                })
+              : null;
+            if (replacementSibling) {
+              if (!replacementSibling.couponConsumptionRecorded) {
+                await tx.order.update({
+                  where: { id: replacementSibling.id },
+                  data: { couponConsumptionRecorded: true },
+                });
+              }
+            } else {
+              await tx.cupon.updateMany({
+                where: {
+                  id: existing.cuponId,
+                  currentUses: { gt: 0 },
+                },
+                data: {
+                  currentUses: { decrement: 1 },
+                },
+              });
+            }
           }
           return this.repo.update(id, updateData, tx);
         })
@@ -822,7 +857,13 @@ export class OrdersService {
       where: {
         order: {
           status: 'PAID',
-          paidAt: { gte: startDate, lte: endDate },
+          OR: [
+            { paidAt: { gte: startDate, lte: endDate } },
+            {
+              paidAt: null,
+              timestamp: { gte: startDate, lte: endDate },
+            },
+          ],
         },
       },
       select: {
@@ -834,6 +875,8 @@ export class OrdersService {
         currency: true,
         commissionRate: true,
         commissionAmount: true,
+        originalAmount: true,
+        exchangeRate: true,
         reference: true,
       },
     });
@@ -849,6 +892,9 @@ export class OrdersService {
         grossAmount: number;
         commissionAmount: number;
         netAmount: number;
+        grossAmountNio: number;
+        commissionAmountNio: number;
+        netAmountNio: number;
       }
     >();
     for (const payment of payments) {
@@ -857,22 +903,39 @@ export class OrdersService {
       const commission =
         payment.commissionAmount?.toNumber() ??
         Math.round(gross * (payment.commissionRate?.toNumber() ?? 0)) / 100;
+      const currency = payment.currency ?? 'NIO';
+      const exchangeRate = Math.max(
+        0.0001,
+        payment.exchangeRate?.toNumber() ?? 1,
+      );
+      const originalGross =
+        currency === 'USD'
+          ? (payment.originalAmount?.toNumber() ?? gross / exchangeRate)
+          : gross;
+      const originalCommission =
+        currency === 'USD' ? commission / exchangeRate : commission;
       const current = groups.get(methodId) ?? {
         methodId,
         name: payment.methodSnapshotName ?? payment.method,
         type: payment.methodType ?? payment.method,
-        currency: payment.currency ?? 'NIO',
+        currency,
         transactionCount: 0,
         referencedCount: 0,
         grossAmount: 0,
         commissionAmount: 0,
         netAmount: 0,
+        grossAmountNio: 0,
+        commissionAmountNio: 0,
+        netAmountNio: 0,
       };
       current.transactionCount += 1;
       if (payment.reference) current.referencedCount += 1;
-      current.grossAmount += gross;
-      current.commissionAmount += commission;
-      current.netAmount += gross - commission;
+      current.grossAmount += originalGross;
+      current.commissionAmount += originalCommission;
+      current.netAmount += originalGross - originalCommission;
+      current.grossAmountNio += gross;
+      current.commissionAmountNio += commission;
+      current.netAmountNio += gross - commission;
       groups.set(methodId, current);
     }
     const round = (value: number) => Math.round(value * 100) / 100;
@@ -882,20 +945,23 @@ export class OrdersService {
         grossAmount: round(group.grossAmount),
         commissionAmount: round(group.commissionAmount),
         netAmount: round(group.netAmount),
+        grossAmountNio: round(group.grossAmountNio),
+        commissionAmountNio: round(group.commissionAmountNio),
+        netAmountNio: round(group.netAmountNio),
       }))
-      .sort((a, b) => b.grossAmount - a.grossAmount);
+      .sort((a, b) => b.grossAmountNio - a.grossAmountNio);
     return {
       startDate: startDate.toISOString(),
       endDate: endDate.toISOString(),
       transactionCount: payments.length,
       grossAmount: round(
-        breakdown.reduce((sum, group) => sum + group.grossAmount, 0),
+        breakdown.reduce((sum, group) => sum + group.grossAmountNio, 0),
       ),
       commissionAmount: round(
-        breakdown.reduce((sum, group) => sum + group.commissionAmount, 0),
+        breakdown.reduce((sum, group) => sum + group.commissionAmountNio, 0),
       ),
       netAmount: round(
-        breakdown.reduce((sum, group) => sum + group.netAmount, 0),
+        breakdown.reduce((sum, group) => sum + group.netAmountNio, 0),
       ),
       breakdown,
     };
@@ -1072,6 +1138,11 @@ export class OrdersService {
   ) {
     const existing = await this.getById(id);
     if (existing.status === OrderStatusDto.paid) return existing;
+    if (existing.status === OrderStatusDto.cancelled) {
+      throw new BadRequestException(
+        'No se puede cobrar ni facturar una orden anulada.',
+      );
+    }
 
     const certificateSerials = this.extractCertificateSerials(
       existing.items,
@@ -1177,7 +1248,7 @@ export class OrdersService {
     const nowMs = Date.now();
     let remainingParentItems: CartItemEntity[] = [];
     let childRawItems: CartItemEntity[] = [];
-    let settlesAmountSplit = false;
+    let settlesSplit = false;
 
     if (dto.mode === 'items') {
       const subtracted = this.subtractSubAccountItems(
@@ -1187,17 +1258,28 @@ export class OrdersService {
       );
       remainingParentItems = subtracted.remainingParentItems;
       const hasRemainingProductItems = remainingParentItems.some(
-        (item) => !isSplitBillOrderItem(item) && item.quantity > 0,
+        (item) =>
+          !isSplitBillOrderItem(item) &&
+          !isPackagingOrderItem(item) &&
+          !isDeliveryChargeOrderItem(item) &&
+          item.quantity > 0,
       );
-
-      if (!hasRemainingProductItems) {
-        return this.finalizeSplitParent(existing, dto, user, [
-          ...existing.items,
-          ...supplementalRawItems,
-        ]);
-      }
-
-      childRawItems = [...subtracted.matchedCoreItems, ...supplementalRawItems];
+      settlesSplit = !hasRemainingProductItems;
+      const remainingSupplementalItems = settlesSplit
+        ? remainingParentItems.filter(
+            (item) =>
+              isPackagingOrderItem(item) || isDeliveryChargeOrderItem(item),
+          )
+        : [];
+      childRawItems = [
+        ...subtracted.matchedCoreItems,
+        ...remainingSupplementalItems.map((item) => ({
+          ...item,
+          id: undefined,
+        })),
+        ...supplementalRawItems,
+      ];
+      if (settlesSplit) remainingParentItems = [];
     } else {
       if (
         coreSubRawItems.length !== 1 ||
@@ -1241,7 +1323,7 @@ export class OrdersService {
       const remainingBalanceAfter = Number(
         (existing.total - subAccountAmount).toFixed(2),
       );
-      settlesAmountSplit = remainingBalanceAfter <= 0.05;
+      settlesSplit = remainingBalanceAfter <= 0.05;
 
       childRawItems = [
         ...coreSubRawItems.map((item) => ({
@@ -1257,7 +1339,7 @@ export class OrdersService {
       const creditItem: CartItemEntity = {
         name: `Abono subcuenta (${dto.accountName})`,
         price: -Math.abs(
-          settlesAmountSplit
+          settlesSplit
             ? Math.max(
                 0,
                 (existing.subTotal ?? subBaseSubtotal) -
@@ -1385,7 +1467,7 @@ export class OrdersService {
             expectedRemainingDiscount,
           )
         : unadjustedParent;
-    const finalParentItems = settlesAmountSplit
+    const finalParentItems = settlesSplit
       ? this.ensureKitchenItemsSentOnSettlement(pricedParentItems, nowMs)
       : pricedParentItems;
 
@@ -1393,21 +1475,21 @@ export class OrdersService {
       this.extractCertificateSerials(finalParentItems);
     const childCertificateSerials = this.extractCertificateSerials(
       pricedChildItems,
-      settlesAmountSplit
+      settlesSplit
         ? [
             ...(dto.certificateSerials ?? []),
             ...pendingParentCertificateSerials,
           ]
         : dto.certificateSerials,
     );
-    const parentCertificateSerials = settlesAmountSplit
+    const parentCertificateSerials = settlesSplit
       ? []
       : pendingParentCertificateSerials;
     const parentCuponId =
       parentPromotion.source === 'coupon' ? parentPromotion.cuponId : null;
     const effectiveChildPromotion =
       childPromotion.source === 'none' &&
-      settlesAmountSplit &&
+      settlesSplit &&
       !hasExplicitChildPromotion &&
       parentPromotion.source === 'coupon'
         ? parentPromotion
@@ -1441,13 +1523,25 @@ export class OrdersService {
         cashierSnapshotName,
       });
 
-    const nextParentStatus = settlesAmountSplit
+    const nextParentStatus = settlesSplit
       ? OrderStatusDto.paid
       : this.deriveGlobalStatus(finalParentItems, existing.orderType);
 
     const { paidOrder, parentOrder } = await this.prisma.$transaction(
       async (tx) => {
         await this.lockUnchangedSplitParent(tx, existing);
+        const sharesParentCoupon =
+          childCuponId !== undefined && childCuponId === parentCuponId;
+        const recordedSiblingCount = sharesParentCoupon
+          ? await tx.order.count({
+              where: {
+                parentOrderId: existing.id,
+                status: 'PAID',
+                cuponId: childCuponId,
+                couponConsumptionRecorded: true,
+              },
+            })
+          : 0;
         const updatedParent = await this.repo.update(
           existing.id,
           {
@@ -1466,7 +1560,7 @@ export class OrdersService {
                 ? parentPromotion.happyHourId
                 : null,
             status: nextParentStatus,
-            paidAt: settlesAmountSplit ? new Date(nowMs) : undefined,
+            paidAt: settlesSplit ? new Date(nowMs) : undefined,
             isSentToKitchen: finalParentItems.some(
               (item) =>
                 requiresKitchenPreparation(item) && item.isSentToKitchen,
@@ -1526,10 +1620,7 @@ export class OrdersService {
           },
           totals: childTotals,
           promotion: effectiveChildPromotion,
-          skipCouponConsumption:
-            !settlesAmountSplit &&
-            childCuponId !== undefined &&
-            childCuponId === parentCuponId,
+          skipCouponConsumption: sharesParentCoupon && recordedSiblingCount > 0,
         });
 
         const finalizedChild = await this.repo.findById(createdChild.id, tx);
@@ -1890,7 +1981,6 @@ export class OrdersService {
         }
 
         const isKitchen = requiresKitchenPreparation(candidate);
-        const wasSent = Boolean(candidate.isSentToKitchen);
         const resolvedChildGiftReason =
           candidate.giftReason === 'happy-hour-2x1' ||
           subItem.giftReason === 'happy-hour-2x1'
@@ -1925,9 +2015,7 @@ export class OrdersService {
           isSentToKitchen: isKitchen ? true : false,
           sentAt: isKitchen ? (candidate.sentAt ?? nowMs) : undefined,
           kitchenStatus: isKitchen
-            ? wasSent
-              ? KitchenStatusDto.delivered
-              : KitchenStatusDto.pending
+            ? (candidate.kitchenStatus ?? KitchenStatusDto.pending)
             : undefined,
         });
 
@@ -2215,10 +2303,18 @@ export class OrdersService {
         !Array.isArray(general.data)
           ? general.data
           : undefined;
+      const providedExchangeRate = Number(payment.exchangeRate);
       const exchangeRate =
         configured.currency === 'USD'
-          ? Math.max(0.0001, Number(generalData?.exchangeRate) || 36.5)
+          ? providedExchangeRate > 0
+            ? providedExchangeRate
+            : Math.max(0.0001, Number(generalData?.exchangeRate) || 36.5)
           : 1;
+      const providedOriginalAmount = Number(payment.originalAmount);
+      const originalAmount =
+        providedOriginalAmount > 0
+          ? Math.round(providedOriginalAmount * 100) / 100
+          : Math.round((amount / exchangeRate) * 100) / 100;
 
       return {
         ...payment,
@@ -2228,7 +2324,7 @@ export class OrdersService {
         methodSnapshotName: configured.name,
         methodType: configured.type,
         currency: configured.currency,
-        originalAmount: Math.round((amount / exchangeRate) * 100) / 100,
+        originalAmount,
         exchangeRate,
         commissionRate: configured.commissionRate,
         commissionAmount,

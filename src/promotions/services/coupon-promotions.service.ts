@@ -104,10 +104,6 @@ export class CouponPromotionsService {
       throw new BadRequestException(`Cupón no válido: ${mappedCoupon.status}`);
     }
 
-    await this.repository.update(coupon.id, {
-      currentUses: coupon.currentUses + 1,
-    });
-
     return {
       applied: {
         id: coupon.id,

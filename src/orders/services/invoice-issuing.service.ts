@@ -21,6 +21,7 @@ import {
 } from '../mappers/status.mapper';
 import type { OrderTotals } from '../types/order-totals';
 import type { ResolvedOrderPromotion } from '../types/order-promotion';
+import { isCouponExpired } from '../../promotions/mappers/promotions.mapper';
 
 interface IssueInvoiceParams {
   orderId: string;
@@ -28,6 +29,8 @@ interface IssueInvoiceParams {
   totals: OrderTotals;
   promotion: ResolvedOrderPromotion;
   skipCouponConsumption?: boolean;
+  cashierId?: string;
+  cashierSnapshotName?: string;
 }
 
 interface DgiConfig {
@@ -83,6 +86,8 @@ export class InvoiceIssuingService {
       totals,
       promotion,
       skipCouponConsumption,
+      cashierId,
+      cashierSnapshotName,
     }: IssueInvoiceParams,
   ): Promise<void> {
     const cuponId =
@@ -118,6 +123,11 @@ export class InvoiceIssuingService {
 
     if (!order) throw new NotFoundException('Orden no encontrada');
     if (order.status === 'PAID') return;
+    if (order.status === 'CANCELLED') {
+      throw new BadRequestException(
+        'No se puede cobrar ni facturar una orden anulada.',
+      );
+    }
 
     const certificateSerials =
       dto.certificateSerials && dto.certificateSerials.length > 0
@@ -161,13 +171,19 @@ export class InvoiceIssuingService {
                     exchangeRate: payment.exchangeRate,
                     commissionRate: payment.commissionRate,
                     commissionAmount: payment.commissionAmount,
-                    cashierId: payment.cashierId,
-                    cashierSnapshotName: payment.cashierSnapshotName,
+                    cashierId:
+                      payment.cashierId ?? cashierId ?? order.cashierId,
+                    cashierSnapshotName:
+                      payment.cashierSnapshotName ??
+                      cashierSnapshotName ??
+                      order.cashierSnapshotName,
                   })),
                 },
               }
             : {}),
           customerId: dto.customerId ?? undefined,
+          cashierId: cashierId ?? undefined,
+          cashierSnapshotName: cashierSnapshotName ?? undefined,
           customerSnapshotName: dto.customerSnapshotName ?? undefined,
           customerAddress: dto.customerAddress ?? undefined,
           orderType: dto.orderType ? toDbOrderType(dto.orderType) : undefined,
@@ -178,8 +194,7 @@ export class InvoiceIssuingService {
           cuponId,
           discountId,
           happyHourId,
-          couponConsumptionRecorded:
-            cuponId !== null && !skipCouponConsumption,
+          couponConsumptionRecorded: cuponId !== null && !skipCouponConsumption,
         },
       });
       return;
@@ -291,13 +306,18 @@ export class InvoiceIssuingService {
                   exchangeRate: payment.exchangeRate,
                   commissionRate: payment.commissionRate,
                   commissionAmount: payment.commissionAmount,
-                  cashierId: payment.cashierId,
-                  cashierSnapshotName: payment.cashierSnapshotName,
+                  cashierId: payment.cashierId ?? cashierId ?? order.cashierId,
+                  cashierSnapshotName:
+                    payment.cashierSnapshotName ??
+                    cashierSnapshotName ??
+                    order.cashierSnapshotName,
                 })),
               },
             }
           : {}),
         customerId: dto.customerId ?? undefined,
+        cashierId: cashierId ?? undefined,
+        cashierSnapshotName: cashierSnapshotName ?? undefined,
         customerSnapshotName: dto.customerSnapshotName ?? undefined,
         customerAddress: dto.customerAddress ?? undefined,
         orderType: dto.orderType ? toDbOrderType(dto.orderType) : undefined,
@@ -308,8 +328,7 @@ export class InvoiceIssuingService {
         cuponId,
         discountId,
         happyHourId,
-        couponConsumptionRecorded:
-          cuponId !== null && !skipCouponConsumption,
+        couponConsumptionRecorded: cuponId !== null && !skipCouponConsumption,
         shiftId,
         paidAt: now,
         pendingCertificateSerials: Prisma.DbNull,
@@ -385,7 +404,7 @@ export class InvoiceIssuingService {
     if (coupon.manualStatus !== CuponManualStatus.ACTIVO) {
       throw new BadRequestException('El cupón no está activo');
     }
-    if (coupon.expiresDate && coupon.expiresDate < now) {
+    if (isCouponExpired(coupon.expiresDate, now)) {
       throw new BadRequestException('El cupón está vencido');
     }
     if (coupon.maxUses > 0 && coupon.currentUses >= coupon.maxUses) {
@@ -412,6 +431,19 @@ export class InvoiceIssuingService {
       ),
     ).sort();
 
+    const giftedItems = normalizedSerials.length
+      ? await tx.orderItem.findMany({
+          where: { orderId, giftQuantity: { gt: 0 } },
+          select: {
+            productId: true,
+            name: true,
+            note: true,
+            giftQuantity: true,
+            price: true,
+          },
+        })
+      : [];
+
     for (const serial of normalizedSerials) {
       const rows = await tx.$queryRaw<LockedCertificate[]>`
         SELECT id, status, "deletedAt"
@@ -428,6 +460,61 @@ export class InvoiceIssuingService {
         throw new BadRequestException(
           `El certificado ${serial} no está disponible`,
         );
+      }
+
+      const details = await tx.certificado.findUnique({
+        where: { id: certificate.id },
+        select: {
+          amount: true,
+          items: { select: { productId: true, quantity: true } },
+        },
+      });
+      const taggedItems = giftedItems.filter(
+        (item) =>
+          item.note?.trim().toUpperCase() === `VALE:${serial}` ||
+          item.note?.trim().toUpperCase() === `VALE: ${serial}`,
+      );
+      if (taggedItems.length === 0) {
+        throw new BadRequestException(
+          `El certificado ${serial} no está asociado a productos regalados`,
+        );
+      }
+
+      if (details?.items.length) {
+        const authorized = new Map(
+          details.items.map((item) => [item.productId, item.quantity]),
+        );
+        const redeemed = new Map<string, number>();
+        for (const item of taggedItems) {
+          if (!item.productId || !authorized.has(item.productId)) {
+            throw new BadRequestException(
+              `El certificado ${serial} no autoriza el producto ${item.name}`,
+            );
+          }
+          redeemed.set(
+            item.productId,
+            (redeemed.get(item.productId) ?? 0) + item.giftQuantity,
+          );
+        }
+        for (const [productId, quantity] of authorized) {
+          if ((redeemed.get(productId) ?? 0) !== quantity) {
+            throw new BadRequestException(
+              `Las cantidades canjeadas no coinciden con el certificado ${serial}`,
+            );
+          }
+        }
+      }
+
+      if (details?.amount) {
+        const redeemedAmount = taggedItems.reduce(
+          (sum, item) => sum + item.price.toNumber() * item.giftQuantity,
+          0,
+        );
+        if (redeemedAmount - details.amount.toNumber() > 0.01) {
+          throw new BadRequestException(
+            `El valor canjeado supera el monto del certificado ${serial}`,
+          );
+        }
       }
 
       await tx.certificado.update({

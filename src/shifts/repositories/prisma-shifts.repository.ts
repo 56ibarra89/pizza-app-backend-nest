@@ -51,7 +51,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       include: { expenses: { orderBy: { createdAt: 'desc' } } },
       orderBy: { startTime: 'desc' },
     });
-    return row ? this.map(row) : null;
+    return row ? this.mapWithLiveSales(row) : null;
   }
 
   async findActiveForCashier(params: {
@@ -72,7 +72,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       include: { expenses: { orderBy: { createdAt: 'desc' } } },
       orderBy: { startTime: 'desc' },
     });
-    return row ? this.map(row) : null;
+    return row ? this.mapWithLiveSales(row) : null;
   }
 
   async findById(id: string): Promise<ShiftEntity | null> {
@@ -81,7 +81,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       include: { expenses: { orderBy: { createdAt: 'desc' } } },
     });
     if (!row) return null;
-    return this.map(row);
+    return this.mapWithLiveSales(row);
   }
 
   async getClosePreview(params: {
@@ -379,7 +379,6 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       }),
       tx.order.findMany({
         where: {
-          ...(closeType === 'END_OF_DAY' ? {} : { shiftId: shift.id }),
           status: { notIn: FINAL_ORDER_STATUSES },
         },
         select: {
@@ -542,6 +541,27 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       cashierSnapshotName: expense.cashierSnapshotName,
       createdAt: expense.createdAt,
       updatedAt: expense.updatedAt,
+    };
+  }
+
+  private async mapWithLiveSales(row: ShiftWithExpenses): Promise<ShiftEntity> {
+    const mapped = this.map(row);
+    if (row.status !== ShiftStatus.OPEN) return mapped;
+
+    const preview = await this.prisma.$transaction((tx) =>
+      this.buildClosePreview(tx, row, 'HANDOVER'),
+    );
+    return {
+      ...mapped,
+      cashSales: preview.sales.cash,
+      cardSales: preview.sales.card,
+      appSales: preview.sales.app,
+      totalSales: preview.sales.total,
+      totalExpenses: preview.totalExpenses,
+      expectedCash: preview.expectedCash,
+      paymentBreakdown: preview.sales.breakdown,
+      totalPaymentCommission: preview.sales.totalCommission,
+      netSales: preview.sales.net,
     };
   }
 

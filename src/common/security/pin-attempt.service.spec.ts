@@ -1,11 +1,14 @@
 import { HttpException } from '@nestjs/common';
+import type { PrismaService } from '../../prisma/prisma.service';
 import { PinAttemptService } from './pin-attempt.service';
 
 describe('PinAttemptService', () => {
   const createHarness = () => {
     const prisma = {
       authAttempt: {
-        findFirst: jest.fn(() => Promise.resolve(null)),
+        findFirst: jest
+          .fn<Promise<{ key: string; lockedUntil: Date } | null>, [unknown?]>()
+          .mockResolvedValue(null),
         findMany: jest.fn(() =>
           Promise.resolve([{ lockedUntil: new Date(Date.now() + 2_000) }]),
         ),
@@ -17,7 +20,7 @@ describe('PinAttemptService', () => {
       ),
     };
     return {
-      service: new PinAttemptService(prisma as any),
+      service: new PinAttemptService(prisma as unknown as PrismaService),
       prisma,
     };
   };
@@ -27,11 +30,10 @@ describe('PinAttemptService', () => {
 
     await service.assertAllowed(['pin:terminal-a', 'pin:terminal-a']);
 
-    expect(prisma.authAttempt.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ key: { in: ['pin:terminal-a'] } }),
-      }),
-    );
+    const query = prisma.authAttempt.findFirst.mock.calls[0]?.[0] as {
+      where?: { key?: { in?: string[] } };
+    };
+    expect(query.where?.key?.in).toEqual(['pin:terminal-a']);
   });
 
   it('rejects a scope that is still locked', async () => {

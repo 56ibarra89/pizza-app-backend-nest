@@ -10,17 +10,32 @@ import { Prisma } from '@prisma/client';
 export type PromoStatusDto = 'Activo' | 'Inactivo';
 export type CuponStatusDto = 'Activo' | 'Inactivo' | 'Agotado' | 'Vencido';
 
-export function toDbPromoActiveStatus(status: PromoStatusDto): PromoActiveStatus {
-  return status === 'Activo' ? PromoActiveStatus.ACTIVO : PromoActiveStatus.INACTIVO;
+export function isCouponExpired(expiresDate: Date | null, now: Date): boolean {
+  if (!expiresDate) return false;
+  const dateKey = expiresDate.toISOString().slice(0, 10);
+  const endOfBusinessDay = new Date(`${dateKey}T23:59:59.999-06:00`);
+  return endOfBusinessDay < now;
 }
 
-export function fromDbPromoActiveStatus(status: PromoActiveStatus): PromoStatusDto {
+export function toDbPromoActiveStatus(
+  status: PromoStatusDto,
+): PromoActiveStatus {
+  return status === 'Activo'
+    ? PromoActiveStatus.ACTIVO
+    : PromoActiveStatus.INACTIVO;
+}
+
+export function fromDbPromoActiveStatus(
+  status: PromoActiveStatus,
+): PromoStatusDto {
   return status === PromoActiveStatus.ACTIVO ? 'Activo' : 'Inactivo';
 }
 
 export type HappyHourPromotionTypeDto = '2x1' | 'porcentaje' | 'monto_fijo';
 
-export function toDbHappyHourPromotionType(type: HappyHourPromotionTypeDto): HappyHourPromotionType {
+export function toDbHappyHourPromotionType(
+  type: HappyHourPromotionTypeDto,
+): HappyHourPromotionType {
   switch (type) {
     case '2x1':
       return HappyHourPromotionType.DOSXUNO;
@@ -31,7 +46,9 @@ export function toDbHappyHourPromotionType(type: HappyHourPromotionTypeDto): Hap
   }
 }
 
-export function fromDbHappyHourPromotionType(type: HappyHourPromotionType): HappyHourPromotionTypeDto {
+export function fromDbHappyHourPromotionType(
+  type: HappyHourPromotionType,
+): HappyHourPromotionTypeDto {
   switch (type) {
     case HappyHourPromotionType.DOSXUNO:
       return '2x1';
@@ -45,24 +62,34 @@ export function fromDbHappyHourPromotionType(type: HappyHourPromotionType): Happ
 export type DiscountTypeDto = 'porcentaje' | 'monto_fijo';
 
 export function toDbDiscountType(type: DiscountTypeDto): CuponDiscountType {
-  return type === 'porcentaje' ? CuponDiscountType.PORCENTAJE : CuponDiscountType.MONTO_FIJO;
+  return type === 'porcentaje'
+    ? CuponDiscountType.PORCENTAJE
+    : CuponDiscountType.MONTO_FIJO;
 }
 
 export function fromDbDiscountType(type: CuponDiscountType): DiscountTypeDto {
   return type === CuponDiscountType.PORCENTAJE ? 'porcentaje' : 'monto_fijo';
 }
 
-export function toDbCuponManualStatus(status: PromoStatusDto): CuponManualStatus {
-  return status === 'Activo' ? CuponManualStatus.ACTIVO : CuponManualStatus.INACTIVO;
+export function toDbCuponManualStatus(
+  status: PromoStatusDto,
+): CuponManualStatus {
+  return status === 'Activo'
+    ? CuponManualStatus.ACTIVO
+    : CuponManualStatus.INACTIVO;
 }
 
-export function fromDbCuponManualStatus(status: CuponManualStatus): PromoStatusDto {
+export function fromDbCuponManualStatus(
+  status: CuponManualStatus,
+): PromoStatusDto {
   return status === CuponManualStatus.ACTIVO ? 'Activo' : 'Inactivo';
 }
 
 export type CertificadoStatusDto = 'Disponible' | 'Entregado' | 'Anulado';
 
-export function fromDbCertificadoStatus(status: CertificadoStatus): CertificadoStatusDto {
+export function fromDbCertificadoStatus(
+  status: CertificadoStatus,
+): CertificadoStatusDto {
   switch (status) {
     case CertificadoStatus.DISPONIBLE:
       return 'Disponible';
@@ -73,7 +100,9 @@ export function fromDbCertificadoStatus(status: CertificadoStatus): CertificadoS
   }
 }
 
-export function decimalToNumber(value: Prisma.Decimal | null | undefined): number {
+export function decimalToNumber(
+  value: Prisma.Decimal | null | undefined,
+): number {
   if (value === null || value === undefined) return 0;
   return value.toNumber();
 }
@@ -104,7 +133,7 @@ export function computeCuponStatus(
 
   const isExhausted = maxUses > 0 && currentUses >= maxUses;
   // Expira al inicio del día de la fecha límite (comparamos sólo la fecha)
-  const isExpired = expiresDate !== null && expiresDate < now;
+  const isExpired = isCouponExpired(expiresDate, now);
 
   if (isExhausted) return 'Agotado';
   if (isExpired) return 'Vencido';
@@ -119,7 +148,12 @@ export function hydrateCuponDerivedFields(data: {
   expiresDate: Date | null;
   manualStatus: PromoStatusDto;
   now?: Date;
-}): { discount: string; usage: string; expires: string; status: CuponStatusDto } {
+}): {
+  discount: string;
+  usage: string;
+  expires: string;
+  status: CuponStatusDto;
+} {
   const status = computeCuponStatus(
     data.maxUses,
     data.currentUses,
@@ -133,7 +167,10 @@ export function hydrateCuponDerivedFields(data: {
       ? `${data.discountValue}%`
       : `C$${data.discountValue.toFixed(2)}`;
 
-  const usage = data.maxUses === 0 ? `${data.currentUses} / ∞` : `${data.currentUses} / ${data.maxUses}`;
+  const usage =
+    data.maxUses === 0
+      ? `${data.currentUses} / ∞`
+      : `${data.currentUses} / ${data.maxUses}`;
 
   const expires =
     data.expiresDate === null
@@ -155,14 +192,20 @@ export function buildHappyHourDerivedFields(data: {
   const time = `${minutesToTime(data.startMinutes)} - ${minutesToTime(data.endMinutes)}`;
 
   let promotion = '';
-  if (data.promotionType === '2x1') promotion = data.appliesTo ? `2x1 en ${data.appliesTo}` : '2x1';
-  else if (data.promotionType === 'porcentaje') promotion = `-${data.promotionValue}%`;
-  else if (data.promotionType === 'monto_fijo') promotion = `-C$${data.promotionValue}`;
+  if (data.promotionType === '2x1')
+    promotion = data.appliesTo ? `2x1 en ${data.appliesTo}` : '2x1';
+  else if (data.promotionType === 'porcentaje')
+    promotion = `-${data.promotionValue}%`;
+  else if (data.promotionType === 'monto_fijo')
+    promotion = `-C$${data.promotionValue}`;
 
   return { days, time, promotion };
 }
 
-export function generateCertificadoSerial(prefix = 'VC', existing?: Set<string>): string {
+export function generateCertificadoSerial(
+  prefix = 'VC',
+  existing?: Set<string>,
+): string {
   if (!existing) {
     const num = Math.floor(100000 + Math.random() * 900000);
     return `${prefix}-${num}`;
@@ -176,4 +219,3 @@ export function generateCertificadoSerial(prefix = 'VC', existing?: Set<string>)
 
   return serial;
 }
-

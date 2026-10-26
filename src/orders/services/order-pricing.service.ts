@@ -115,15 +115,17 @@ export class OrderPricingService {
     const productCache: ProductCache = new Map();
     return Promise.all(
       items.map(async (item) => {
-        if (!item.isCombo || !item.productId) return item;
-        const combo = await this.getProduct(item.productId, productCache);
-        if (!combo.isCombo) {
+        if (!item.productId) return item;
+        const product = await this.getProduct(item.productId, productCache);
+        if (!product.isCombo) {
+          if (!item.isCombo) return item;
           throw new BadRequestException('El producto indicado no es un combo');
         }
         return {
           ...item,
+          isCombo: true,
           comboSelections: await this.normalizeComboSelections(
-            combo,
+            product,
             item.comboSelections ?? [],
             productCache,
           ),
@@ -263,6 +265,17 @@ export class OrderPricingService {
       const isTwoForOnePromotion =
         promotion.source === 'happy-hour' &&
         promotion.rule.promotionType === HappyHourPromotionType.DOSXUNO;
+      const giftQuantity = item.giftQuantity ?? 0;
+
+      if (
+        giftQuantity > 0 &&
+        item.giftReason !== 'happy-hour-2x1' &&
+        !item.note?.trim().toLocaleLowerCase('es').startsWith('vale:')
+      ) {
+        throw new BadRequestException(
+          `Las unidades regaladas de ${item.name} requieren una promoción o certificado válido`,
+        );
+      }
 
       if (item.giftReason === 'happy-hour-2x1' && !isTwoForOnePromotion) {
         throw new BadRequestException(
@@ -272,7 +285,6 @@ export class OrderPricingService {
 
       if (isTwoForOnePromotion && isEligible) {
         const expectedGiftQuantity = Math.floor(item.quantity / 2);
-        const giftQuantity = item.giftQuantity ?? 0;
         const isCurrentTwoForOneItem = item.giftReason === 'happy-hour-2x1';
         if (
           giftQuantity < 0 ||
@@ -312,7 +324,9 @@ export class OrderPricingService {
     const taxableTotal = Math.max(0, subTotal - discountAmount);
 
     const { taxes, isExonerated } = readTaxConfig(taxConfig.data);
-    const taxPercentage = isExonerated ? 0 : (taxes[0]?.percentage ?? 0);
+    const taxPercentage = isExonerated
+      ? 0
+      : taxes.reduce((sum, tax) => sum + tax.percentage, 0);
     const taxAmount =
       taxPercentage > 0 ? taxableTotal * (taxPercentage / 100) : 0;
 
@@ -583,7 +597,9 @@ export class OrderPricingService {
       return { unitPrice: item.price, isDiscountable: false };
     }
 
-    return { unitPrice: item.price, isDiscountable: true };
+    throw new BadRequestException(
+      `El producto ${item.name} debe incluir un productId válido`,
+    );
   }
 
   private async resolveComboPrice(

@@ -231,6 +231,8 @@ describe('OrderPricingService combo extras', () => {
         categories: [],
         createdAt: new Date(),
         updatedAt: new Date(),
+        createdById: null,
+        updatedById: null,
         deletedAt: null,
       },
     };

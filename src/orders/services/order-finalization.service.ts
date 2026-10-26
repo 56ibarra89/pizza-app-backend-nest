@@ -1,4 +1,8 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { FinalizeOrderDto } from '../dto/finalize-order.dto';
@@ -10,6 +14,7 @@ import { InvoiceIssuingService } from './invoice-issuing.service';
 import { OrderPricingService } from './order-pricing.service';
 import type { OrderTotals } from '../types/order-totals';
 import type { ResolvedOrderPromotion } from '../types/order-promotion';
+import { OrderStatusDto } from '../dto/order-status.dto';
 
 @Injectable()
 export class OrderFinalizationService {
@@ -24,6 +29,11 @@ export class OrderFinalizationService {
     dto: FinalizeOrderDto,
     user?: AuthenticatedUser | string,
   ): Promise<void> {
+    if (order.status === OrderStatusDto.cancelled) {
+      throw new BadRequestException(
+        'No se puede cobrar ni facturar una orden anulada.',
+      );
+    }
     if (typeof user !== 'string' && user?.role === UserRoleDto.cocinero) {
       throw new ForbiddenException('Los cocineros no pueden facturar órdenes.');
     }
@@ -63,6 +73,13 @@ export class OrderFinalizationService {
         dto,
         totals,
         promotion,
+        cashierId: typeof user === 'string' ? undefined : user?.id,
+        cashierSnapshotName:
+          typeof user === 'string'
+            ? user === 'system'
+              ? undefined
+              : user
+            : user?.username,
       }),
     );
   }

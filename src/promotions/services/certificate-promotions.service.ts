@@ -105,13 +105,7 @@ export class CertificatePromotionsService {
     }
 
     this.assertAvailable(certificate);
-    const updated = await this.repository.update(certificate.id, {
-      status: CertificadoStatus.ENTREGADO,
-      redeemedAt: new Date(),
-      redeemedOrderId: dto.redeemedOrderId ?? null,
-    });
-
-    return this.mapResponse(updated);
+    return this.mapResponse(certificate);
   }
 
   private normalizeSerial(serial: string): string {

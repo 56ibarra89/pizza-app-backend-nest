@@ -226,6 +226,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     if (ordersWithoutPayments > 0) {
       paymentMethodOptions.set('legacy:EFECTIVO', 'Efectivo');
     }
+    paymentMethodOptions.set('MIXTO', 'Mixto');
 
     return {
       items: rows.map((row) => this.mapOrder(row)),
@@ -788,12 +789,13 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     const whereClause: Prisma.OrderItemWhereInput = {
       orderId: params.orderId,
       isSentToKitchen: true,
+      sentAt: params.sentAt,
     };
 
     if (params.itemId !== undefined) {
       whereClause.id = params.itemId;
     } else if (params.kitchenId) {
-      whereClause.kitchenId = params.kitchenId;
+      whereClause.OR = [{ kitchenId: params.kitchenId }, { isCombo: true }];
     }
 
     const items = await this.prisma.orderItem.findMany({
@@ -887,6 +889,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     timestamp: Date;
     updatedAt: Date;
     paidAt: Date | null;
+    shiftId: string | null;
     parentOrderId: string | null;
     splitAccountName: string | null;
     splitMode: string | null;
@@ -1023,6 +1026,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       timestamp: o.timestamp,
       updatedAt: o.updatedAt,
       paidAt: o.paidAt ?? undefined,
+      shiftId: o.shiftId ?? undefined,
       parentOrderId: o.parentOrderId ?? undefined,
       splitAccountName: o.splitAccountName ?? undefined,
       splitMode: o.splitMode ?? undefined,

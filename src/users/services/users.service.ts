@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { MailerService } from '@nestjs-modules/mailer';
 import { JwtService } from '@nestjs/jwt';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserRole as DbUserRole, WeekDay } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   USERS_REPOSITORY,
@@ -18,7 +18,7 @@ import {
 import type { CreateUserDto } from '../dto/create-user.dto';
 import type { UpdateUserDto } from '../dto/update-user.dto';
 import { PasswordHasherService } from './password-hasher.service';
-import type { UserRoleDto } from '../dto/user-role.dto';
+import { UserRoleDto } from '../dto/user-role.dto';
 import { UserLockoutService } from './user-lockout.service';
 import { PasswordResetEmailService } from './password-reset-email.service';
 import { PinHasherService } from '../../common/security/pin-hasher.service';
@@ -50,6 +50,10 @@ function isPasswordResetJwtPayload(
 function securityScope(kind: string, source: string): string {
   const digest = createHash('sha256').update(source).digest('hex');
   return `${kind}:${digest}`;
+}
+
+function isWeekDay(value: string): value is WeekDay {
+  return Object.values(WeekDay).some((day) => day === value);
 }
 
 async function waitForMinimumDuration(startedAt: number, minimumMs = 300) {
@@ -92,10 +96,14 @@ export class UsersService {
 
   async create(dto: CreateUserDto, actor?: AuthenticatedUser) {
     const accessRole = dto.accessRoleId
-      ? await this.prisma.accessRole.findUnique({ where: { id: dto.accessRoleId } })
+      ? await this.prisma.accessRole.findUnique({
+          where: { id: dto.accessRoleId },
+        })
       : await this.prisma.accessRole.findUnique({ where: { code: dto.role } });
     if (!accessRole || !accessRole.isActive) {
-      throw new BadRequestException('El rol seleccionado no existe o está inactivo.');
+      throw new BadRequestException(
+        'El rol seleccionado no existe o está inactivo.',
+      );
     }
     const [passwordHash, pinHash] = await Promise.all([
       dto.password
@@ -115,7 +123,7 @@ export class UsersService {
         role: fromDbRole(accessRole.baseRole),
         accessRoleId: accessRole.id,
         isActive: dto.isActive ?? true,
-        workDays: dto.workDays as any,
+        workDays: dto.workDays,
       });
       await this.auditAccessChange(actor, 'USER_CREATED', {
         userId: created.id,
@@ -138,12 +146,19 @@ export class UsersService {
     const current = await this.repo.findById(id);
     if (!current) throw new NotFoundException('Usuario no encontrado');
     const accessRole = dto.accessRoleId
-      ? await this.prisma.accessRole.findUnique({ where: { id: dto.accessRoleId } })
+      ? await this.prisma.accessRole.findUnique({
+          where: { id: dto.accessRoleId },
+        })
       : dto.role
         ? await this.prisma.accessRole.findUnique({ where: { code: dto.role } })
         : null;
-    if ((dto.accessRoleId || dto.role) && (!accessRole || !accessRole.isActive)) {
-      throw new BadRequestException('El rol seleccionado no existe o está inactivo.');
+    if (
+      (dto.accessRoleId || dto.role) &&
+      (!accessRole || !accessRole.isActive)
+    ) {
+      throw new BadRequestException(
+        'El rol seleccionado no existe o está inactivo.',
+      );
     }
     const nextRole = accessRole ? fromDbRole(accessRole.baseRole) : dto.role;
     const systemAdminRole = await this.prisma.accessRole.findUnique({
@@ -198,7 +213,7 @@ export class UsersService {
         accessRoleId: accessRole?.id,
         isActive: dto.isActive,
         themePreference: dto.themePreference,
-        workDays: dto.workDays as any,
+        workDays: dto.workDays,
         tokenVersion: revokesSessions ? current.tokenVersion + 1 : undefined,
       });
       await this.auditAccessChange(actor, 'USER_UPDATED', {
@@ -278,9 +293,9 @@ export class UsersService {
   async delete(id: string, actor?: AuthenticatedUser) {
     const user = await this.repo.findById(id);
     if (!user) throw new NotFoundException('Usuario no encontrado');
-    if (user.role === 'admin') {
+    if (user.role === UserRoleDto.admin) {
       const activeAdmins = await this.prisma.user.count({
-        where: { role: 'ADMIN', isActive: true },
+        where: { role: DbUserRole.ADMIN, isActive: true },
       });
       if (activeAdmins <= 1) {
         throw new ConflictException(
@@ -367,7 +382,9 @@ export class UsersService {
       tokenVersion: user.tokenVersion,
       type: 'access',
     });
-    const authorization = await this.accessControl.authorizationForUser(user.id);
+    const authorization = await this.accessControl.authorizationForUser(
+      user.id,
+    );
     return {
       success: true,
       username: user.username,
@@ -409,7 +426,9 @@ export class UsersService {
       tokenVersion: user.tokenVersion,
       type: 'access',
     });
-    const authorization = await this.accessControl.authorizationForUser(user.id);
+    const authorization = await this.accessControl.authorizationForUser(
+      user.id,
+    );
     return {
       username: user.username,
       role: user.role,
@@ -456,7 +475,12 @@ export class UsersService {
     const idLower = identifier.toLowerCase();
     const user = await this.repo.findByIdentifier(idLower);
 
-    if (!user || !user.isActive || user.role !== 'admin' || !user.email) {
+    if (
+      !user ||
+      !user.isActive ||
+      user.role !== UserRoleDto.admin ||
+      !user.email
+    ) {
       await waitForMinimumDuration(startedAt);
       return genericResponse;
     }
@@ -591,7 +615,7 @@ export class UsersService {
           },
         },
       });
-    } catch (e) {
+    } catch {
       // Ignorar si no existe
     }
 
@@ -599,9 +623,13 @@ export class UsersService {
   }
 
   async getDeliveryStats(dateStr: string) {
-    const [year, month, day] = dateStr.split('-').map(Number);
-    const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
-    const endOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      throw new BadRequestException(
+        'La fecha debe usar el formato YYYY-MM-DD.',
+      );
+    }
+    const startOfDay = new Date(`${dateStr}T00:00:00.000-06:00`);
+    const endOfDay = new Date(`${dateStr}T23:59:59.999-06:00`);
 
     // Only count DELIVERED orders, or all orders assigned to driver?
     // Usually they want to see how many were completed today, so DELIVERED.
@@ -637,16 +665,24 @@ export class UsersService {
     userId: string,
     zones: { day: string; floor: number }[],
   ) {
+    const normalizedZones = zones.map((zone) => {
+      const day = zone.day.trim().toUpperCase();
+      if (!isWeekDay(day)) {
+        throw new BadRequestException(`Día de semana inválido: ${zone.day}`);
+      }
+      return { ...zone, day };
+    });
+
     // We can delete all and recreate, or upsert. Delete + Create is easier.
     await this.prisma.$transaction(async (tx) => {
       await tx.waiterZoneAssignment.deleteMany({
         where: { userId },
       });
-      if (zones.length > 0) {
+      if (normalizedZones.length > 0) {
         await tx.waiterZoneAssignment.createMany({
-          data: zones.map((z) => ({
+          data: normalizedZones.map((z) => ({
             userId,
-            day: z.day as any,
+            day: z.day,
             floor: z.floor,
           })),
         });

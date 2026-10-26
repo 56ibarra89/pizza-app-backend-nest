@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { OrderStatusDto } from '../dto/order-status.dto';
+import { PaymentMethodDto } from '../dto/payment-method.dto';
 import type { OrderEntity } from '../entities/order.entity';
 import { OrdersService } from './orders.service';
 
@@ -77,7 +78,7 @@ describe('OrdersService split checkout safeguards', () => {
             extras: [],
           },
         ],
-        payments: [{ method: 'EFECTIVO', amount: 100 }],
+        payments: [{ method: PaymentMethodDto.EFECTIVO, amount: 100 }],
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
@@ -186,7 +187,7 @@ describe('OrdersService split checkout safeguards', () => {
             extras: [],
           },
         ],
-        payments: [{ method: 'EFECTIVO', amount: 115 }],
+        payments: [{ method: PaymentMethodDto.EFECTIVO, amount: 115 }],
       }),
     ).rejects.toThrow(
       'No se puede cambiar a división por productos después de registrar abonos por monto.',
@@ -469,6 +470,7 @@ describe('OrdersService split checkout safeguards', () => {
                 invoiceNumber: null,
               },
             ]),
+            order: { count: jest.fn().mockResolvedValue(0) },
           }),
       ),
     };

@@ -264,7 +264,13 @@ export class AdminDashboardService {
       this.prisma.order.aggregate({
         where: {
           status: 'PAID',
-          paidAt: { gte: startOfDay, lte: endOfDay },
+          OR: [
+            { paidAt: { gte: startOfDay, lte: endOfDay } },
+            {
+              paidAt: null,
+              timestamp: { gte: startOfDay, lte: endOfDay },
+            },
+          ],
         },
         _sum: { total: true },
       }),

@@ -1,8 +1,9 @@
 import type { SystemLogsService } from '../services/system-logs.service';
+import { UserRoleDto } from '../../common/enums/user-role.enum';
 import { AuditWriteQueueService } from './audit-write-queue.service';
 
 const entry = (requestId: string) => ({
-  user: { id: 'user-id', username: 'admin', role: 'admin' },
+  user: { id: 'user-id', username: 'admin', role: UserRoleDto.admin },
   action: 'PRODUCTS_UPDATE',
   module: 'products',
   operation: 'UPDATE',

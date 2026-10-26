@@ -67,10 +67,21 @@ describe('ReportsService', () => {
       expect.objectContaining({
         where: {
           status: 'PAID',
-          paidAt: {
-            gte: new Date('2026-10-12T06:00:00.000Z'),
-            lte: new Date('2026-10-13T05:59:59.999Z'),
-          },
+          OR: [
+            {
+              paidAt: {
+                gte: new Date('2026-10-12T06:00:00.000Z'),
+                lte: new Date('2026-10-13T05:59:59.999Z'),
+              },
+            },
+            {
+              paidAt: null,
+              timestamp: {
+                gte: new Date('2026-10-12T06:00:00.000Z'),
+                lte: new Date('2026-10-13T05:59:59.999Z'),
+              },
+            },
+          ],
         },
       }),
     );

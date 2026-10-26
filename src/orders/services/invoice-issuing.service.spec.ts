@@ -49,8 +49,23 @@ describe('InvoiceIssuingService', () => {
         }),
       },
       shift: { findFirst: jest.fn().mockResolvedValue({ id: 'shift-open' }) },
+      orderItem: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            productId: 'product-1',
+            name: 'Producto',
+            note: 'Vale: GIFT-1',
+            giftQuantity: 1,
+            price: new Prisma.Decimal(100),
+          },
+        ]),
+      },
       cupon: { update: jest.fn().mockResolvedValue({}) },
       certificado: {
+        findUnique: jest.fn().mockResolvedValue({
+          amount: null,
+          items: [{ productId: 'product-1', quantity: 1 }],
+        }),
         update: jest.fn((args: unknown) => {
           capturedCertUpdate = args;
           return Promise.resolve({});
@@ -199,7 +214,22 @@ describe('InvoiceIssuingService', () => {
         }),
       },
       shift: { findFirst: jest.fn().mockResolvedValue({ id: 'shift-open' }) },
+      orderItem: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            productId: 'product-1',
+            name: 'Producto',
+            note: 'Vale: CERT-99',
+            giftQuantity: 1,
+            price: new Prisma.Decimal(100),
+          },
+        ]),
+      },
       certificado: {
+        findUnique: jest.fn().mockResolvedValue({
+          amount: null,
+          items: [{ productId: 'product-1', quantity: 1 }],
+        }),
         update: jest.fn((args: unknown) => {
           capturedCertUpdate = args;
           return Promise.resolve({});
@@ -237,6 +267,7 @@ describe('InvoiceIssuingService', () => {
     const dto = toOrderResponseDto({
       id: 'order-1',
       items: [],
+      payments: [],
       total: 100,
       status: OrderStatusDto.paid,
       timestamp: new Date('2026-10-22T18:00:00.000Z'),

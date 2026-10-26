@@ -26,6 +26,9 @@ const PRODUCT_BASE_INCLUDE = {
   comboGroups: {
     include: {
       options: {
+        where: {
+          itemProduct: { deletedAt: null, isActive: true },
+        },
         include: {
           itemProduct: { select: { id: true, name: true } },
         },
@@ -361,6 +364,13 @@ export class PrismaProductsRepository implements IProductsRepository {
       }
       if (dto.comboGroups) {
         await tx.comboGroup.deleteMany({ where: { productId: id } });
+      }
+      if (dto.comboPrice !== undefined && !dto.prices) {
+        await tx.productPrice.upsert({
+          where: { productId_size: { productId: id, size: 'único' } },
+          create: { productId: id, size: 'único', price: dto.comboPrice },
+          update: { price: dto.comboPrice },
+        });
       }
 
       return tx.product.update({
