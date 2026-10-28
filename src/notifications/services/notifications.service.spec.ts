@@ -15,7 +15,7 @@ describe('NotificationsService', () => {
   const appConfig = { findUnique: jest.fn() };
   const order = {
     findMany: jest.fn(),
-    updateMany: jest.fn(),
+    updateMany: jest.fn<Promise<{ count: number }>, [unknown]>(),
     update: jest.fn(),
   };
   const prisma = { notification, user, appConfig, order };
@@ -65,6 +65,7 @@ describe('NotificationsService', () => {
         message: 'La orden de Cliente está lista para ser entregada.',
         role: UserRole.MOTORIZADO,
         targetUsername: 'reina',
+        orderId: 'ORD-1',
       },
     });
     expect(notification.create).toHaveBeenCalledTimes(6);
@@ -127,17 +128,27 @@ describe('NotificationsService', () => {
 
     await service.checkOverdueDeliveries();
 
-    expect(order.updateMany).toHaveBeenCalledWith({
-      where: { id: 'order-overdue', deliverySlaAlertedAt: null },
-      data: { deliverySlaAlertedAt: expect.any(Date) },
+    const updateCall = order.updateMany.mock.calls[0]?.[0] as {
+      where: { id: string; deliverySlaAlertedAt: null };
+      data: { deliverySlaAlertedAt: Date };
+    };
+    expect(updateCall.where).toEqual({
+      id: 'order-overdue',
+      deliverySlaAlertedAt: null,
     });
+    expect(updateCall.data.deliverySlaAlertedAt).toBeInstanceOf(Date);
     expect(notification.create).toHaveBeenCalledTimes(4);
-    expect(notification.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        title: 'Delivery fuera de tiempo',
-        role: UserRole.CAJERO,
-        targetUsername: 'caja1',
-      }),
+    const notificationCalls = notification.create.mock.calls.map(
+      ([call]) => call as { data: Record<string, unknown> },
+    );
+    const cashierNotification = notificationCalls.find(
+      (call) => call.data.role === UserRole.CAJERO,
+    );
+    expect(cashierNotification?.data).toMatchObject({
+      title: 'Delivery fuera de tiempo',
+      role: UserRole.CAJERO,
+      targetUsername: 'caja1',
+      orderId: 'order-overdue',
     });
     expect(systemLogs.createProcess).toHaveBeenCalledWith(
       expect.objectContaining({

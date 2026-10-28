@@ -19,6 +19,7 @@ export interface NotificationEvent {
   targetUsername?: string | null;
   createdAt: Date;
   isRead: boolean;
+  orderId?: string | null;
 }
 
 @Injectable()
@@ -95,9 +96,27 @@ export class NotificationsService {
 
         try {
           const notifications = [
-            this.createNotification(title, message, UserRole.ADMIN),
-            this.createNotification(title, message, UserRole.CAJERO_PRINCIPAL),
-            this.createNotification(title, message, UserRole.DESPACHADOR),
+            this.createNotification(
+              title,
+              message,
+              UserRole.ADMIN,
+              undefined,
+              order.id,
+            ),
+            this.createNotification(
+              title,
+              message,
+              UserRole.CAJERO_PRINCIPAL,
+              undefined,
+              order.id,
+            ),
+            this.createNotification(
+              title,
+              message,
+              UserRole.DESPACHADOR,
+              undefined,
+              order.id,
+            ),
           ];
           if (order.cashierSnapshotName) {
             notifications.push(
@@ -106,6 +125,7 @@ export class NotificationsService {
                 message,
                 UserRole.CAJERO,
                 order.cashierSnapshotName,
+                order.id,
               ),
             );
           }
@@ -198,22 +218,42 @@ export class NotificationsService {
       message,
       UserRole.CAJERO,
       payload.targetUsername,
+      payload.orderId,
     );
     // Guardamos notificación para CAJERO_PRINCIPAL
-    await this.createNotification(title, message, UserRole.CAJERO_PRINCIPAL);
+    await this.createNotification(
+      title,
+      message,
+      UserRole.CAJERO_PRINCIPAL,
+      undefined,
+      payload.orderId,
+    );
     // Guardamos notificación para ADMIN
-    await this.createNotification(title, message, UserRole.ADMIN);
+    await this.createNotification(
+      title,
+      message,
+      UserRole.ADMIN,
+      undefined,
+      payload.orderId,
+    );
     // Guardamos notificación para MESERO (dirigida al usuario específico si existe)
     await this.createNotification(
       title,
       message,
       UserRole.MESERO,
       payload.targetUsername,
+      payload.orderId,
     );
 
     // Guardamos notificación para DESPACHADOR solo si es delivery
     if (payload.orderType === 'delivery') {
-      await this.createNotification(title, message, UserRole.DESPACHADOR);
+      await this.createNotification(
+        title,
+        message,
+        UserRole.DESPACHADOR,
+        undefined,
+        payload.orderId,
+      );
 
       if (payload.driverId) {
         const driver = await this.prisma.user.findUnique({
@@ -227,6 +267,7 @@ export class NotificationsService {
             message,
             UserRole.MOTORIZADO,
             driver.username,
+            payload.orderId,
           );
         }
       }
@@ -238,6 +279,7 @@ export class NotificationsService {
     message: string,
     role: UserRole,
     targetUsername?: string,
+    orderId?: string,
   ) {
     const notification = await this.prisma.notification.create({
       data: {
@@ -245,6 +287,7 @@ export class NotificationsService {
         message,
         role,
         targetUsername,
+        orderId,
       },
     });
 
