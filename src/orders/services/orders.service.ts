@@ -23,7 +23,11 @@ import type { CartItemEntity } from '../entities/order-item.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OrderPricingService } from './order-pricing.service';
 import { OrderFinalizationService } from './order-finalization.service';
-import { assertPaymentsMatchTotal } from '../validators/order-payments.validator';
+import {
+  assertPaymentsMatchTotal,
+  normalizeAndValidateOrderPayments,
+  reconcileSplitOrderPayments,
+} from '../validators/order-payments.validator';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { UserRoleDto } from '../../common';
 import { HiddenKitchenTicketsService } from './hidden-kitchen-tickets.service';
@@ -43,6 +47,10 @@ import {
   isSplitBillPartialPaymentItem,
   requiresKitchenPreparation,
 } from '../validators/order-item-kind';
+import {
+  extractCertificateSerialFromNote,
+  hasValeNotePrefix,
+} from '../validators/order-certificate.validator';
 import { KitchensService } from '../../kitchens/kitchens.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CertificadoStatus, Prisma } from '@prisma/client';
@@ -87,8 +95,11 @@ export class OrdersService {
     private readonly prisma: PrismaService,
   ) {}
 
-  listTodayOrActive(now = new Date()) {
-    return this.repo.listTodayOrActive(now);
+  listTodayOrActive(
+    now = new Date(),
+    filters?: { driverId?: string; kitchenId?: string; limit?: number },
+  ) {
+    return this.repo.listTodayOrActive(now, filters);
   }
 
   listHistory(params: {
@@ -100,6 +111,8 @@ export class OrdersService {
     paymentMethodId?: string;
     view?: 'all' | 'invoices';
     statuses?: OrderStatusDto[];
+    driverId?: string;
+    kitchenId?: string;
   }) {
     const maxRangeMs = 366 * 24 * 60 * 60 * 1000;
     if (
@@ -150,6 +163,12 @@ export class OrdersService {
       ? OrderStatusDto.pending
       : (dto.status ??
         (dto.payments?.length ? OrderStatusDto.paid : OrderStatusDto.pending));
+    if (status === OrderStatusDto.paid) {
+      this.assertCanFinalizeOrder(user, {
+        orderType: dto.orderType,
+        driverId: dto.driverId,
+      });
+    }
     const timestamp = dto.timestamp ?? new Date();
     const isSentToKitchen =
       dto.isSentToKitchen ?? !(dto.linkedTables && dto.linkedTables.length > 0);
@@ -186,41 +205,53 @@ export class OrdersService {
     const cuponId =
       promotion.source === 'coupon' ? promotion.cuponId : undefined;
 
-    await this.assertPendingBenefitsAvailable({
-      cuponId,
-      certificateSerials,
-    });
+    const created = await this.runInTransactionIfAvailable(async (tx) => {
+      await this.assertPendingBenefitsAvailable(
+        {
+          cuponId,
+          certificateSerials,
+          items: pricedItems,
+        },
+        tx,
+      );
 
-    const created = await this.repo.create({
-      id: dto.id,
-      shiftId,
-      customerId,
-      items: pricedItems,
-      subTotal: totals.subTotal,
-      discountAmount: totals.discountAmount,
-      taxAmount: totals.taxAmount,
-      total: totals.total,
-      timestamp,
-      status: status === OrderStatusDto.paid ? OrderStatusDto.pending : status,
-      customerSnapshotName:
-        dto.customerSnapshotName ||
-        (dto.customerPhone ? `Cliente ${dto.customerPhone}` : undefined),
-      cashierId,
-      cashierSnapshotName,
-      orderType: dto.orderType,
-      customerAddress: dto.customerAddress,
-      linkedTables: dto.linkedTables,
-      isSentToKitchen,
-      cuponId,
-      discountId:
-        promotion.source === 'discount' ? promotion.discountId : undefined,
-      happyHourId:
-        promotion.source === 'happy-hour' ? promotion.happyHourId : undefined,
-      driverId: dto.driverId,
-      payments: resolvedPayments,
-      customerTendered: dto.customerTendered,
-      deliveryChange: dto.deliveryChange,
-      certificateSerials,
+      return this.repo.create(
+        {
+          id: dto.id,
+          shiftId,
+          customerId,
+          items: pricedItems,
+          subTotal: totals.subTotal,
+          discountAmount: totals.discountAmount,
+          taxAmount: totals.taxAmount,
+          total: totals.total,
+          timestamp,
+          status:
+            status === OrderStatusDto.paid ? OrderStatusDto.pending : status,
+          customerSnapshotName:
+            dto.customerSnapshotName ||
+            (dto.customerPhone ? `Cliente ${dto.customerPhone}` : undefined),
+          cashierId,
+          cashierSnapshotName,
+          orderType: dto.orderType,
+          customerAddress: dto.customerAddress,
+          linkedTables: dto.linkedTables,
+          isSentToKitchen,
+          cuponId,
+          discountId:
+            promotion.source === 'discount' ? promotion.discountId : undefined,
+          happyHourId:
+            promotion.source === 'happy-hour'
+              ? promotion.happyHourId
+              : undefined,
+          driverId: dto.driverId,
+          payments: resolvedPayments,
+          customerTendered: dto.customerTendered,
+          deliveryChange: dto.deliveryChange,
+          certificateSerials,
+        },
+        tx,
+      );
     });
 
     if (status === OrderStatusDto.paid) {
@@ -249,7 +280,7 @@ export class OrdersService {
             promotionCode: dto.promotionCode,
             certificateSerials,
           },
-          'system',
+          user ?? 'system',
           false,
         );
         this.publishOrder(finalized, 'created');
@@ -297,6 +328,44 @@ export class OrdersService {
       if (assignedKitchenId !== dto.kitchenId) {
         throw new ForbiddenException(
           'No tienes acceso a esta cocina en el día de hoy.',
+        );
+      }
+
+      const hasMatchingKitchenItem = existing.items.some((item) => {
+        if (!requiresKitchenPreparation(item)) return false;
+        if (dto.itemId !== undefined && item.id !== dto.itemId) return false;
+        return (
+          item.kitchenId === assignedKitchenId ||
+          (item.isCombo &&
+            Array.isArray(item.comboSelections) &&
+            item.comboSelections.some(
+              (sel) => sel.kitchenId === assignedKitchenId,
+            ))
+        );
+      });
+      if (!hasMatchingKitchenItem) {
+        throw new ForbiddenException(
+          'La orden no contiene productos pertenecientes a tu cocina asignada.',
+        );
+      }
+    }
+
+    if (user?.role === UserRoleDto.motorizado) {
+      if (
+        existing.orderType !== OrderTypeDto.delivery ||
+        !existing.driverId ||
+        existing.driverId !== user.id
+      ) {
+        throw new ForbiddenException(
+          'Solo puedes actualizar pedidos de delivery asignados a tu usuario.',
+        );
+      }
+      if (
+        dto.status !== OrderStatusDto.delivered &&
+        dto.status !== OrderStatusDto.paid
+      ) {
+        throw new ForbiddenException(
+          'El motorizado solo puede marcar el pedido como entregado o cobrado.',
         );
       }
     }
@@ -451,6 +520,7 @@ export class OrdersService {
       nextStatus === OrderStatusDto.paid &&
       existing.status !== OrderStatusDto.paid
     ) {
+      this.assertCanFinalizeOrder(user, existing);
       assertPaymentsMatchTotal(existing.total, existing.payments);
       return this.finalize(id, { payments: existing.payments }, user);
     }
@@ -636,11 +706,10 @@ export class OrdersService {
     }
     if (
       user.role === UserRoleDto.motorizado &&
-      existing.driverId &&
-      existing.driverId !== user.id
+      (!existing.driverId || existing.driverId !== user.id)
     ) {
       throw new ForbiddenException(
-        'Este pedido está asignado a otro motorizado.',
+        'Solo puedes iniciar la entrega de pedidos asignados a tu usuario.',
       );
     }
     if (existing.deliveryStartedAt) return existing;
@@ -981,15 +1050,18 @@ export class OrdersService {
 
   async updateItems(id: string, dto: UpdateOrderItemsDto) {
     const existing = await this.getById(id);
+    if (existing.status === OrderStatusDto.cancelled) {
+      throw new BadRequestException(
+        'No se pueden modificar los productos de una orden anulada.',
+      );
+    }
     const existingItemIds = new Set(
       existing.items.flatMap((item) =>
         typeof item.id === 'number' ? [item.id] : [],
       ),
     );
     const wasReadyForPickup = this.isReadyForPickup(existing.items);
-    const isFinal =
-      existing.status === OrderStatusDto.paid ||
-      existing.status === OrderStatusDto.cancelled;
+    const isFinal = existing.status === OrderStatusDto.paid;
 
     const seenItemIds = new Set<number>();
     const rawItems: CartItemEntity[] = dto.items.map((item) => {
@@ -1018,34 +1090,12 @@ export class OrdersService {
           };
     });
     this.assertSplitBillCreditsUnchanged(existing.items, rawItems);
-    const mappedItems = await this.pricing.normalizeComboItems(rawItems);
-    const nextStatus = isFinal
-      ? existing.status
-      : this.deriveGlobalStatus(mappedItems, existing.orderType);
-
-    const becameReadyForPickup =
-      !isFinal && !wasReadyForPickup && this.isReadyForPickup(mappedItems);
 
     if (isFinal) {
-      const existingById = new Map(
-        existing.items.flatMap((item) =>
-          typeof item.id === 'number' ? [[item.id, item] as const] : [],
-        ),
+      const lockedItems = this.mergePaidOrderOperationalItems(
+        existing.items,
+        rawItems,
       );
-      const lockedItems: CartItemEntity[] = mappedItems.map((item, idx) => {
-        const prev =
-          (item.id !== undefined ? existingById.get(item.id) : undefined) ??
-          existing.items[idx];
-        return prev
-          ? {
-              ...prev,
-              isSentToKitchen: item.isSentToKitchen,
-              sentAt: item.sentAt ?? prev.sentAt,
-              kitchenStatus: item.kitchenStatus ?? prev.kitchenStatus,
-              comboSelections: item.comboSelections ?? prev.comboSelections,
-            }
-          : item;
-      });
       const updated = await this.repo.update(id, {
         items: lockedItems,
         total: existing.total,
@@ -1069,6 +1119,12 @@ export class OrdersService {
       this.publishOrder(updated, 'updated');
       return updated;
     }
+
+    const mappedItems = await this.pricing.normalizeComboItems(rawItems);
+    const nextStatus = this.deriveGlobalStatus(mappedItems, existing.orderType);
+
+    const becameReadyForPickup =
+      !wasReadyForPickup && this.isReadyForPickup(mappedItems);
 
     const promotion = await this.pricing.resolvePromotion(
       dto,
@@ -1103,31 +1159,107 @@ export class OrdersService {
     );
     const cuponId = promotion.source === 'coupon' ? promotion.cuponId : null;
 
-    await this.assertPendingBenefitsAvailable({
-      cuponId: cuponId ?? undefined,
-      certificateSerials,
-      excludeOrderId: id,
-    });
+    const updated = await this.runInTransactionIfAvailable(async (tx) => {
+      if (typeof tx?.$queryRaw === 'function') {
+        const lockedRows = await tx.$queryRaw<
+          Array<{ id: string; status?: string; updatedAt?: Date }>
+        >`
+          SELECT id, status, "updatedAt"
+          FROM "Order"
+          WHERE id = ${id}
+          FOR UPDATE
+        `;
+        const locked = lockedRows[0];
+        if (!locked) {
+          throw new NotFoundException('Orden no encontrada');
+        }
+        if (locked.status === 'PAID' || locked.status === 'CANCELLED') {
+          throw new ConflictException(
+            'La orden fue cobrada o anulada mientras se editaba.',
+          );
+        }
+        if (
+          existing.updatedAt &&
+          locked.updatedAt instanceof Date &&
+          locked.updatedAt.getTime() !== existing.updatedAt.getTime()
+        ) {
+          throw new ConflictException(
+            'La orden fue modificada por otra terminal. Actualiza la orden e inténtalo nuevamente.',
+          );
+        }
+      }
 
-    const updated = await this.repo.update(id, {
-      items: pricedItems,
-      total: totals.total,
-      subTotal: totals.subTotal,
-      discountAmount: totals.discountAmount,
-      taxAmount: totals.taxAmount,
-      cuponId,
-      discountId: promotion.source === 'discount' ? promotion.discountId : null,
-      happyHourId:
-        promotion.source === 'happy-hour' ? promotion.happyHourId : null,
-      status: nextStatus,
-      isSentToKitchen: dto.isSentToKitchen,
-      certificateSerials,
+      await this.assertPendingBenefitsAvailable(
+        {
+          cuponId: cuponId ?? undefined,
+          certificateSerials,
+          excludeOrderId: id,
+          items: pricedItems,
+        },
+        tx,
+      );
+
+      return this.repo.update(
+        id,
+        {
+          items: pricedItems,
+          total: totals.total,
+          subTotal: totals.subTotal,
+          discountAmount: totals.discountAmount,
+          taxAmount: totals.taxAmount,
+          cuponId,
+          discountId:
+            promotion.source === 'discount' ? promotion.discountId : null,
+          happyHourId:
+            promotion.source === 'happy-hour' ? promotion.happyHourId : null,
+          status: nextStatus,
+          isSentToKitchen: dto.isSentToKitchen,
+          certificateSerials,
+        },
+        tx,
+      );
     });
     if (becameReadyForPickup) {
       this.emitOrderReady(updated);
     }
     this.publishOrder(updated, 'updated');
     return updated;
+  }
+
+  private assertCanFinalizeOrder(
+    user?: AuthenticatedUser | string,
+    order?: Pick<OrderEntity, 'orderType' | 'driverId'>,
+  ): void {
+    if (!user || typeof user === 'string') {
+      return;
+    }
+
+    if (user.role === UserRoleDto.cocinero) {
+      throw new ForbiddenException(
+        'Los cocineros no tienen permiso para cobrar o facturar órdenes.',
+      );
+    }
+
+    if (
+      Array.isArray(user.permissions) &&
+      !user.permissions.includes('orders.finalize')
+    ) {
+      throw new ForbiddenException(
+        'No tienes permiso para cobrar o finalizar órdenes.',
+      );
+    }
+
+    if (user.role === UserRoleDto.motorizado && order) {
+      if (
+        order.orderType !== OrderTypeDto.delivery ||
+        !order.driverId ||
+        order.driverId !== user.id
+      ) {
+        throw new ForbiddenException(
+          'Solo puedes finalizar pedidos de delivery asignados a tu usuario.',
+        );
+      }
+    }
   }
 
   async finalize(
@@ -1137,6 +1269,7 @@ export class OrdersService {
     publishEvent = true,
   ) {
     const existing = await this.getById(id);
+    this.assertCanFinalizeOrder(user, existing);
     if (existing.status === OrderStatusDto.paid) return existing;
     if (existing.status === OrderStatusDto.cancelled) {
       throw new BadRequestException(
@@ -1157,6 +1290,7 @@ export class OrdersService {
       cuponId: effectiveCuponId,
       certificateSerials,
       excludeOrderId: id,
+      items: existing.items,
     });
 
     const { customerId } =
@@ -1196,8 +1330,12 @@ export class OrdersService {
     if (user?.role === UserRoleDto.cocinero) {
       throw new ForbiddenException('Los cocineros no pueden facturar órdenes.');
     }
+    if (user?.role === UserRoleDto.motorizado) {
+      throw new ForbiddenException('Los motorizados no pueden dividir cuentas.');
+    }
 
     const existing = await this.getById(id);
+    this.assertCanFinalizeOrder(user, existing);
     if (
       existing.status === OrderStatusDto.paid ||
       existing.status === OrderStatusDto.cancelled
@@ -2041,28 +2179,7 @@ export class OrdersService {
     targetTotal: number,
     clientTotal?: number,
   ): OrderPaymentDto[] {
-    if (!payments.length) return payments;
-    const paidSum = payments.reduce((sum, p) => sum + p.amount, 0);
-    if (clientTotal !== undefined && Math.abs(paidSum - clientTotal) >= 0.02) {
-      return payments;
-    }
-    const delta = Number((targetTotal - paidSum).toFixed(2));
-    if (Math.abs(delta) < 0.01 || Math.abs(delta) > 1) {
-      return payments;
-    }
-    const adjustIdx = [...payments]
-      .map((payment, idx) => ({ payment, idx }))
-      .reverse()
-      .find(({ payment }) => payment.amount + delta > 0)?.idx;
-    if (adjustIdx === undefined) return payments;
-    return payments.map((payment, idx) =>
-      idx === adjustIdx
-        ? {
-            ...payment,
-            amount: Number((payment.amount + delta).toFixed(2)),
-          }
-        : payment,
-    );
+    return reconcileSplitOrderPayments(payments, targetTotal, clientTotal);
   }
 
   private assertSplitBillCreditsUnchanged(
@@ -2103,14 +2220,150 @@ export class OrdersService {
     }
   }
 
+  private mergePaidOrderOperationalItems(
+    existingItems: readonly CartItemEntity[],
+    incomingItems: readonly CartItemEntity[],
+  ): CartItemEntity[] {
+    if (incomingItems.length !== existingItems.length) {
+      throw new BadRequestException(
+        'No se puede modificar el contenido comercial de una orden facturada.',
+      );
+    }
+
+    const incomingById = new Map<number, CartItemEntity>();
+    for (const item of incomingItems) {
+      if (item.id !== undefined) {
+        incomingById.set(item.id, item);
+      }
+    }
+
+    const usedIncomingIndexes = new Set<number>();
+
+    return existingItems.map((prev, idx) => {
+      let incoming: CartItemEntity | undefined;
+      if (prev.id !== undefined && incomingById.has(prev.id)) {
+        incoming = incomingById.get(prev.id);
+        const foundIdx = incomingItems.indexOf(incoming!);
+        if (foundIdx >= 0) usedIncomingIndexes.add(foundIdx);
+      } else if (!usedIncomingIndexes.has(idx) && incomingItems[idx]?.id === undefined) {
+        incoming = incomingItems[idx];
+        usedIncomingIndexes.add(idx);
+      }
+
+      if (!incoming || !this.isCommerciallySameOrderItem(prev, incoming)) {
+        throw new BadRequestException(
+          'No se puede modificar el contenido comercial de una orden facturada.',
+        );
+      }
+
+      if (!requiresKitchenPreparation(prev)) {
+        return prev;
+      }
+
+      const mergedComboSelections =
+        prev.comboSelections && incoming.comboSelections
+          ? prev.comboSelections.map((prevSel, selIdx) => {
+              const incSel = incoming.comboSelections?.[selIdx];
+              return incSel
+                ? {
+                    ...prevSel,
+                    kitchenStatus: incSel.kitchenStatus ?? prevSel.kitchenStatus,
+                  }
+                : prevSel;
+            })
+          : prev.comboSelections;
+
+      return {
+        ...prev,
+        isSentToKitchen: Boolean(prev.isSentToKitchen || incoming.isSentToKitchen),
+        sentAt: incoming.sentAt ?? prev.sentAt,
+        kitchenStatus: incoming.kitchenStatus ?? prev.kitchenStatus,
+        comboSelections: mergedComboSelections,
+      };
+    });
+  }
+
+  private isCommerciallySameOrderItem(
+    prev: CartItemEntity,
+    incoming: CartItemEntity,
+  ): boolean {
+    if ((incoming.productId ?? null) !== (prev.productId ?? null)) return false;
+    if (incoming.name.trim() !== prev.name.trim()) return false;
+    if (incoming.size.trim().toLowerCase() !== prev.size.trim().toLowerCase()) {
+      return false;
+    }
+    if (incoming.quantity !== prev.quantity) return false;
+    if ((incoming.giftQuantity ?? 0) !== (prev.giftQuantity ?? 0)) return false;
+    if ((incoming.giftReason ?? null) !== (prev.giftReason ?? null)) {
+      return false;
+    }
+    if ((incoming.note ?? null) !== (prev.note ?? null)) return false;
+    if (Boolean(incoming.isCombo) !== Boolean(prev.isCombo)) return false;
+
+    const prevExtras = [...(prev.extras ?? [])].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+    const incExtras = [...(incoming.extras ?? [])].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+    if (prevExtras.length !== incExtras.length) return false;
+    for (let i = 0; i < prevExtras.length; i++) {
+      if (
+        prevExtras[i].name.trim().toLowerCase() !==
+          incExtras[i].name.trim().toLowerCase() ||
+        Math.abs(prevExtras[i].price - incExtras[i].price) > 0.01
+      ) {
+        return false;
+      }
+    }
+
+    const prevSelections = prev.comboSelections ?? [];
+    const incSelections = incoming.comboSelections ?? [];
+    if (prevSelections.length !== incSelections.length) return false;
+    for (let i = 0; i < prevSelections.length; i++) {
+      const pSel = prevSelections[i];
+      const iSel = incSelections[i];
+      if (
+        pSel.groupId !== iSel.groupId ||
+        pSel.productId !== iSel.productId ||
+        (pSel.size ?? null) !== (iSel.size ?? null) ||
+        pSel.quantity !== iSel.quantity
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   private extractCertificateSerials(
     items: readonly CartItemEntity[],
     explicitSerials?: readonly string[],
   ): string[] {
     const fromItems = items.flatMap((item) => {
-      const note = item.note?.trim();
-      if (!note || !note.toLowerCase().startsWith('vale:')) return [];
-      return [note.slice('vale:'.length).trim()];
+      const giftQuantity = item.giftQuantity ?? 0;
+      const serial = extractCertificateSerialFromNote(item.note);
+      const hasVale = hasValeNotePrefix(item.note);
+
+      if (giftQuantity > 0 && item.giftReason !== 'happy-hour-2x1') {
+        if (!serial) {
+          throw new BadRequestException(
+            `Las unidades regaladas de ${item.name} requieren una promoción o certificado válido`,
+          );
+        }
+        return [serial];
+      }
+
+      if (hasVale) {
+        if (!serial) {
+          throw new BadRequestException(
+            `Las unidades regaladas de ${item.name} requieren una promoción o certificado válido`,
+          );
+        }
+        return giftQuantity > 0 ? [serial] : [];
+      }
+
+      return [];
     });
     const raw =
       explicitSerials !== undefined
@@ -2125,35 +2378,130 @@ export class OrdersService {
     ).sort();
   }
 
-  private async assertPendingBenefitsAvailable(params: {
-    cuponId?: number;
-    certificateSerials: readonly string[];
-    excludeOrderId?: string;
-  }): Promise<void> {
+  private async runInTransactionIfAvailable<T>(
+    fn: (tx?: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    if (typeof this.prisma?.$transaction === 'function') {
+      return this.prisma.$transaction((tx) => fn(tx));
+    }
+    return fn(undefined);
+  }
+
+  private async assertPendingBenefitsAvailable(
+    params: {
+      cuponId?: number;
+      certificateSerials: readonly string[];
+      excludeOrderId?: string;
+      items?: readonly CartItemEntity[];
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const db = tx ?? this.prisma;
+    const certificateGiftedItems = (params.items ?? []).filter(
+      (item) =>
+        (item.giftQuantity ?? 0) > 0 && item.giftReason !== 'happy-hour-2x1',
+    );
+    for (const item of certificateGiftedItems) {
+      const serial = extractCertificateSerialFromNote(item.note);
+      if (!serial || !params.certificateSerials.includes(serial)) {
+        throw new BadRequestException(
+          `Las unidades regaladas de ${item.name} requieren una promoción o certificado válido`,
+        );
+      }
+    }
+
     if (params.certificateSerials.length > 0) {
-      const certificates = await this.prisma.certificado.findMany({
+      if (typeof tx?.$queryRaw === 'function') {
+        for (const serial of [...params.certificateSerials].sort()) {
+          await tx.$queryRaw`
+            SELECT id
+            FROM "Certificado"
+            WHERE UPPER(serial) = ${serial} AND "deletedAt" IS NULL
+            FOR UPDATE
+          `;
+        }
+      }
+
+      const certificates = await db.certificado.findMany({
         where: {
           serial: { in: [...params.certificateSerials] },
           deletedAt: null,
         },
-        select: { serial: true, status: true },
+        select: {
+          serial: true,
+          status: true,
+          amount: true,
+          items: { select: { productId: true, quantity: true } },
+        },
       });
       const bySerial = new Map(
-        certificates.map((cert) => [cert.serial.toUpperCase(), cert.status]),
+        certificates.map((cert) => [cert.serial.toUpperCase(), cert]),
       );
       for (const serial of params.certificateSerials) {
-        const status = bySerial.get(serial);
-        if (!status) {
+        const cert = bySerial.get(serial);
+        if (!cert) {
           throw new BadRequestException(`Certificado no encontrado: ${serial}`);
         }
-        if (status !== CertificadoStatus.DISPONIBLE) {
+        if (cert.status !== CertificadoStatus.DISPONIBLE) {
           throw new BadRequestException(
             `El certificado ${serial} no está disponible`,
           );
         }
+
+        if (params.items !== undefined) {
+          const taggedItems = certificateGiftedItems.filter(
+            (item) => extractCertificateSerialFromNote(item.note) === serial,
+          );
+          if (taggedItems.length === 0) {
+            throw new BadRequestException(
+              `El certificado ${serial} no está asociado a productos regalados`,
+            );
+          }
+
+          if (Array.isArray(cert.items) && cert.items.length > 0) {
+            const authorized = new Map(
+              cert.items.map((item) => [item.productId, item.quantity]),
+            );
+            const redeemed = new Map<string, number>();
+            for (const item of taggedItems) {
+              if (!item.productId || !authorized.has(item.productId)) {
+                throw new BadRequestException(
+                  `El certificado ${serial} no autoriza el producto ${item.name}`,
+                );
+              }
+              redeemed.set(
+                item.productId,
+                (redeemed.get(item.productId) ?? 0) + (item.giftQuantity ?? 0),
+              );
+            }
+            for (const [productId, quantity] of authorized) {
+              if ((redeemed.get(productId) ?? 0) !== quantity) {
+                throw new BadRequestException(
+                  `Las cantidades canjeadas no coinciden con el certificado ${serial}`,
+                );
+              }
+            }
+          }
+
+          if (cert.amount !== undefined && cert.amount !== null) {
+            const maxAmount =
+              typeof cert.amount === 'number'
+                ? cert.amount
+                : cert.amount.toNumber();
+            const redeemedAmount = taggedItems.reduce(
+              (sum, item) => sum + item.price * (item.giftQuantity ?? 0),
+              0,
+            );
+            if (redeemedAmount - maxAmount > 0.01) {
+              throw new BadRequestException(
+                `El valor canjeado supera el monto del certificado ${serial}`,
+              );
+            }
+          }
+        }
       }
 
-      const activeOrdersWithCerts = await this.prisma.order.findMany({
+      const activeOrdersWithCerts = await db.order.findMany({
         where: {
           status: { notIn: ['PAID', 'CANCELLED'] },
           NOT: { pendingCertificateSerials: { equals: Prisma.DbNull } },
@@ -2184,7 +2532,15 @@ export class OrdersService {
     }
 
     if (params.cuponId !== undefined) {
-      const coupon = await this.prisma.cupon.findUnique({
+      if (typeof tx?.$queryRaw === 'function') {
+        await tx.$queryRaw`
+          SELECT id
+          FROM "Cupon"
+          WHERE id = ${params.cuponId} AND "deletedAt" IS NULL
+          FOR UPDATE
+        `;
+      }
+      const coupon = await db.cupon.findUnique({
         where: { id: params.cuponId },
         select: { maxUses: true, currentUses: true, deletedAt: true },
       });
@@ -2192,7 +2548,7 @@ export class OrdersService {
         throw new BadRequestException('Cupón no encontrado');
       }
       if (coupon.maxUses > 0) {
-        const reservedCouponCount = await this.prisma.order.count({
+        const reservedCouponCount = await db.order.count({
           where: {
             cuponId: params.cuponId,
             status: { notIn: ['PAID', 'CANCELLED'] },
@@ -2264,101 +2620,20 @@ export class OrdersService {
     const config = normalizePaymentMethodsConfig(
       saved?.data ?? DEFAULT_PAYMENT_METHODS_CONFIG,
     );
+    const generalData =
+      typeof general?.data === 'object' &&
+      general.data !== null &&
+      !Array.isArray(general.data)
+        ? (general.data as Record<string, unknown>)
+        : undefined;
+    const defaultExchangeRate =
+      Math.max(0.0001, Number(generalData?.exchangeRate) || 36.5);
 
-    return payments.map((payment) => {
-      const configured = this.findPaymentMethod(config.methods, payment);
-      if (!configured || !configured.isActive) {
-        throw new BadRequestException(
-          'El método de pago seleccionado ya no está disponible.',
-        );
-      }
-      const rawReference = payment.reference?.trim();
-      const reference =
-        configured.type === 'CARD_POS' && rawReference
-          ? normalizePosReference(rawReference)
-          : rawReference;
-      if (
-        configured.type === 'CARD_POS' &&
-        !isValidPosReference(reference ?? '')
-      ) {
-        throw new BadRequestException(
-          `${configured.name} requiere el código de autorización o referencia del voucher: 4 a 20 caracteres alfanuméricos o guiones, con al menos un número.`,
-        );
-      }
-      if (
-        configured.type !== 'CARD_POS' &&
-        configured.requiresReference &&
-        (!reference || reference.length < 4)
-      ) {
-        throw new BadRequestException(
-          `${configured.name} requiere una referencia de al menos 4 caracteres.`,
-        );
-      }
-      const amount = Math.round(payment.amount * 100) / 100;
-      const commissionAmount =
-        Math.round(amount * configured.commissionRate) / 100;
-      const generalData =
-        typeof general?.data === 'object' &&
-        general.data !== null &&
-        !Array.isArray(general.data)
-          ? general.data
-          : undefined;
-      const providedExchangeRate = Number(payment.exchangeRate);
-      const exchangeRate =
-        configured.currency === 'USD'
-          ? providedExchangeRate > 0
-            ? providedExchangeRate
-            : Math.max(0.0001, Number(generalData?.exchangeRate) || 36.5)
-          : 1;
-      const providedOriginalAmount = Number(payment.originalAmount);
-      const originalAmount =
-        providedOriginalAmount > 0
-          ? Math.round(providedOriginalAmount * 100) / 100
-          : Math.round((amount / exchangeRate) * 100) / 100;
-
-      return {
-        ...payment,
-        method: this.toLegacyPaymentMethod(configured),
-        methodConfigId: configured.id,
-        reference,
-        methodSnapshotName: configured.name,
-        methodType: configured.type,
-        currency: configured.currency,
-        originalAmount,
-        exchangeRate,
-        commissionRate: configured.commissionRate,
-        commissionAmount,
-      };
-    });
-  }
-
-  private findPaymentMethod(
-    methods: PaymentMethodConfig[],
-    payment: OrderPaymentDto,
-  ) {
-    if (payment.methodConfigId) {
-      return methods.find((method) => method.id === payment.methodConfigId);
-    }
-    const expectedType =
-      payment.method === PaymentMethodDto.EFECTIVO
-        ? 'CASH'
-        : payment.method === PaymentMethodDto.TARJETA
-          ? 'CARD_POS'
-          : undefined;
-    return methods.find(
-      (method) =>
-        method.isActive &&
-        (expectedType
-          ? method.type === expectedType
-          : method.type === 'BANK_TRANSFER' ||
-            method.type === 'DIGITAL_WALLET'),
+    return normalizeAndValidateOrderPayments(
+      payments,
+      config.methods,
+      defaultExchangeRate,
     );
-  }
-
-  private toLegacyPaymentMethod(method: PaymentMethodConfig): PaymentMethodDto {
-    if (method.type === 'CASH') return PaymentMethodDto.EFECTIVO;
-    if (method.type === 'CARD_POS') return PaymentMethodDto.TARJETA;
-    return PaymentMethodDto.APP;
   }
 
   private publishOrder(

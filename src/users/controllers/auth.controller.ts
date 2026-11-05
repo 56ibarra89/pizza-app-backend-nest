@@ -17,6 +17,22 @@ function requestSource(request: Request): string {
   return request.ip || request.socket.remoteAddress || 'unknown';
 }
 
+function extractRefreshTokenFromRequest(
+  request?: Request,
+  body?: { refreshToken?: string; refresh_token?: string },
+): string | undefined {
+  const fromBody = body?.refreshToken ?? body?.refresh_token;
+  if (typeof fromBody === 'string' && fromBody.trim()) {
+    return fromBody.trim();
+  }
+  const authHeader = request?.headers?.authorization;
+  if (typeof authHeader === 'string' && /^Bearer\s+/i.test(authHeader)) {
+    const bearer = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (bearer) return bearer;
+  }
+  return undefined;
+}
+
 const AUTHENTICATED_ROLES = [
   UserRoleDto.admin,
   UserRoleDto.cajero,
@@ -67,10 +83,28 @@ export class AuthController {
     return this.users.resetPassword(dto.token, dto.newPassword);
   }
 
-  @Roles(...AUTHENTICATED_ROLES)
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  @Public()
   @Post('refresh')
-  async refresh(@CurrentUser() user: AuthenticatedUser) {
-    return this.users.refreshToken(user.id);
+  async refresh(
+    @CurrentUser() user?: AuthenticatedUser,
+    @Req() request?: Request,
+    @Body() body?: { refreshToken?: string; refresh_token?: string },
+  ) {
+    if (user?.id && !request && !body) {
+      return this.users.refreshToken(user.id);
+    }
+
+    const rawToken = extractRefreshTokenFromRequest(request, body);
+    if (rawToken && typeof this.users.refreshSessionToken === 'function') {
+      return this.users.refreshSessionToken(rawToken);
+    }
+
+    if (user?.id) {
+      return this.users.refreshToken(user.id);
+    }
+
+    return this.users.refreshSessionToken(rawToken);
   }
 
   @Roles(...AUTHENTICATED_ROLES)

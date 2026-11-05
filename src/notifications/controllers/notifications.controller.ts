@@ -11,7 +11,6 @@ import {
 import { NotificationsService } from '../services/notifications.service';
 import { UserRole } from '@prisma/client';
 import { Observable } from 'rxjs';
-import { map, filter } from 'rxjs/operators';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -33,34 +32,58 @@ export class NotificationsController {
   @UseGuards(JwtAuthGuard)
   @Sse('stream')
   stream(@CurrentUser() user: AuthenticatedUser): Observable<MessageEvent> {
-    const role = user.role.toUpperCase() as UserRole;
-    return this.notificationsService.notificationStream.asObservable().pipe(
-      filter((notification) => {
-        if (notification.role !== role) {
-          return false;
-        }
+    return new Observable<MessageEvent>((subscriber) => {
+      const subscription =
+        this.notificationsService.notificationStream.subscribe({
+          next: (notification) => {
+            void this.notificationsService
+              .validateStreamSubscriber(user)
+              .then((activeSession) => {
+                if (!activeSession) {
+                  subscriber.complete();
+                  return;
+                }
 
-        if (
-          role === UserRole.MOTORIZADO ||
-          role === UserRole.CAJERO ||
-          role === UserRole.MESERO
-        ) {
-          return (
-            notification.targetUsername?.toLowerCase() ===
-            user.username.toLowerCase()
-          );
-        }
+                const { role, username } = activeSession;
+                if (notification.role !== role) {
+                  return;
+                }
 
-        return (
-          !notification.targetUsername ||
-          notification.targetUsername.toLowerCase() ===
-            user.username.toLowerCase()
-        );
-      }),
-      map((notification) => ({
-        data: notification,
-      })),
-    );
+                if (
+                  role === UserRole.MOTORIZADO ||
+                  role === UserRole.CAJERO ||
+                  role === UserRole.MESERO
+                ) {
+                  if (
+                    notification.targetUsername?.toLowerCase() !==
+                    username.toLowerCase()
+                  ) {
+                    return;
+                  }
+                } else if (
+                  notification.targetUsername &&
+                  notification.targetUsername.toLowerCase() !==
+                    username.toLowerCase()
+                ) {
+                  return;
+                }
+
+                subscriber.next({
+                  data: notification,
+                });
+              })
+              .catch(() => {
+                subscriber.complete();
+              });
+          },
+          error: (err) => subscriber.error(err),
+          complete: () => subscriber.complete(),
+        });
+
+      return () => {
+        subscription.unsubscribe();
+      };
+    });
   }
 
   @UseGuards(JwtAuthGuard)

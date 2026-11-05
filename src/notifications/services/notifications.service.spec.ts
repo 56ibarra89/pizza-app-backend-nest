@@ -157,4 +157,49 @@ describe('NotificationsService', () => {
       }),
     );
   });
+
+  it('invalida suscriptores SSE cuando el token expira, el usuario se desactiva o cambia tokenVersion (H10)', async () => {
+    const expiredResult = await service.validateStreamSubscriber({
+      id: 'user-1',
+      username: 'caja1',
+      role: 'cajero' as never,
+      tokenVersion: 2,
+      tokenExpiresAtMs: Date.now() - 1_000,
+    });
+    expect(expiredResult).toBeNull();
+    expect(user.findUnique).not.toHaveBeenCalled();
+
+    user.findUnique.mockResolvedValueOnce({
+      isActive: true,
+      tokenVersion: 3,
+      role: UserRole.CAJERO,
+      username: 'caja1',
+    });
+    const revokedResult = await service.validateStreamSubscriber({
+      id: 'user-1',
+      username: 'caja1',
+      role: 'cajero' as never,
+      tokenVersion: 2,
+      tokenExpiresAtMs: Date.now() + 60_000,
+    });
+    expect(revokedResult).toBeNull();
+
+    user.findUnique.mockResolvedValueOnce({
+      isActive: true,
+      tokenVersion: 2,
+      role: UserRole.CAJERO,
+      username: 'caja1',
+    });
+    const activeResult = await service.validateStreamSubscriber({
+      id: 'user-1',
+      username: 'caja1',
+      role: 'cajero' as never,
+      tokenVersion: 2,
+      tokenExpiresAtMs: Date.now() + 60_000,
+    });
+    expect(activeResult).toEqual({
+      role: UserRole.CAJERO,
+      username: 'caja1',
+    });
+  });
 });

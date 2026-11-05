@@ -13,6 +13,7 @@ import type {
   SelectedComboOptionEntity,
 } from '../entities/order-item.entity';
 import { KitchenStatusDto } from '../dto/kitchen-status.dto';
+import { OrderStatusDto } from '../dto/order-status.dto';
 import {
   fromDbKitchenStatus,
   fromDbOrderStatus,
@@ -24,23 +25,54 @@ import {
   toDbPaymentMethod,
 } from '../mappers/status.mapper';
 import type { OrderHistoryPage } from '../interfaces/orders.repository';
+import { getBusinessDayBounds } from '../../common/time/business-time.util';
+
+const MAX_TODAY_OR_ACTIVE_ORDERS = 500;
 
 @Injectable()
 export class PrismaOrdersRepository implements IOrdersRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async listTodayOrActive(now: Date): Promise<OrderEntity[]> {
-    const startOfDay = new Date(now);
-    startOfDay.setHours(0, 0, 0, 0);
+  async listTodayOrActive(
+    now: Date,
+    filters?: { driverId?: string; kitchenId?: string; limit?: number },
+  ): Promise<OrderEntity[]> {
+    const { startOfDay } = getBusinessDayBounds(now);
+    const take = Math.min(
+      Math.max(1, filters?.limit ?? MAX_TODAY_OR_ACTIVE_ORDERS),
+      MAX_TODAY_OR_ACTIVE_ORDERS,
+    );
 
-    const orders = await this.prisma.order.findMany({
-      where: {
+    const conditions: Prisma.OrderWhereInput[] = [
+      {
         OR: [
           { timestamp: { gte: startOfDay } },
           { paidAt: { gte: startOfDay } },
           { status: { notIn: ['PAID', 'CANCELLED'] satisfies OrderStatus[] } },
         ],
       },
+    ];
+
+    if (filters?.driverId) {
+      conditions.push({
+        orderType: 'DELIVERY',
+        driverId: filters.driverId,
+      });
+    }
+
+    if (filters?.kitchenId) {
+      conditions.push({
+        items: {
+          some: {
+            OR: [{ kitchenId: filters.kitchenId }, { isCombo: true }],
+          },
+        },
+      });
+    }
+
+    const orders = await this.prisma.order.findMany({
+      where: conditions.length === 1 ? conditions[0] : { AND: conditions },
+      take,
       include: {
         customer: { select: { id: true, name: true, phone: true } },
         payments: true,
@@ -65,6 +97,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     paymentMethodId?: string;
     view?: 'all' | 'invoices';
     statuses?: import('../dto/order-status.dto').OrderStatusDto[];
+    driverId?: string;
+    kitchenId?: string;
   }): Promise<OrderHistoryPage> {
     const dateRange = { gte: params.startDate, lte: params.endDate };
     const baseConditions: Prisma.OrderWhereInput[] = [
@@ -79,6 +113,21 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         },
       },
     ];
+    if (params.driverId) {
+      baseConditions.push({
+        orderType: 'DELIVERY',
+        driverId: params.driverId,
+      });
+    }
+    if (params.kitchenId) {
+      baseConditions.push({
+        items: {
+          some: {
+            OR: [{ kitchenId: params.kitchenId }, { isCombo: true }],
+          },
+        },
+      });
+    }
     if (params.statuses?.length) {
       baseConditions.push({
         status: { in: params.statuses.map(toDbOrderStatus) },
@@ -270,6 +319,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         },
         linkedTables: { select: { tableId: true } },
       },
+      take: MAX_TODAY_OR_ACTIVE_ORDERS,
       orderBy: { timestamp: 'desc' },
     });
     return list.map((o) => this.mapOrder(o));
@@ -732,35 +782,55 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           : Prisma.DbNull,
       });
 
-      updateData.items = {
-        deleteMany:
-          existingItems.length > 0
-            ? { id: { notIn: existingItems.map((item) => item.id) } }
-            : {},
-        update: existingItems.map((i) => ({
-          where: { id: i.id },
-          data: {
-            ...itemData(i),
-            ...(extrasChanged(i)
-              ? {
-                  extras: {
-                    deleteMany: {},
-                    create: i.extras.map((e) => ({
-                      name: e.name,
-                      price: e.price,
-                    })),
-                  },
-                }
-              : {}),
-          },
-        })),
-        create: newItems.map((i) => ({
-          ...itemData(i),
-          extras: {
-            create: i.extras.map((e) => ({ name: e.name, price: e.price })),
-          },
-        })),
-      };
+      const isFinalOrderStatus =
+        data.status === OrderStatusDto.paid ||
+        data.status === OrderStatusDto.cancelled;
+
+      updateData.items = isFinalOrderStatus
+        ? {
+            update: existingItems.map((i) => ({
+              where: { id: i.id },
+              data: {
+                isSentToKitchen: i.isSentToKitchen ?? false,
+                sentAt: i.sentAt ? new Date(i.sentAt) : null,
+                kitchenStatus: i.kitchenStatus
+                  ? toDbKitchenStatus(i.kitchenStatus)
+                  : null,
+                comboSelections: i.comboSelections
+                  ? (i.comboSelections as unknown as Prisma.InputJsonValue)
+                  : Prisma.DbNull,
+              },
+            })),
+          }
+        : {
+            deleteMany:
+              existingItems.length > 0
+                ? { id: { notIn: existingItems.map((item) => item.id) } }
+                : {},
+            update: existingItems.map((i) => ({
+              where: { id: i.id },
+              data: {
+                ...itemData(i),
+                ...(extrasChanged(i)
+                  ? {
+                      extras: {
+                        deleteMany: {},
+                        create: i.extras.map((e) => ({
+                          name: e.name,
+                          price: e.price,
+                        })),
+                      },
+                    }
+                  : {}),
+              },
+            })),
+            create: newItems.map((i) => ({
+              ...itemData(i),
+              extras: {
+                create: i.extras.map((e) => ({ name: e.name, price: e.price })),
+              },
+            })),
+          };
     }
 
     const updated = await (tx ?? this.prisma).order.update({

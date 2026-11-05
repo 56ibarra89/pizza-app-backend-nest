@@ -37,12 +37,27 @@ const PRODUCT_BASE_INCLUDE = {
   },
 };
 
+const CATEGORY_REVENUE_WINDOW_DAYS = 30;
+const CATEGORY_REVENUE_CACHE_TTL_MS = 5 * 60 * 1000;
+
 @Injectable()
 export class PrismaProductsRepository implements IProductsRepository {
+  private categoryRevenueCache: {
+    expiresAt: number;
+    revenueByCategory: Map<string, number>;
+  } | null = null;
+
   constructor(private readonly prisma: PrismaService) {}
 
-  async getCategories(): Promise<CategoryEntity[]> {
-    const [categories, categoryRevenue] = await Promise.all([
+  invalidateCategoryRevenueCache(): void {
+    this.categoryRevenueCache = null;
+  }
+
+  async getCategories(params?: {
+    includeMetrics?: boolean;
+  }): Promise<CategoryEntity[]> {
+    const includeMetrics = params?.includeMetrics !== false;
+    const [categories, revenueByCategory] = await Promise.all([
       this.prisma.category.findMany({
         where: { deletedAt: null },
         orderBy: { label: 'asc' },
@@ -58,45 +73,10 @@ export class PrismaProductsRepository implements IProductsRepository {
           },
         },
       }),
-      this.prisma.$queryRaw<
-        Array<{ categoryId: string; totalRevenue: unknown }>
-      >`
-        WITH "reportableItems" AS (
-          SELECT
-            p."categoryId",
-            oi."orderId",
-            oi."price" * GREATEST(oi."quantity" - oi."giftQuantity", 0) AS "grossRevenue",
-            COALESCE(o."discountAmount", 0) AS "discountAmount"
-          FROM "OrderItem" oi
-          INNER JOIN "Order" o ON o.id = oi."orderId"
-          INNER JOIN "Product" p ON p.id = oi."productId"
-          WHERE o.status = 'PAID'
-        ),
-        "orderGross" AS (
-          SELECT "orderId", SUM("grossRevenue") AS "grossTotal"
-          FROM "reportableItems"
-          GROUP BY "orderId"
-        )
-        SELECT
-          ri."categoryId",
-          SUM(
-            GREATEST(
-              ri."grossRevenue" - CASE
-                WHEN og."grossTotal" > 0
-                  THEN ri."discountAmount" * ri."grossRevenue" / og."grossTotal"
-                ELSE 0
-              END,
-              0
-            )
-          ) AS "totalRevenue"
-        FROM "reportableItems" ri
-        INNER JOIN "orderGross" og ON og."orderId" = ri."orderId"
-        GROUP BY ri."categoryId"
-      `,
+      includeMetrics
+        ? this.getCategoryRevenueMap()
+        : Promise.resolve(new Map<string, number>()),
     ]);
-    const revenueByCategory = new Map(
-      categoryRevenue.map((row) => [row.categoryId, Number(row.totalRevenue)]),
-    );
 
     return categories.map((c) => ({
       id: c.id,
@@ -107,6 +87,65 @@ export class PrismaProductsRepository implements IProductsRepository {
       extras: c.extras.map((extra) => this.mapExtra(extra)),
       items: c.products.map((p) => this.mapProduct(p, c.extras)),
     }));
+  }
+
+  private async getCategoryRevenueMap(): Promise<Map<string, number>> {
+    const nowMs = Date.now();
+    if (
+      this.categoryRevenueCache &&
+      this.categoryRevenueCache.expiresAt > nowMs
+    ) {
+      return this.categoryRevenueCache.revenueByCategory;
+    }
+
+    const windowStart = new Date(
+      nowMs - CATEGORY_REVENUE_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+    );
+    const categoryRevenue = await this.prisma.$queryRaw<
+      Array<{ categoryId: string; totalRevenue: unknown }>
+    >`
+      WITH "reportableItems" AS (
+        SELECT
+          p."categoryId",
+          oi."orderId",
+          oi."price" * GREATEST(oi."quantity" - oi."giftQuantity", 0) AS "grossRevenue",
+          COALESCE(o."discountAmount", 0) AS "discountAmount"
+        FROM "OrderItem" oi
+        INNER JOIN "Order" o ON o.id = oi."orderId"
+        INNER JOIN "Product" p ON p.id = oi."productId"
+        WHERE o.status = 'PAID'
+          AND COALESCE(o."paidAt", o."timestamp") >= ${windowStart}
+      ),
+      "orderGross" AS (
+        SELECT "orderId", SUM("grossRevenue") AS "grossTotal"
+        FROM "reportableItems"
+        GROUP BY "orderId"
+      )
+      SELECT
+        ri."categoryId",
+        SUM(
+          GREATEST(
+            ri."grossRevenue" - CASE
+              WHEN og."grossTotal" > 0
+                THEN ri."discountAmount" * ri."grossRevenue" / og."grossTotal"
+              ELSE 0
+            END,
+            0
+          )
+        ) AS "totalRevenue"
+      FROM "reportableItems" ri
+      INNER JOIN "orderGross" og ON og."orderId" = ri."orderId"
+      GROUP BY ri."categoryId"
+    `;
+
+    const revenueByCategory = new Map(
+      categoryRevenue.map((row) => [row.categoryId, Number(row.totalRevenue)]),
+    );
+    this.categoryRevenueCache = {
+      expiresAt: nowMs + CATEGORY_REVENUE_CACHE_TTL_MS,
+      revenueByCategory,
+    };
+    return revenueByCategory;
   }
 
   async createCategory(dto: CreateCategoryDto): Promise<CategoryEntity> {

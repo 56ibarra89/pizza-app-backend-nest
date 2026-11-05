@@ -173,6 +173,14 @@ export class PrismaShiftsRepository implements IShiftsRepository {
   }): Promise<ShiftEntity> {
     return this.prisma.$transaction(
       async (tx) => {
+        if (typeof tx.$queryRaw === 'function') {
+          await tx.$queryRaw`
+            SELECT id, status
+            FROM "Shift"
+            WHERE id = ${params.id}
+            FOR UPDATE
+          `;
+        }
         const existing = await tx.shift.findUnique({
           where: { id: params.id },
           include: { expenses: true },

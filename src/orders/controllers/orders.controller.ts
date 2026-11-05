@@ -26,6 +26,7 @@ import type { OrderEntity } from '../entities/order.entity';
 import { requiresKitchenPreparation } from '../validators/order-item-kind';
 import { ListOrderHistoryQueryDto } from '../dto/list-order-history-query.dto';
 import { OrderStatusDto } from '../dto/order-status.dto';
+import { getBusinessDayBounds } from '../../common/time/business-time.util';
 
 @ApiTags('orders')
 @Controller('orders')
@@ -55,12 +56,53 @@ export class OrdersController {
       );
     }
 
-    const list = await this.orders.listTodayOrActive();
-    return this.toVisibleOrderResponses(list, user);
+    let kitchenId: string | undefined;
+    if (user?.role === UserRoleDto.cocinero) {
+      const assignedKitchenId = await this.kitchens.getAssignedKitchenIdForDate(
+        user.id,
+      );
+      if (!assignedKitchenId) {
+        return [];
+      }
+      kitchenId = assignedKitchenId;
+    }
+
+    const driverId =
+      user?.role === UserRoleDto.motorizado ? user.id : undefined;
+
+    const list = await this.orders.listTodayOrActive(new Date(), {
+      driverId,
+      kitchenId,
+    });
+    return this.toVisibleOrderResponses(list, user, kitchenId);
   }
 
   @Get('history')
-  async listHistory(@Query() query: ListOrderHistoryQueryDto) {
+  async listHistory(
+    @Query() query: ListOrderHistoryQueryDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    let kitchenId: string | undefined;
+    if (user?.role === UserRoleDto.cocinero) {
+      const assignedKitchenId = await this.kitchens.getAssignedKitchenIdForDate(
+        user.id,
+      );
+      if (!assignedKitchenId) {
+        return {
+          items: [],
+          total: 0,
+          page: query.page,
+          pageSize: query.pageSize,
+          totalPages: 0,
+          paymentMethodOptions: [],
+        };
+      }
+      kitchenId = assignedKitchenId;
+    }
+
+    const driverId =
+      user?.role === UserRoleDto.motorizado ? user.id : undefined;
+
     const result = await this.orders.listHistory({
       startDate: new Date(query.startDate),
       endDate: new Date(query.endDate),
@@ -70,9 +112,16 @@ export class OrdersController {
       paymentMethodId: query.paymentMethodId,
       view: query.view,
       statuses: query.statuses as OrderStatusDto[] | undefined,
+      driverId,
+      kitchenId,
     });
+    const visibleItems = await this.toVisibleOrderResponses(
+      result.items,
+      user,
+      kitchenId,
+    );
     return {
-      items: result.items.map(toOrderResponseDto),
+      items: visibleItems,
       total: result.total,
       page: query.page,
       pageSize: query.pageSize,
@@ -84,11 +133,20 @@ export class OrdersController {
   private async toVisibleOrderResponses(
     orders: OrderEntity[],
     user?: AuthenticatedUser,
+    resolvedKitchenId?: string,
   ) {
     const responses = orders.map(toOrderResponseDto);
+    if (user?.role === UserRoleDto.motorizado) {
+      return responses.filter(
+        (order) =>
+          order.orderType === 'delivery' && order.driverId === user.id,
+      );
+    }
     if (user?.role !== UserRoleDto.cocinero) return responses;
 
-    const kitchenId = await this.kitchens.getAssignedKitchenIdForDate(user.id);
+    const kitchenId =
+      resolvedKitchenId ??
+      (await this.kitchens.getAssignedKitchenIdForDate(user.id));
     if (!kitchenId) return [];
 
     return responses.flatMap((order) => {
@@ -124,20 +182,29 @@ export class OrdersController {
 
   @Get('driver/:driverId/today')
   @Permissions('delivery.read')
-  @Roles(UserRoleDto.admin, UserRoleDto.despachador, UserRoleDto.motorizado)
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.despachador,
+    UserRoleDto.motorizado,
+  )
   async getDriverTodayOrders(
     @Param('driverId') driverId: string,
     @CurrentUser() user: AuthenticatedUser,
     @Query('date') dateStr?: string,
   ) {
-    let dateToUse = dateStr;
-    if (!dateToUse) {
-      const now = new Date();
-      dateToUse = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    let startOfDay: Date;
+    let endOfDay: Date;
+    try {
+      const bounds = getBusinessDayBounds(dateStr ?? new Date());
+      startOfDay = bounds.startOfDay;
+      endOfDay = bounds.endOfDay;
+    } catch {
+      throw new BadRequestException(
+        'La fecha debe usar el formato YYYY-MM-DD.',
+      );
     }
-    const [year, month, day] = dateToUse.split('-').map(Number);
-    const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
-    const endOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
 
     const effectiveDriverId =
       user.role === UserRoleDto.motorizado ? user.id : driverId;
@@ -273,6 +340,7 @@ export class OrdersController {
   @Permissions('delivery.read')
   @Roles(
     UserRoleDto.admin,
+    UserRoleDto.cajero,
     UserRoleDto.cajero_principal,
     UserRoleDto.despachador,
     UserRoleDto.motorizado,
@@ -363,7 +431,9 @@ export class OrdersController {
     const [response] = await this.toVisibleOrderResponses([order], user);
     if (!response) {
       throw new ForbiddenException(
-        'No tienes acceso a esta orden desde la cocina asignada.',
+        user?.role === UserRoleDto.motorizado
+          ? 'No tienes acceso a pedidos que no están asignados a tu usuario.'
+          : 'No tienes acceso a esta orden desde la cocina asignada.',
       );
     }
     return response;

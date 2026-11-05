@@ -49,7 +49,7 @@ export class ShiftsService {
       throw new BadRequestException('Ya existe un turno de caja abierto en el sistema.');
     }
 
-    return this.repo.open({
+    const opened = await this.repo.open({
       cashierId: user.id,
       cashierSnapshotName: user.username,
       cashRegisterSnapshotName: dto.cashRegisterName?.trim() || undefined,
@@ -57,6 +57,15 @@ export class ShiftsService {
       notes: dto.notes?.trim() || undefined,
       startTime: new Date(),
     });
+
+    if (opened?.id) {
+      this.eventEmitter?.emit('shift.opened', {
+        shiftId: opened.id,
+        user,
+      });
+    }
+
+    return opened;
   }
 
   async close(id: string, dto: CloseShiftDto, user: AuthenticatedUser) {

@@ -6,6 +6,7 @@ import {
   PromoActiveStatus,
 } from '@prisma/client';
 import { Prisma } from '@prisma/client';
+import { getBusinessDayBounds } from '../../common/time/business-time.util';
 
 export type PromoStatusDto = 'Activo' | 'Inactivo';
 export type CuponStatusDto = 'Activo' | 'Inactivo' | 'Agotado' | 'Vencido';
@@ -13,7 +14,7 @@ export type CuponStatusDto = 'Activo' | 'Inactivo' | 'Agotado' | 'Vencido';
 export function isCouponExpired(expiresDate: Date | null, now: Date): boolean {
   if (!expiresDate) return false;
   const dateKey = expiresDate.toISOString().slice(0, 10);
-  const endOfBusinessDay = new Date(`${dateKey}T23:59:59.999-06:00`);
+  const { endOfDay: endOfBusinessDay } = getBusinessDayBounds(dateKey);
   return endOfBusinessDay < now;
 }
 

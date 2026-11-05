@@ -9,4 +9,6 @@ export interface AuthenticatedUser {
   permissions?: string[];
   firstName?: string;
   lastName?: string;
+  tokenVersion?: number;
+  tokenExpiresAtMs?: number;
 }

@@ -135,6 +135,8 @@ describe('UsersService security boundaries', () => {
     });
 
     expect(result.success).toBe(true);
+    expect(result.access_token).toBe('signed-token');
+    expect(result.refresh_token).toBe('signed-token');
     expect(repo.findByIdentifier).toHaveBeenCalledWith('cashier');
     expect(repo.registerSuccessfulLogin).toHaveBeenCalledWith(user.id);
     expect(authAttempts.assertAllowed).toHaveBeenCalledTimes(1);
@@ -169,5 +171,69 @@ describe('UsersService security boundaries', () => {
         }),
       }),
     );
+  });
+
+  it('renews a session from a recently expired access token or valid refresh token (H09)', async () => {
+    const { service, jwtService } = createHarness();
+    const recentlyExpiredSec = Math.floor((Date.now() - 5 * 60_000) / 1000);
+    jwtService.verify.mockReturnValueOnce({
+      sub: user.id,
+      tokenVersion: user.tokenVersion,
+      type: 'access',
+      exp: recentlyExpiredSec,
+    });
+    jwtService.sign
+      .mockReturnValueOnce('new-access-jwt')
+      .mockReturnValueOnce('new-refresh-jwt');
+
+    const refreshed = await service.refreshSessionToken('expired-access-token');
+
+    expect(jwtService.verify).toHaveBeenCalledWith('expired-access-token', {
+      ignoreExpiration: true,
+    });
+    expect(refreshed).toEqual({
+      access_token: 'new-access-jwt',
+      refresh_token: 'new-refresh-jwt',
+    });
+  });
+
+  it('rejects session renewal when tokenVersion was revoked or token is outside grace window (H09)', async () => {
+    const { service, jwtService } = createHarness();
+
+    // Case 1: Revoked tokenVersion
+    jwtService.verify.mockReturnValueOnce({
+      sub: user.id,
+      tokenVersion: user.tokenVersion - 1,
+      type: 'refresh',
+      exp: Math.floor((Date.now() + 3600_000) / 1000),
+    });
+
+    await expect(
+      service.refreshSessionToken('revoked-refresh-token'),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    // Case 2: Access token expired more than 24h ago
+    jwtService.verify.mockReturnValueOnce({
+      sub: user.id,
+      tokenVersion: user.tokenVersion,
+      type: 'access',
+      exp: Math.floor((Date.now() - 25 * 3600_000) / 1000),
+    });
+
+    await expect(
+      service.refreshSessionToken('stale-access-token'),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    // Case 3: Password reset token cannot be used to refresh session
+    jwtService.verify.mockReturnValueOnce({
+      sub: user.id,
+      tokenVersion: user.tokenVersion,
+      type: 'password_reset',
+      exp: Math.floor((Date.now() + 600_000) / 1000),
+    } as any);
+
+    await expect(
+      service.refreshSessionToken('reset-token'),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 });

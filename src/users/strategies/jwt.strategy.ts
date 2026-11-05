@@ -14,6 +14,7 @@ interface AccessJwtPayload {
   sub: string;
   tokenVersion: number;
   type: 'access';
+  exp?: number;
 }
 
 function isAccessJwtPayload(payload: unknown): payload is AccessJwtPayload {
@@ -74,6 +75,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       accessRoleName: user.accessRole?.name,
       permissions:
         user.accessRole?.permissions.map((entry) => entry.permission.code) ?? [],
+      tokenVersion: user.tokenVersion,
+      tokenExpiresAtMs:
+        typeof payload.exp === 'number' ? payload.exp * 1000 : undefined,
     };
   }
 }

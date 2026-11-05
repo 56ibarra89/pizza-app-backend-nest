@@ -13,7 +13,9 @@ import type { ExtraIngredientEntity } from '../entities/product.entity';
 export const PRODUCTS_REPOSITORY = Symbol('PRODUCTS_REPOSITORY');
 
 export interface IProductsRepository {
-  getCategories(): Promise<CategoryEntity[]>;
+  getCategories(params?: {
+    includeMetrics?: boolean;
+  }): Promise<CategoryEntity[]>;
   createCategory(dto: CreateCategoryDto): Promise<CategoryEntity>;
   updateCategory(id: string, dto: UpdateCategoryDto): Promise<CategoryEntity>;
   deleteCategory(id: string): Promise<void>;

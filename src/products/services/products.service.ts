@@ -25,8 +25,10 @@ export class ProductsService {
     @Inject(PRODUCTS_REPOSITORY) private readonly repo: IProductsRepository,
   ) {}
 
-  getCategories(): Promise<CategoryEntity[]> {
-    return this.repo.getCategories();
+  getCategories(params?: {
+    includeMetrics?: boolean;
+  }): Promise<CategoryEntity[]> {
+    return this.repo.getCategories(params);
   }
 
   createCategory(dto: CreateCategoryDto): Promise<CategoryEntity> {

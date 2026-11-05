@@ -43,10 +43,28 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
     expirationDate: Date;
     status: CorrelativoStatus;
   }): Promise<CorrelativoEntity> {
-    const created = await this.prisma.correlativo.create({
-      data: params,
-    });
-    return this.map(created);
+    const executeCreate = async (tx: typeof this.prisma) => {
+      if (params.status === CorrelativoStatus.ACTIVO) {
+        await tx.correlativo.updateMany({
+          where: {
+            documentType: params.documentType,
+            status: CorrelativoStatus.ACTIVO,
+          },
+          data: { status: CorrelativoStatus.VENCIDO },
+        });
+      }
+      const created = await tx.correlativo.create({
+        data: params,
+      });
+      return this.map(created);
+    };
+
+    if (typeof this.prisma.$transaction === 'function') {
+      return this.prisma.$transaction((tx) =>
+        executeCreate(tx as unknown as typeof this.prisma),
+      );
+    }
+    return executeCreate(this.prisma);
   }
 
   async update(id: string, params: {
@@ -60,11 +78,40 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
     expirationDate?: Date;
     status?: CorrelativoStatus;
   }): Promise<CorrelativoEntity> {
-    const updated = await this.prisma.correlativo.update({
-      where: { id },
-      data: params,
-    });
-    return this.map(updated);
+    const executeUpdate = async (tx: typeof this.prisma) => {
+      if (params.status === CorrelativoStatus.ACTIVO) {
+        let docType = params.documentType;
+        if (!docType && tx.correlativo.findUnique) {
+          const existing = await tx.correlativo.findUnique({
+            where: { id },
+            select: { documentType: true },
+          });
+          docType = existing?.documentType;
+        }
+        if (docType) {
+          await tx.correlativo.updateMany({
+            where: {
+              documentType: docType,
+              status: CorrelativoStatus.ACTIVO,
+              id: { not: id },
+            },
+            data: { status: CorrelativoStatus.VENCIDO },
+          });
+        }
+      }
+      const updated = await tx.correlativo.update({
+        where: { id },
+        data: params,
+      });
+      return this.map(updated);
+    };
+
+    if (typeof this.prisma.$transaction === 'function') {
+      return this.prisma.$transaction((tx) =>
+        executeUpdate(tx as unknown as typeof this.prisma),
+      );
+    }
+    return executeUpdate(this.prisma);
   }
 
   async consumeNext(documentType: DocumentType): Promise<{
@@ -76,10 +123,32 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
     status: CorrelativoStatus;
   }> {
     return this.prisma.$transaction(async (tx) => {
-      const active = await tx.correlativo.findFirst({
-        where: { documentType, status: CorrelativoStatus.ACTIVO },
-        orderBy: { createdAt: 'desc' },
-      });
+      let active: Awaited<ReturnType<typeof tx.correlativo.findFirst>> = null;
+      if (typeof tx.$queryRaw === 'function') {
+        const lockedRows = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id
+          FROM "Correlativo"
+          WHERE "documentType" = ${documentType}::"DocumentType"
+            AND "status" = 'ACTIVO'::"CorrelativoStatus"
+          ORDER BY "createdAt" DESC
+          LIMIT 1
+          FOR UPDATE
+        `;
+        if (lockedRows[0]?.id && tx.correlativo.findUnique) {
+          active = await tx.correlativo.findUnique({
+            where: { id: lockedRows[0].id },
+          });
+        } else if (lockedRows[0]?.id) {
+          active = await tx.correlativo.findFirst({
+            where: { id: lockedRows[0].id },
+          });
+        }
+      } else {
+        active = await tx.correlativo.findFirst({
+          where: { documentType, status: CorrelativoStatus.ACTIVO },
+          orderBy: { createdAt: 'desc' },
+        });
+      }
 
       if (!active) {
         throw new NotFoundException('No hay correlativo ACTIVO para ese tipo de documento');
@@ -95,6 +164,14 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
       }
 
       const issuedNumber = active.currentNumber;
+      if (
+        typeof active.startNumber === 'number' &&
+        issuedNumber < active.startNumber
+      ) {
+        throw new BadRequestException(
+          'El número actual del correlativo es menor al rango autorizado.',
+        );
+      }
       if (issuedNumber > active.endNumber) {
         await tx.correlativo.update({
           where: { id: active.id },

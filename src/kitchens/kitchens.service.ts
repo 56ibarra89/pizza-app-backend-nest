@@ -3,16 +3,7 @@ import { CreateKitchenDto } from './dto/create-kitchen.dto';
 import { UpdateKitchenDto } from './dto/update-kitchen.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import type { WeekDay } from '@prisma/client';
-
-const WEEK_DAYS: readonly WeekDay[] = [
-  'SUNDAY',
-  'MONDAY',
-  'TUESDAY',
-  'WEDNESDAY',
-  'THURSDAY',
-  'FRIDAY',
-  'SATURDAY',
-];
+import { getBusinessDateParts } from '../common/time/business-time.util';
 
 @Injectable()
 export class KitchensService {
@@ -77,11 +68,12 @@ export class KitchensService {
   }
 
   async getAssignedKitchenIdForDate(userId: string, date = new Date()) {
+    const { weekday } = getBusinessDateParts(date);
     const assignment = await this.prisma.cookKitchenAssignment.findUnique({
       where: {
         userId_dayOfWeek: {
           userId,
-          dayOfWeek: WEEK_DAYS[date.getDay()],
+          dayOfWeek: weekday,
         },
       },
       select: {

@@ -30,5 +30,42 @@ describe('AuthController session revocation', () => {
     expect(users.refreshToken).toHaveBeenCalledWith('user-1');
     expect(result).toEqual({ access_token: 'new-token' });
   });
-});
 
+  it('accepts expired access token or refresh token from Authorization header or body on /auth/refresh (H09)', async () => {
+    const users = {
+      refreshSessionToken: jest.fn(() =>
+        Promise.resolve({
+          access_token: 'fresh-access-token',
+          refresh_token: 'fresh-refresh-token',
+        }),
+      ),
+    };
+    const controller = new AuthController(users as any);
+
+    const resultFromHeader = await controller.refresh(
+      undefined,
+      {
+        headers: { authorization: 'Bearer expired.jwt.token' },
+      } as any,
+      {},
+    );
+
+    expect(users.refreshSessionToken).toHaveBeenCalledWith('expired.jwt.token');
+    expect(resultFromHeader).toEqual({
+      access_token: 'fresh-access-token',
+      refresh_token: 'fresh-refresh-token',
+    });
+
+    const resultFromBody = await controller.refresh(
+      undefined,
+      { headers: {} } as any,
+      { refresh_token: 'body.refresh.token' },
+    );
+
+    expect(users.refreshSessionToken).toHaveBeenCalledWith('body.refresh.token');
+    expect(resultFromBody).toEqual({
+      access_token: 'fresh-access-token',
+      refresh_token: 'fresh-refresh-token',
+    });
+  });
+});

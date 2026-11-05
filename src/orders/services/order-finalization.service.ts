@@ -47,23 +47,27 @@ export class OrderFinalizationService {
       },
       order.timestamp,
     );
-    const calculatedTotals = await this.pricing.calculate(
+    const unadjusted = await this.pricing.calculateWithPrices(
       order.items,
       promotion,
+      undefined,
+      { useSnapshotPrices: true },
     );
+    const calculatedTotals = unadjusted.totals;
     const hasSplitAdjustedDiscount =
       typeof order.discountAmount === 'number' &&
       order.discountAmount >= 0 &&
       ((promotion.source === 'none' && order.discountAmount > 0) ||
         (promotion.source !== 'none' &&
           order.discountAmount + 0.01 < calculatedTotals.discountAmount));
-    const totals = hasSplitAdjustedDiscount
-      ? await this.pricing.calculate(
+    const { items: pricedItems, totals } = hasSplitAdjustedDiscount
+      ? await this.pricing.calculateWithPrices(
           order.items,
           promotion,
           order.discountAmount,
+          { useSnapshotPrices: true },
         )
-      : calculatedTotals;
+      : unadjusted;
     const payments = dto.payments ?? order.payments;
     assertPaymentsMatchTotal(totals.total, payments);
 
@@ -72,6 +76,8 @@ export class OrderFinalizationService {
         orderId: order.id,
         dto,
         totals,
+        items: pricedItems,
+        expectedUpdatedAt: order.updatedAt,
         promotion,
         cashierId: typeof user === 'string' ? undefined : user?.id,
         cashierSnapshotName:

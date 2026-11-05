@@ -43,10 +43,12 @@ describe('OrdersGateway authorization', () => {
 
   const connect = async () => {
     const middlewareRef: { current?: GatewayMiddleware } = {};
+    const emit = jest.fn();
     const server = {
       use: (middleware: GatewayMiddleware) => {
         middlewareRef.current = middleware;
       },
+      to: jest.fn().mockReturnValue({ emit }),
     };
     const gateway = new OrdersGateway(
       jwtService,
@@ -67,13 +69,16 @@ describe('OrdersGateway authorization', () => {
         headers: {},
       },
       join: jest.fn().mockResolvedValue(undefined),
+      leave: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn(),
+      on: jest.fn(),
     };
     const next = jest.fn();
 
     middleware(socket, next);
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    return { next, socket };
+    return { gateway, next, socket, emit };
   };
 
   beforeEach(() => {
@@ -112,5 +117,37 @@ describe('OrdersGateway authorization', () => {
       'authenticated-full-orders-clients',
     );
     expect(next).toHaveBeenCalledWith();
+  });
+
+  it('desconecta y retira del canal un socket cuya sesión fue revocada antes de emitir cambios (H10)', async () => {
+    authorizationForUser.mockResolvedValue({
+      accessRoleId: 'role-1',
+      accessRoleName: 'Caja',
+      permissions: ['home.access', 'orders.read'],
+    });
+
+    const { gateway, socket } = await connect();
+
+    findById.mockResolvedValueOnce({
+      ...activeUser,
+      tokenVersion: activeUser.tokenVersion + 1,
+    });
+
+    await gateway.handleOrderSynchronized({
+      mutation: 'updated',
+      order: {
+        id: 'order-1',
+        status: 'pending' as never,
+        total: 100,
+        timestamp: new Date('2026-10-24T12:00:00.000Z'),
+        items: [],
+        payments: [],
+      },
+    });
+
+    expect(socket.leave).toHaveBeenCalledWith(
+      'authenticated-full-orders-clients',
+    );
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
   });
 });

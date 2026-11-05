@@ -11,6 +11,7 @@ import type {
 
 const MAX_REPORT_RANGE_DAYS = 366;
 const DAY_MS = 86_400_000;
+const REPORT_BATCH_SIZE = 2_500;
 const SPANISH_MONTHS = [
   'ene',
   'feb',
@@ -92,57 +93,56 @@ export class ReportsService {
   }): Promise<SalesReportDto> {
     this.validateRange(params.startDate, params.endDate);
 
-    // Only report-relevant columns are loaded. Customer data, kitchen state,
-    // extras and other large order relations never cross the database/API boundary.
-    const orders = await this.prisma.order.findMany({
-      where: {
-        status: 'PAID',
-        OR: [
-          { paidAt: { gte: params.startDate, lte: params.endDate } },
-          {
-            paidAt: null,
-            timestamp: { gte: params.startDate, lte: params.endDate },
-          },
-        ],
-      },
-      select: {
-        id: true,
-        parentOrderId: true,
-        total: true,
-        discountAmount: true,
-        timestamp: true,
-        paidAt: true,
-        invoiceNumber: true,
-        orderType: true,
-        linkedTables: { select: { tableId: true }, take: 1 },
-        payments: {
-          select: {
-            method: true,
-            amount: true,
-            methodConfigId: true,
-            methodSnapshotName: true,
-            methodType: true,
-            currency: true,
-            originalAmount: true,
-          },
+    // Only report-relevant columns are loaded in bounded batches. Customer data,
+    // kitchen state, extras and other large order relations never cross the DB boundary.
+    const reportSelect = {
+      id: true,
+      parentOrderId: true,
+      total: true,
+      discountAmount: true,
+      timestamp: true,
+      paidAt: true,
+      invoiceNumber: true,
+      orderType: true,
+      linkedTables: { select: { tableId: true }, take: 1 },
+      payments: {
+        select: {
+          method: true,
+          amount: true,
+          methodConfigId: true,
+          methodSnapshotName: true,
+          methodType: true,
+          currency: true,
+          originalAmount: true,
         },
-        items: {
-          select: {
-            productId: true,
-            name: true,
-            price: true,
-            quantity: true,
-            giftQuantity: true,
-            product: {
-              select: {
-                categoryId: true,
-                category: { select: { label: true } },
-              },
+      },
+      items: {
+        select: {
+          productId: true,
+          name: true,
+          price: true,
+          quantity: true,
+          giftQuantity: true,
+          product: {
+            select: {
+              categoryId: true,
+              category: { select: { label: true } },
             },
           },
         },
       },
-    });
+    } as const;
+
+    const reportWhere = {
+      status: 'PAID' as const,
+      OR: [
+        { paidAt: { gte: params.startDate, lte: params.endDate } },
+        {
+          paidAt: null,
+          timestamp: { gte: params.startDate, lte: params.endDate },
+        },
+      ],
+    };
 
     let totalSales = 0;
     let cashSales = 0;
@@ -180,130 +180,146 @@ export class ReportsService {
     );
     const groupByDay = Math.floor((endDayUtc - startDayUtc) / DAY_MS) >= 1;
 
-    for (const order of orders) {
-      const orderTotal = Number(order.total);
-      const discount = Number(order.discountAmount ?? 0);
-      const isSettledSplitAggregate =
-        !order.invoiceNumber &&
-        orderTotal === 0 &&
-        order.payments.length === 0 &&
-        order.items.some((item) => {
-          const normalized = item.name.trim().toLocaleLowerCase('es');
-          return (
-            normalized === 'abono subcuenta' ||
-            normalized.startsWith('abono subcuenta ')
-          );
-        });
+    let offset = 0;
+    while (true) {
+      const orders = await this.prisma.order.findMany({
+        where: reportWhere,
+        select: reportSelect,
+        orderBy: [{ timestamp: 'asc' }, { id: 'asc' }],
+        skip: offset,
+        take: REPORT_BATCH_SIZE,
+      });
 
-      if (Number.isFinite(discount) && discount > 0) {
-        totalDiscounts += discount;
-        discountedOrderGroups.add(order.parentOrderId ?? order.id);
-      }
-
-      if (!isSettledSplitAggregate) {
-        totalOrders += 1;
-        totalSales += orderTotal;
-
-        const channel = toChannelType(
-          order.orderType,
-          order.linkedTables.length > 0,
-        );
-        channels[channel].sales += orderTotal;
-        channels[channel].ordersCount += 1;
-
-        const paidAt = order.paidAt ?? order.timestamp;
-        const time = groupByDay
-          ? dayKey(paidAt, params.timezoneOffsetMinutes)
-          : hourKey(paidAt, params.timezoneOffsetMinutes);
-        const currentTime = times.get(time) ?? { sales: 0, ordersCount: 0 };
-        times.set(time, {
-          sales: currentTime.sales + orderTotal,
-          ordersCount: currentTime.ordersCount + 1,
-        });
-
-        const orderPayments = order.payments.length
-          ? order.payments
-          : [
-              {
-                method: 'EFECTIVO' as const,
-                amount: order.total,
-                methodConfigId: null,
-                methodSnapshotName: null,
-                methodType: null,
-                currency: null,
-                originalAmount: null,
-              },
-            ];
-        for (const payment of orderPayments) {
-          const amount = Number(payment.amount);
-          const type = payment.methodType || legacyPaymentType(payment.method);
-          if (
-            type === 'CASH' ||
-            (!payment.methodType && payment.method === 'EFECTIVO')
-          ) {
-            cashSales += amount;
-          } else if (
-            type === 'CARD_POS' ||
-            (!payment.methodType && payment.method === 'TARJETA')
-          ) {
-            cardSales += amount;
-          } else {
-            appSales += amount;
-          }
-
-          const id = payment.methodConfigId || `legacy:${payment.method}`;
-          const row = payments.get(id) ?? {
-            id,
-            name:
-              payment.methodSnapshotName?.trim() ||
-              legacyPaymentName(payment.method),
-            type,
-            currency: payment.currency || 'NIO',
-            amount: 0,
-            transactionCount: 0,
-          };
-          row.amount += amount;
-          row.transactionCount += 1;
-          if (payment.originalAmount !== null) {
-            row.originalAmount =
-              (row.originalAmount ?? 0) + Number(payment.originalAmount);
-          }
-          payments.set(id, row);
-        }
-      }
-
-      const reportableItems = order.items.filter(
-        (item) => item.productId && !isSupplementalItem(item.name),
-      );
-      const productGross = reportableItems.reduce(
-        (sum, item) =>
-          sum +
-          Number(item.price) * Math.max(0, item.quantity - item.giftQuantity),
-        0,
-      );
-      for (const item of reportableItems) {
-        const categoryId = item.product?.categoryId;
-        const categoryName = item.product?.category.label ?? 'Otros';
-        const grossRevenue =
-          Number(item.price) * Math.max(0, item.quantity - item.giftQuantity);
-        const allocatedDiscount =
-          productGross > 0 ? discount * (grossRevenue / productGross) : 0;
-        const netRevenue = Math.max(0, grossRevenue - allocatedDiscount);
-        const key = item.productId ?? `${categoryId ?? 'other'}:${item.name}`;
-        const product = products.get(key);
-        if (product) {
-          product.quantity += item.quantity;
-          product.totalRevenue += netRevenue;
-        } else {
-          products.set(key, {
-            name: item.name,
-            quantity: item.quantity,
-            totalRevenue: netRevenue,
-            categoryId,
-            categoryName,
+      for (const order of orders) {
+        const orderTotal = Number(order.total);
+        const discount = Number(order.discountAmount ?? 0);
+        const isSettledSplitAggregate =
+          !order.invoiceNumber &&
+          orderTotal === 0 &&
+          order.payments.length === 0 &&
+          order.items.some((item) => {
+            const normalized = item.name.trim().toLocaleLowerCase('es');
+            return (
+              normalized === 'abono subcuenta' ||
+              normalized.startsWith('abono subcuenta ')
+            );
           });
+
+        if (Number.isFinite(discount) && discount > 0) {
+          totalDiscounts += discount;
+          discountedOrderGroups.add(order.parentOrderId ?? order.id);
+        }
+
+        if (!isSettledSplitAggregate) {
+          totalOrders += 1;
+          totalSales += orderTotal;
+
+          const channel = toChannelType(
+            order.orderType,
+            order.linkedTables.length > 0,
+          );
+          channels[channel].sales += orderTotal;
+          channels[channel].ordersCount += 1;
+
+          const paidAt = order.paidAt ?? order.timestamp;
+          const time = groupByDay
+            ? dayKey(paidAt, params.timezoneOffsetMinutes)
+            : hourKey(paidAt, params.timezoneOffsetMinutes);
+          const currentTime = times.get(time) ?? { sales: 0, ordersCount: 0 };
+          times.set(time, {
+            sales: currentTime.sales + orderTotal,
+            ordersCount: currentTime.ordersCount + 1,
+          });
+
+          const orderPayments = order.payments.length
+            ? order.payments
+            : [
+                {
+                  method: 'EFECTIVO' as const,
+                  amount: order.total,
+                  methodConfigId: null,
+                  methodSnapshotName: null,
+                  methodType: null,
+                  currency: null,
+                  originalAmount: null,
+                },
+              ];
+          for (const payment of orderPayments) {
+            const amount = Number(payment.amount);
+            const type = payment.methodType || legacyPaymentType(payment.method);
+            if (
+              type === 'CASH' ||
+              (!payment.methodType && payment.method === 'EFECTIVO')
+            ) {
+              cashSales += amount;
+            } else if (
+              type === 'CARD_POS' ||
+              (!payment.methodType && payment.method === 'TARJETA')
+            ) {
+              cardSales += amount;
+            } else {
+              appSales += amount;
+            }
+
+            const id = payment.methodConfigId || `legacy:${payment.method}`;
+            const row = payments.get(id) ?? {
+              id,
+              name:
+                payment.methodSnapshotName?.trim() ||
+                legacyPaymentName(payment.method),
+              type,
+              currency: payment.currency || 'NIO',
+              amount: 0,
+              transactionCount: 0,
+            };
+            row.amount += amount;
+            row.transactionCount += 1;
+            if (payment.originalAmount !== null) {
+              row.originalAmount =
+                (row.originalAmount ?? 0) + Number(payment.originalAmount);
+            }
+            payments.set(id, row);
+          }
+        }
+
+        const reportableItems = order.items.filter(
+          (item) => item.productId && !isSupplementalItem(item.name),
+        );
+        const productGross = reportableItems.reduce(
+          (sum, item) =>
+            sum +
+            Number(item.price) * Math.max(0, item.quantity - item.giftQuantity),
+          0,
+        );
+        for (const item of reportableItems) {
+          const categoryId = item.product?.categoryId;
+          const categoryName = item.product?.category.label ?? 'Otros';
+          const grossRevenue =
+            Number(item.price) * Math.max(0, item.quantity - item.giftQuantity);
+          const allocatedDiscount =
+            productGross > 0 ? discount * (grossRevenue / productGross) : 0;
+          const netRevenue = Math.max(0, grossRevenue - allocatedDiscount);
+          const key = item.productId ?? `${categoryId ?? 'other'}:${item.name}`;
+          const product = products.get(key);
+          if (product) {
+            product.quantity += item.quantity;
+            product.totalRevenue += netRevenue;
+          } else {
+            products.set(key, {
+              name: item.name,
+              quantity: item.quantity,
+              totalRevenue: netRevenue,
+              categoryId,
+              categoryName,
+            });
+          }
         }
       }
+
+      if (orders.length < REPORT_BATCH_SIZE) {
+        break;
+      }
+      offset += REPORT_BATCH_SIZE;
     }
 
     const channelLabels: Record<ChannelType, string> = {

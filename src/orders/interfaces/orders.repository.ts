@@ -20,7 +20,10 @@ export interface OrderHistoryPage {
 }
 
 export interface IOrdersRepository {
-  listTodayOrActive(now: Date): Promise<OrderEntity[]>;
+  listTodayOrActive(
+    now: Date,
+    filters?: { driverId?: string; kitchenId?: string; limit?: number },
+  ): Promise<OrderEntity[]>;
   listHistory(params: {
     startDate: Date;
     endDate: Date;
@@ -30,6 +33,8 @@ export interface IOrdersRepository {
     paymentMethodId?: string;
     view?: 'all' | 'invoices';
     statuses?: OrderStatusDto[];
+    driverId?: string;
+    kitchenId?: string;
   }): Promise<OrderHistoryPage>;
   listByDriverAndDate(
     driverId: string,

@@ -12,6 +12,8 @@ export interface CreateCashExpenseParams {
   notes?: string;
   cashierId?: string;
   cashierSnapshotName: string;
+  maxShiftTotalWithoutAuth?: number;
+  hasAuthorization?: boolean;
 }
 
 export interface ListCashExpensesParams {

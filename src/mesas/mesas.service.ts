@@ -55,59 +55,77 @@ export class MesasService implements OnModuleInit {
   }
 
   async updateFloorsConfig(floors: UpdateFloorDto[]) {
+    const seenIds = new Set<number>();
+    for (const floor of floors) {
+      if (!Number.isInteger(floor.id) || floor.id <= 0) {
+        throw new BadRequestException(
+          `El identificador de planta "${floor.id}" no es válido.`,
+        );
+      }
+      if (seenIds.has(floor.id)) {
+        throw new BadRequestException(
+          `La planta con identificador ${floor.id} está duplicada.`,
+        );
+      }
+      seenIds.add(floor.id);
+      if (!Number.isInteger(floor.tableCount) || floor.tableCount < 0) {
+        throw new BadRequestException(
+          `La cantidad de mesas para la planta "${floor.name}" no es válida.`,
+        );
+      }
+    }
+
     const oldConfig = await this.getFloorsConfig();
     const newFloorIds = floors.map((f) => f.id);
     const removedFloors = oldConfig.filter((f) => !newFloorIds.includes(f.id));
 
-    for (const removedFloor of removedFloors) {
-      const mesas = await this.prisma.mesa.findMany({
-        where: { floor: removedFloor.id },
-      });
-      for (const t of mesas) {
-        if (t.estado !== 'DISPONIBLE') {
-          throw new BadRequestException(
-            `No se puede eliminar la planta "${removedFloor.name}" porque tiene la mesa ${t.number} ocupada.`,
-          );
-        }
-        const linkedOrders = await this.prisma.orderTable.count({
-          where: { tableId: t.id },
-        });
-        if (linkedOrders > 0) {
-          throw new BadRequestException(
-            `No se puede eliminar la planta "${removedFloor.name}" porque la mesa ${t.number} tiene historial de pedidos. En su lugar, ajusta el número de mesas a 0 para ocultarla.`,
-          );
-        }
-      }
-      if (mesas.length > 0) {
-        await this.prisma.mesa.deleteMany({
+    const runAtomicUpdate = async (tx: Prisma.TransactionClient) => {
+      const tableIdsToDelete: string[] = [];
+      const tablesToCreate: Prisma.MesaCreateManyInput[] = [];
+
+      // Fase 1: Validar todas las plantas eliminadas antes de escribir cambios
+      for (const removedFloor of removedFloors) {
+        const mesas = await tx.mesa.findMany({
           where: { floor: removedFloor.id },
+          orderBy: { number: 'asc' },
         });
-      }
-    }
-
-    await this.appConfigService.upsert(FLOORS_CONFIG_KEY, { data: floors });
-
-    for (const floor of floors) {
-      const existingMesas = await this.prisma.mesa.findMany({
-        where: { floor: floor.id },
-        orderBy: { number: 'asc' },
-      });
-
-      const currentCount = existingMesas.length;
-
-      if (floor.tableCount > currentCount) {
-        const toCreate: Prisma.MesaCreateManyInput[] = [];
-        for (let i = currentCount + 1; i <= floor.tableCount; i++) {
-          toCreate.push({
-            id: `F${floor.id}-M${i}`,
-            floor: floor.id,
-            number: i,
-            estado: 'DISPONIBLE' as const,
+        for (const t of mesas) {
+          if (t.estado !== 'DISPONIBLE') {
+            throw new BadRequestException(
+              `No se puede eliminar la planta "${removedFloor.name}" porque tiene la mesa ${t.number} ocupada.`,
+            );
+          }
+          const linkedOrders = await tx.orderTable.count({
+            where: { tableId: t.id },
           });
+          if (linkedOrders > 0) {
+            throw new BadRequestException(
+              `No se puede eliminar la planta "${removedFloor.name}" porque la mesa ${t.number} tiene historial de pedidos. En su lugar, ajusta el número de mesas a 0 para ocultarla.`,
+            );
+          }
+          tableIdsToDelete.push(t.id);
         }
-        await this.prisma.mesa.createMany({ data: toCreate });
-      } else if (floor.tableCount < currentCount) {
-        // Delete excess tables
+      }
+
+      // Fase 2: Validar todas las plantas actualizadas o reducidas antes de escribir cambios
+      for (const floor of floors) {
+        const existingMesas = await tx.mesa.findMany({
+          where: { floor: floor.id },
+          orderBy: { number: 'asc' },
+        });
+
+        const existingByNumber = new Set(existingMesas.map((m) => m.number));
+        for (let i = 1; i <= floor.tableCount; i++) {
+          if (!existingByNumber.has(i)) {
+            tablesToCreate.push({
+              id: `F${floor.id}-M${i}`,
+              floor: floor.id,
+              number: i,
+              estado: 'DISPONIBLE' as const,
+            });
+          }
+        }
+
         const tablesToDelete = existingMesas.filter(
           (m) => m.number > floor.tableCount,
         );
@@ -117,7 +135,7 @@ export class MesasService implements OnModuleInit {
               `No se puede eliminar la mesa ${t.number} de la planta "${floor.name}" porque no está disponible.`,
             );
           }
-          const linkedOrders = await this.prisma.orderTable.count({
+          const linkedOrders = await tx.orderTable.count({
             where: { tableId: t.id },
           });
           if (linkedOrders > 0) {
@@ -125,16 +143,44 @@ export class MesasService implements OnModuleInit {
               `No se puede eliminar la mesa ${t.number} de la planta "${floor.name}" porque tiene historial de pedidos. En su lugar, ajusta el número de mesas a 0 o déjala intacta para no romper reportes antiguos.`,
             );
           }
+          tableIdsToDelete.push(t.id);
         }
-        await this.prisma.mesa.deleteMany({
-          where: {
-            id: { in: tablesToDelete.map((t) => t.id) },
-          },
+      }
+
+      // Fase 3: Aplicar mutaciones de forma atómica una vez superadas todas las validaciones
+      if (tableIdsToDelete.length > 0) {
+        await tx.mesa.deleteMany({
+          where: { id: { in: tableIdsToDelete } },
         });
       }
+
+      if (tablesToCreate.length > 0) {
+        await tx.mesa.createMany({ data: tablesToCreate });
+      }
+
+      if (tx.appConfig?.upsert) {
+        await tx.appConfig.upsert({
+          where: { id: FLOORS_CONFIG_KEY },
+          create: {
+            id: FLOORS_CONFIG_KEY,
+            data: floors as unknown as Prisma.InputJsonValue,
+          },
+          update: {
+            data: floors as unknown as Prisma.InputJsonValue,
+          },
+        });
+      } else {
+        await this.appConfigService.upsert(FLOORS_CONFIG_KEY, { data: floors });
+      }
+
+      return floors;
+    };
+
+    if (typeof this.prisma.$transaction === 'function') {
+      return this.prisma.$transaction(runAtomicUpdate);
     }
 
-    return floors;
+    return runAtomicUpdate(this.prisma as unknown as Prisma.TransactionClient);
   }
 
   async getMesas() {

@@ -21,6 +21,10 @@ import {
   isDeliveryChargeOrderItem,
   isSplitBillOrderItem,
 } from '../validators/order-item-kind';
+import {
+  extractCertificateSerialFromNote,
+  hasValeNotePrefix,
+} from '../validators/order-certificate.validator';
 import type {
   OrderPromotionInput,
   OrderPromotionSource,
@@ -227,9 +231,15 @@ export class OrderPricingService {
     items: readonly CartItemEntity[],
     promotion: ResolvedOrderPromotion = { source: 'none' },
     overrideDiscountAmount?: number,
+    options?: { useSnapshotPrices?: boolean },
   ): Promise<OrderTotals> {
     return (
-      await this.calculateWithPrices(items, promotion, overrideDiscountAmount)
+      await this.calculateWithPrices(
+        items,
+        promotion,
+        overrideDiscountAmount,
+        options,
+      )
     ).totals;
   }
 
@@ -237,6 +247,7 @@ export class OrderPricingService {
     items: readonly CartItemEntity[],
     promotion: ResolvedOrderPromotion = { source: 'none' },
     overrideDiscountAmount?: number,
+    options?: { useSnapshotPrices?: boolean },
   ): Promise<{ items: CartItemEntity[]; totals: OrderTotals }> {
     const [packagingConfig, taxConfig] = await Promise.all([
       this.appConfigService.getByIdOrDefault('packaging_sizes'),
@@ -246,7 +257,12 @@ export class OrderPricingService {
     const productCache: ProductCache = new Map();
     const resolvedPrices = await Promise.all(
       items.map((item) =>
-        this.resolveItemPrice(item, packagingSizes, productCache),
+        this.resolveItemPrice(
+          item,
+          packagingSizes,
+          productCache,
+          Boolean(options?.useSnapshotPrices),
+        ),
       ),
     );
 
@@ -266,11 +282,24 @@ export class OrderPricingService {
         promotion.source === 'happy-hour' &&
         promotion.rule.promotionType === HappyHourPromotionType.DOSXUNO;
       const giftQuantity = item.giftQuantity ?? 0;
+      const certificateSerial = extractCertificateSerialFromNote(item.note);
+
+      if (giftQuantity < 0 || giftQuantity > item.quantity) {
+        throw new BadRequestException(
+          `La cantidad regalada de ${item.name} no es válida`,
+        );
+      }
+
+      if (hasValeNotePrefix(item.note) && !certificateSerial) {
+        throw new BadRequestException(
+          `Las unidades regaladas de ${item.name} requieren una promoción o certificado válido`,
+        );
+      }
 
       if (
         giftQuantity > 0 &&
         item.giftReason !== 'happy-hour-2x1' &&
-        !item.note?.trim().toLocaleLowerCase('es').startsWith('vale:')
+        !certificateSerial
       ) {
         throw new BadRequestException(
           `Las unidades regaladas de ${item.name} requieren una promoción o certificado válido`,
@@ -501,7 +530,12 @@ export class OrderPricingService {
     pricedItem: PricedItem,
     promotion: ResolvedOrderPromotion,
   ): boolean {
-    if (item.note?.startsWith('Vale: ')) return false;
+    if (
+      hasValeNotePrefix(item.note) ||
+      extractCertificateSerialFromNote(item.note) !== null
+    ) {
+      return false;
+    }
     if (!pricedItem.isDiscountable || promotion.source === 'none') return false;
     if (promotion.source === 'coupon') return true;
 
@@ -537,7 +571,42 @@ export class OrderPricingService {
     item: CartItemEntity,
     packagingSizes: readonly PackagingSizeConfig[],
     productCache: ProductCache,
+    useSnapshotPrices = false,
   ): Promise<PricedItem> {
+    const hasPersistedSnapshot =
+      useSnapshotPrices &&
+      item.id !== undefined &&
+      typeof item.price === 'number' &&
+      Number.isFinite(item.price) &&
+      item.price >= 0;
+
+    if (hasPersistedSnapshot) {
+      if (item.productId) {
+        let categoryId = item.categoryId;
+        if (!categoryId) {
+          try {
+            const product = await this.getProduct(item.productId, productCache);
+            categoryId = product?.categoryId;
+          } catch {
+            categoryId = item.categoryId;
+          }
+        }
+        return {
+          unitPrice: item.price,
+          isDiscountable: true,
+          productId: item.productId,
+          categoryId,
+          extras: item.extras ?? [],
+        };
+      }
+
+      return {
+        unitPrice: item.price,
+        isDiscountable: false,
+        extras: item.extras ?? [],
+      };
+    }
+
     if (item.productId) {
       const product = await this.getProduct(item.productId, productCache);
       const price = product.prices.find(

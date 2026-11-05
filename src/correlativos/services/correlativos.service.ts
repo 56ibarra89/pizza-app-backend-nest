@@ -60,6 +60,23 @@ export class CorrelativosService {
     if (dto.endNumber !== undefined && dto.startNumber !== undefined && dto.endNumber < dto.startNumber) {
       throw new BadRequestException('endNumber no puede ser menor que startNumber');
     }
+    if (
+      dto.currentNumber !== undefined &&
+      dto.startNumber !== undefined &&
+      dto.currentNumber < dto.startNumber
+    ) {
+      throw new BadRequestException('currentNumber fuera de rango');
+    }
+    if (
+      dto.currentNumber !== undefined &&
+      dto.endNumber !== undefined &&
+      dto.currentNumber > dto.endNumber + 1
+    ) {
+      throw new BadRequestException('currentNumber fuera de rango');
+    }
+    if (dto.status === CorrelativoStatus.ACTIVO && dto.documentType) {
+      await this.repo.markActiveAsVencido(dto.documentType);
+    }
     
     return this.repo.update(id, {
       documentType: dto.documentType,

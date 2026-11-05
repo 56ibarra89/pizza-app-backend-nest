@@ -29,8 +29,10 @@ export class ProductsController {
   constructor(private readonly products: ProductsService) {}
 
   @Get('categories')
-  getCategories() {
-    return this.products.getCategories();
+  getCategories(@Query('includeMetrics') includeMetrics?: string) {
+    return this.products.getCategories({
+      includeMetrics: includeMetrics !== 'false',
+    });
   }
 
   @Post('categories')

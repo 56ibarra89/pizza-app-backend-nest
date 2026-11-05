@@ -211,6 +211,8 @@ export class CashExpensesService {
       notes: dto.notes?.trim() || undefined,
       cashierId: user.id,
       cashierSnapshotName,
+      maxShiftTotalWithoutAuth: policy.maxShiftTotal,
+      hasAuthorization: Boolean(requiresAuthorization),
     });
   }
 

@@ -42,6 +42,7 @@ export class UsersController {
 
   @Get('directory')
   @Permissions('users.directory')
+  @Roles(...AUTHENTICATED_ROLES)
   async getDirectory() {
     const list = await this.users.getAll();
     return list.map((user) => ({
@@ -96,6 +97,7 @@ export class UsersController {
 
   @Get(':id')
   @Permissions('users.read')
+  @Roles(...AUTHENTICATED_ROLES)
   async getById(@Param('id', new ParseUUIDPipe()) id: string) {
     const user = await this.users.getById(id);
     return toUserResponseDto(user);
@@ -192,7 +194,13 @@ export class UsersController {
 
   @Get(':id/zones')
   @Permissions('tables.read')
-  @Roles(UserRoleDto.admin, UserRoleDto.mesero)
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.mesero,
+    UserRoleDto.despachador,
+  )
   async getWaiterZones(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.users.getWaiterZones(id);
   }

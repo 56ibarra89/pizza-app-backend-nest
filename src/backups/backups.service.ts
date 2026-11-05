@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   InternalServerErrorException,
@@ -30,15 +31,29 @@ import {
   MAX_BACKUP_UPLOAD_BYTES,
   MAX_BACKUP_UPLOAD_MB,
 } from './backup-upload.config';
+import { getBusinessDateParts } from '../common/time/business-time.util';
 
 const execFileAsync = promisify(execFile);
 const CONFIG_KEY = 'backup_config';
 
 @Injectable()
 export class BackupsService implements OnModuleInit {
+  private static readonly REQUIRED_CORE_TABLES = [
+    'User',
+    'Order',
+    'OrderItem',
+    'Payment',
+    'Shift',
+    'Product',
+    'Category',
+    'Correlativo',
+    'AppConfig',
+  ] as const;
+
   private readonly logger = new Logger(BackupsService.name);
   private readonly storageDir = path.join(process.cwd(), 'storage', 'backups');
   private lastCronExecutionKey: string | null = null;
+  private isRestoreInProgress = false;
 
   constructor(
     private readonly configService: ConfigService,
@@ -200,6 +215,11 @@ export class BackupsService implements OnModuleInit {
    * Genera un nuevo archivo de respaldo PostgreSQL con el tipo especificado.
    */
   async generateBackup(type: BackupType = 'MANUAL'): Promise<BackupItemDto> {
+    if (this.isRestoreInProgress && type !== 'SAFETY_SNAPSHOT') {
+      throw new ConflictException(
+        'No se puede generar un respaldo mientras una restauración está en curso',
+      );
+    }
     this.ensureStorageDir();
     const creds = this.getDatabaseCredentials();
     const pgDumpPath = this.resolveBinaryPath('pg_dump');
@@ -381,102 +401,176 @@ export class BackupsService implements OnModuleInit {
     filename?: string;
     tempFilePath?: string;
   }): Promise<RestoreBackupResponseDto> {
-    let sourcePath: string;
-    let sourceName: string;
-
-    if (options.tempFilePath) {
-      sourcePath = options.tempFilePath;
-      sourceName = path.basename(options.tempFilePath);
-    } else if (options.filename) {
-      sourcePath = this.getBackupFilePath(options.filename);
-      sourceName = path.basename(options.filename);
-    } else {
-      throw new BadRequestException('Debes indicar un archivo para restaurar');
-    }
-
-    if (!fs.existsSync(sourcePath)) {
-      throw new NotFoundException(
-        'El archivo de respaldo a restaurar no existe',
+    if (this.isRestoreInProgress) {
+      throw new ConflictException(
+        'Ya existe una restauración de base de datos en curso',
       );
     }
 
-    if (options.tempFilePath) {
-      const uploadedStat = await fs.promises.stat(sourcePath);
-      if (uploadedStat.size === 0) {
+    this.isRestoreInProgress = true;
+    try {
+      let sourcePath: string;
+      let sourceName: string;
+
+      if (options.tempFilePath) {
+        sourcePath = options.tempFilePath;
+        sourceName = path.basename(options.tempFilePath);
+      } else if (options.filename) {
+        sourcePath = this.getBackupFilePath(options.filename);
+        sourceName = path.basename(options.filename);
+      } else {
+        throw new BadRequestException(
+          'Debes indicar un archivo para restaurar',
+        );
+      }
+
+      if (!fs.existsSync(sourcePath)) {
+        throw new NotFoundException(
+          'El archivo de respaldo a restaurar no existe',
+        );
+      }
+
+      const sourceStat = await fs.promises.stat(sourcePath);
+      if (sourceStat.size === 0) {
         throw new BadRequestException('El archivo de respaldo está vacío');
       }
-      if (uploadedStat.size > MAX_BACKUP_UPLOAD_BYTES) {
+      if (sourceStat.size > MAX_BACKUP_UPLOAD_BYTES) {
         throw new BadRequestException(
           `El respaldo supera el límite de ${MAX_BACKUP_UPLOAD_MB} MB`,
         );
       }
-    }
 
-    // 1. Crear Snapshot de Seguridad preventivo obligatorio
-    this.logger.warn(
-      `Iniciando proceso de restauración desde [${sourceName}]. Generando snapshot preventivo...`,
-    );
-    const safetySnapshot = await this.generateBackup('SAFETY_SNAPSHOT');
-    this.logger.log(
-      `Snapshot de seguridad preventivo creado: ${safetySnapshot.filename}`,
-    );
-
-    // 2. Ejecutar restauración con psql
-    const creds = this.getDatabaseCredentials();
-    const psqlPath = this.resolveBinaryPath('psql');
-
-    const args = [
-      '-h',
-      creds.host,
-      '-p',
-      creds.port,
-      '-U',
-      creds.username,
-      '-d',
-      creds.database,
-      '-f',
-      sourcePath,
-    ];
-
-    try {
-      await execFileAsync(psqlPath, args, {
-        env: {
-          ...process.env,
-          PGPASSWORD: creds.password,
-        },
-      });
-
+      // 1. Crear Snapshot de Seguridad preventivo obligatorio
+      this.logger.warn(
+        `Iniciando proceso de restauración desde [${sourceName}]. Generando snapshot preventivo...`,
+      );
+      const safetySnapshot = await this.generateBackup('SAFETY_SNAPSHOT');
       this.logger.log(
-        `Base de datos restaurada exitosamente desde ${sourceName}`,
+        `Snapshot de seguridad preventivo creado: ${safetySnapshot.filename}`,
       );
 
-      // Si provino de un archivo subido temporalmente, conservarlo en el almacenamiento local
-      if (options.tempFilePath) {
-        const storedImportedName = `backup-imported_${new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '')}.sql`;
-        const storedImportedPath = path.join(
-          this.storageDir,
-          storedImportedName,
-        );
-        try {
-          fs.copyFileSync(sourcePath, storedImportedPath);
-        } catch {
-          // ignore
-        }
-      }
+      // 2. Ejecutar restauración atómica con psql deteniendo ante cualquier error
+      const creds = this.getDatabaseCredentials();
+      const psqlPath = this.resolveBinaryPath('psql');
 
-      return {
-        success: true,
-        safetySnapshot: safetySnapshot.filename,
-        restoredFrom: sourceName,
-        message:
-          'Base de datos restaurada correctamente. Se generó un snapshot de seguridad preventivo antes de aplicar los cambios.',
+      const args = [
+        '-h',
+        creds.host,
+        '-p',
+        creds.port,
+        '-U',
+        creds.username,
+        '-d',
+        creds.database,
+        '-v',
+        'ON_ERROR_STOP=1',
+        '--single-transaction',
+        '-f',
+        sourcePath,
+      ];
+
+      const execEnv = {
+        ...process.env,
+        PGPASSWORD: creds.password,
+        PGOPTIONS: [process.env.PGOPTIONS, '-c lock_timeout=30000']
+          .filter(Boolean)
+          .join(' '),
       };
-    } catch (err: any) {
-      this.logger.error(
-        `Fallo crítico al restaurar con psql: ${err?.message || err}`,
-      );
-      throw new InternalServerErrorException(
-        `Error al restaurar la base de datos: ${err?.message || 'Error ejecutando psql'}. Tu estado previo quedó respaldado en: ${safetySnapshot.filename}`,
+
+      try {
+        const restoreResult = await execFileAsync(psqlPath, args, {
+          env: execEnv,
+        });
+        const stderrText = restoreResult?.stderr ?? '';
+        if (/(^|\n)\s*(psql:.*:\s*)?(ERROR|FATAL):/i.test(stderrText)) {
+          throw new Error(stderrText.trim());
+        }
+
+        await this.verifyRestoredDatabaseIntegrity(psqlPath, creds, execEnv);
+
+        this.logger.log(
+          `Base de datos restaurada exitosamente desde ${sourceName}`,
+        );
+
+        // Si provino de un archivo subido temporalmente, conservarlo en el almacenamiento local
+        if (options.tempFilePath) {
+          const storedImportedName = `backup-imported_${new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '')}.sql`;
+          const storedImportedPath = path.join(
+            this.storageDir,
+            storedImportedName,
+          );
+          try {
+            fs.copyFileSync(sourcePath, storedImportedPath);
+          } catch {
+            // ignore
+          }
+        }
+
+        return {
+          success: true,
+          safetySnapshot: safetySnapshot.filename,
+          restoredFrom: sourceName,
+          message:
+            'Base de datos restaurada correctamente. Se generó un snapshot de seguridad preventivo antes de aplicar los cambios.',
+        };
+      } catch (err: any) {
+        this.logger.error(
+          `Fallo crítico al restaurar con psql: ${err?.message || err}`,
+        );
+        throw new InternalServerErrorException(
+          `Error al restaurar la base de datos: ${err?.message || 'Error ejecutando psql'}. Tu estado previo quedó respaldado en: ${safetySnapshot.filename}`,
+        );
+      }
+    } finally {
+      this.isRestoreInProgress = false;
+    }
+  }
+
+  private async verifyRestoredDatabaseIntegrity(
+    psqlPath: string,
+    creds: {
+      host: string;
+      port: string;
+      username: string;
+      password: string;
+      database: string;
+    },
+    env: NodeJS.ProcessEnv,
+  ): Promise<void> {
+    const tableListSql = BackupsService.REQUIRED_CORE_TABLES.map(
+      (tableName) => `'${tableName}'`,
+    ).join(', ');
+    const verificationQuery = `SELECT COUNT(*)::int FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN (${tableListSql});`;
+
+    const result = await execFileAsync(
+      psqlPath,
+      [
+        '-h',
+        creds.host,
+        '-p',
+        creds.port,
+        '-U',
+        creds.username,
+        '-d',
+        creds.database,
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-t',
+        '-A',
+        '-c',
+        verificationQuery,
+      ],
+      { env },
+    );
+
+    const rawCount = (result?.stdout ?? '').trim();
+    const parsedCount = Number.parseInt(rawCount, 10);
+    if (
+      !Number.isFinite(parsedCount) ||
+      parsedCount < BackupsService.REQUIRED_CORE_TABLES.length
+    ) {
+      throw new Error(
+        `La verificación posterior a la restauración falló: se esperaban ${BackupsService.REQUIRED_CORE_TABLES.length} tablas esenciales y se encontraron ${Number.isFinite(parsedCount) ? parsedCount : 0}`,
       );
     }
   }
@@ -523,11 +617,12 @@ export class BackupsService implements OnModuleInit {
       if (!config.enabled) return;
 
       const now = new Date();
-      const currentHour = now.getHours();
-      const currentMinute = now.getMinutes();
+      const businessParts = getBusinessDateParts(now);
+      const currentHour = businessParts.hour;
+      const currentMinute = businessParts.minute;
 
       if (currentHour === config.hour && currentMinute === config.minute) {
-        const dateKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}_${currentHour}:${currentMinute}`;
+        const dateKey = `${businessParts.ymd}_${currentHour}:${currentMinute}`;
         if (this.lastCronExecutionKey === dateKey) {
           return; // Ya ejecutado en este minuto
         }

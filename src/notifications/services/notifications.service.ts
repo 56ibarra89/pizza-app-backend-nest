@@ -10,6 +10,7 @@ import {
   normalizeServiceSlaConfig,
 } from '../../common/service-sla.config';
 import { SystemLogsService } from '../../system-logs/services/system-logs.service';
+import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 
 export interface NotificationEvent {
   id: string;
@@ -396,5 +397,47 @@ export class NotificationsService {
     if (affectedRows === 0) {
       throw new NotFoundException('Notificación no encontrada.');
     }
+  }
+
+  async validateStreamSubscriber(
+    user: AuthenticatedUser,
+  ): Promise<{ role: UserRole; username: string } | null> {
+    if (
+      typeof user.tokenExpiresAtMs === 'number' &&
+      Date.now() >= user.tokenExpiresAtMs
+    ) {
+      return null;
+    }
+
+    if (!this.prisma.user?.findUnique) {
+      return {
+        role: user.role.toUpperCase() as UserRole,
+        username: user.username,
+      };
+    }
+
+    const dbUser = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: {
+        isActive: true,
+        tokenVersion: true,
+        role: true,
+        username: true,
+      },
+    });
+    if (!dbUser || !dbUser.isActive) {
+      return null;
+    }
+    if (
+      typeof user.tokenVersion === 'number' &&
+      dbUser.tokenVersion !== user.tokenVersion
+    ) {
+      return null;
+    }
+
+    return {
+      role: dbUser.role,
+      username: dbUser.username,
+    };
   }
 }

@@ -52,6 +52,8 @@ interface OrdersServerToClientEvents {
 }
 
 interface OrderSocketData {
+  token?: string;
+  joinedRoom?: string;
   user?: {
     id: string;
     username: string;
@@ -82,6 +84,7 @@ type OrdersSocketServer = Server<
 })
 export class OrdersGateway implements OnGatewayInit {
   private readonly logger = new Logger(OrdersGateway.name);
+  private readonly connectedSockets = new Set<OrdersSocket>();
 
   @WebSocketServer()
   private server: OrdersSocketServer;
@@ -95,10 +98,12 @@ export class OrdersGateway implements OnGatewayInit {
   ) {}
 
   afterInit(server: OrdersSocketServer): void {
+    this.server = server;
     server.use((socket, next) => {
       void this.authenticate(socket)
         .then(async () => {
-          await this.joinAuthorizedRoom(socket);
+          await this.reconcileAuthorizedRooms(socket);
+          this.trackConnectedSocket(socket);
           next();
         })
         .catch(() => {
@@ -108,7 +113,8 @@ export class OrdersGateway implements OnGatewayInit {
   }
 
   @OnEvent(ORDER_SYNCHRONIZED_EVENT)
-  handleOrderSynchronized(event: OrderSynchronizedEvent): void {
+  async handleOrderSynchronized(event: OrderSynchronizedEvent): Promise<void> {
+    await this.revalidateConnectedSockets();
     const occurredAt = new Date().toISOString();
     this.server.to(FULL_ORDERS_ROOM).emit('orders:changed', {
       mutation: event.mutation,
@@ -150,29 +156,65 @@ export class OrdersGateway implements OnGatewayInit {
     });
   }
 
-  private async joinAuthorizedRoom(socket: OrdersSocket): Promise<void> {
+  private trackConnectedSocket(socket: OrdersSocket): void {
+    this.connectedSockets.add(socket);
+    socket.on?.('disconnect', () => {
+      this.connectedSockets.delete(socket);
+    });
+  }
+
+  private async revalidateConnectedSockets(): Promise<void> {
+    const sockets = Array.from(this.connectedSockets);
+    await Promise.all(
+      sockets.map(async (socket) => {
+        try {
+          await this.authenticate(socket);
+          await this.reconcileAuthorizedRooms(socket);
+        } catch {
+          const previousRoom = socket.data.joinedRoom;
+          if (previousRoom) {
+            await socket.leave?.(previousRoom);
+            socket.data.joinedRoom = undefined;
+          }
+          this.connectedSockets.delete(socket);
+          socket.disconnect?.(true);
+        }
+      }),
+    );
+  }
+
+  private async reconcileAuthorizedRooms(socket: OrdersSocket): Promise<void> {
     const user = socket.data.user;
     if (!user) throw new Error('Usuario no autenticado');
 
+    let targetRoom: string | undefined;
     if (user.role === UserRoleDto.motorizado) {
-      return;
+      targetRoom = undefined;
+    } else if (user.role !== UserRoleDto.cocinero) {
+      targetRoom = FULL_ORDERS_ROOM;
+    } else {
+      const assignedKitchenId = await this.kitchens.getAssignedKitchenIdForDate(
+        user.id,
+      );
+      targetRoom = assignedKitchenId
+        ? kitchenRoom(assignedKitchenId)
+        : undefined;
     }
 
-    if (user.role !== UserRoleDto.cocinero) {
-      await socket.join(FULL_ORDERS_ROOM);
-      return;
+    const previousRoom = socket.data.joinedRoom;
+    if (previousRoom && previousRoom !== targetRoom) {
+      await socket.leave?.(previousRoom);
+      socket.data.joinedRoom = undefined;
     }
 
-    const assignedKitchenId = await this.kitchens.getAssignedKitchenIdForDate(
-      user.id,
-    );
-    if (assignedKitchenId) {
-      await socket.join(kitchenRoom(assignedKitchenId));
+    if (targetRoom && previousRoom !== targetRoom) {
+      await socket.join(targetRoom);
+      socket.data.joinedRoom = targetRoom;
     }
   }
 
   private async authenticate(socket: OrdersSocket): Promise<void> {
-    const token = this.extractToken(socket);
+    const token = socket.data.token ?? this.extractToken(socket);
     if (!token) {
       throw new Error('Token ausente');
     }
@@ -203,6 +245,7 @@ export class OrdersGateway implements OnGatewayInit {
       throw new Error('Permiso de ordenes insuficiente');
     }
 
+    socket.data.token = token;
     socket.data.user = {
       id: user.id,
       username: user.username,

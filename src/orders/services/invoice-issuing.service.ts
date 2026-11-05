@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -13,6 +14,7 @@ import {
   ShiftStatus,
 } from '@prisma/client';
 import type { FinalizeOrderDto } from '../dto/finalize-order.dto';
+import type { CartItemEntity } from '../entities/order-item.entity';
 import { OrderStatusDto } from '../dto/order-status.dto';
 import {
   toDbOrderStatus,
@@ -22,11 +24,18 @@ import {
 import type { OrderTotals } from '../types/order-totals';
 import type { ResolvedOrderPromotion } from '../types/order-promotion';
 import { isCouponExpired } from '../../promotions/mappers/promotions.mapper';
+import { extractCertificateSerialFromNote } from '../validators/order-certificate.validator';
+import {
+  getBusinessDateParts,
+  getBusinessMonthEnd,
+} from '../../common/time/business-time.util';
 
 interface IssueInvoiceParams {
   orderId: string;
   dto: FinalizeOrderDto;
   totals: OrderTotals;
+  items?: readonly CartItemEntity[];
+  expectedUpdatedAt?: Date;
   promotion: ResolvedOrderPromotion;
   skipCouponConsumption?: boolean;
   cashierId?: string;
@@ -84,6 +93,8 @@ export class InvoiceIssuingService {
       orderId,
       dto,
       totals,
+      items,
+      expectedUpdatedAt,
       promotion,
       skipCouponConsumption,
       cashierId,
@@ -98,14 +109,26 @@ export class InvoiceIssuingService {
       promotion.source === 'happy-hour'
         ? (promotion.happyHourId ?? null)
         : null;
-    const lockedOrders = await tx.$queryRaw<Array<{ id: string }>>`
-      SELECT id
+    const lockedOrders = await tx.$queryRaw<
+      Array<{ id: string; updatedAt?: Date }>
+    >`
+      SELECT id, "updatedAt"
       FROM "Order"
       WHERE id = ${orderId}
       FOR UPDATE
     `;
-    if (!lockedOrders[0]) {
+    const lockedOrder = lockedOrders[0];
+    if (!lockedOrder) {
       throw new NotFoundException('Orden no encontrada');
+    }
+    if (
+      expectedUpdatedAt &&
+      lockedOrder.updatedAt instanceof Date &&
+      lockedOrder.updatedAt.getTime() !== expectedUpdatedAt.getTime()
+    ) {
+      throw new ConflictException(
+        'La orden fue modificada mientras se procesaba el cobro. Por favor verifica el pedido e inténtalo nuevamente.',
+      );
     }
 
     const order = await tx.order.findUnique({
@@ -139,6 +162,7 @@ export class InvoiceIssuingService {
           : [];
 
     const status = toDbOrderStatus(OrderStatusDto.paid);
+    await this.synchronizeBilledItemPrices(tx, items);
     if (order.invoiceNumber) {
       const now = new Date();
       const shiftId = await this.requireActiveShiftId(tx);
@@ -222,13 +246,12 @@ export class InvoiceIssuingService {
         where: { id: 'dgi_resolution' },
       });
       const dgiConfig = readDgiConfig(dgiConfigRecord?.data ?? null);
-      const expirationDate = new Date(
-        now.getFullYear(),
-        now.getMonth() + 1,
-        0,
-        23,
-        59,
-        59,
+      const expirationDate = getBusinessMonthEnd(now);
+
+      const startNumber = Math.max(1, Number(dgiConfig.startNumber ?? 1));
+      const endNumber = Math.max(
+        startNumber,
+        Number(dgiConfig.endNumber ?? 99999),
       );
 
       const created = await tx.correlativo.create({
@@ -237,9 +260,9 @@ export class InvoiceIssuingService {
           resolutionNumber:
             dgiConfig.resolutionNumber ?? `AUTO-${prefix.slice(0, -1)}`,
           prefix,
-          startNumber: Number(dgiConfig.startNumber ?? 1),
-          endNumber: Number(dgiConfig.endNumber ?? 99999),
-          currentNumber: 1,
+          startNumber,
+          endNumber,
+          currentNumber: startNumber,
           issueDate: now,
           expirationDate,
           status: CorrelativoStatus.ACTIVO,
@@ -255,7 +278,26 @@ export class InvoiceIssuingService {
       throw new NotFoundException('No se pudo obtener el correlativo activo');
     }
 
+    if (
+      correlativo.expirationDate instanceof Date &&
+      correlativo.expirationDate < now
+    ) {
+      await tx.correlativo.update({
+        where: { id: correlativo.id },
+        data: { status: CorrelativoStatus.VENCIDO },
+      });
+      throw new BadRequestException('El correlativo está VENCIDO');
+    }
+
     const issuedNumber = correlativo.currentNumber;
+    if (
+      typeof correlativo.startNumber === 'number' &&
+      issuedNumber < correlativo.startNumber
+    ) {
+      throw new BadRequestException(
+        'El número actual del correlativo es menor al rango autorizado.',
+      );
+    }
     if (issuedNumber > correlativo.endNumber) {
       await tx.correlativo.update({
         where: { id: correlativo.id },
@@ -369,6 +411,23 @@ export class InvoiceIssuingService {
     });
   }
 
+  private async synchronizeBilledItemPrices(
+    tx: Prisma.TransactionClient,
+    items?: readonly CartItemEntity[],
+  ): Promise<void> {
+    if (!items?.length || !tx.orderItem?.update) {
+      return;
+    }
+    for (const item of items) {
+      if (typeof item.id === 'number' && Number.isFinite(item.price)) {
+        await tx.orderItem.update({
+          where: { id: item.id },
+          data: { price: item.price },
+        });
+      }
+    }
+  }
+
   private async requireActiveShiftId(
     tx: Prisma.TransactionClient,
   ): Promise<string> {
@@ -381,6 +440,19 @@ export class InvoiceIssuingService {
       throw new BadRequestException(
         'Debe existir un turno de caja abierto para cobrar una orden.',
       );
+    }
+    if (typeof tx.$executeRaw === 'function') {
+      const lockedCount = await tx.$executeRaw`
+        SELECT id
+        FROM "Shift"
+        WHERE id = ${activeShift.id} AND status = 'OPEN'::"ShiftStatus"
+        FOR UPDATE
+      `;
+      if (typeof lockedCount === 'number' && lockedCount === 0) {
+        throw new BadRequestException(
+          'El turno de caja fue cerrado mientras se procesaba el cobro.',
+        );
+      }
     }
     return activeShift.id;
   }
@@ -423,15 +495,7 @@ export class InvoiceIssuingService {
     orderId: string,
     now: Date,
   ): Promise<void> {
-    const normalizedSerials = Array.from(
-      new Set(
-        serials
-          .map((serial) => serial.trim().toUpperCase())
-          .filter((serial) => serial.length > 0),
-      ),
-    ).sort();
-
-    const giftedItems = normalizedSerials.length
+    const giftedItems = tx.orderItem?.findMany
       ? await tx.orderItem.findMany({
           where: { orderId, giftQuantity: { gt: 0 } },
           select: {
@@ -439,10 +503,33 @@ export class InvoiceIssuingService {
             name: true,
             note: true,
             giftQuantity: true,
+            giftReason: true,
             price: true,
           },
         })
       : [];
+
+    const certificateGiftedItems = giftedItems.filter(
+      (item) => item.giftReason !== 'happy-hour-2x1',
+    );
+    const itemSerials: string[] = [];
+    for (const item of certificateGiftedItems) {
+      const itemSerial = extractCertificateSerialFromNote(item.note);
+      if (!itemSerial) {
+        throw new BadRequestException(
+          `Las unidades regaladas de ${item.name} requieren una promoción o certificado válido`,
+        );
+      }
+      itemSerials.push(itemSerial);
+    }
+
+    const normalizedSerials = Array.from(
+      new Set(
+        [...serials, ...itemSerials]
+          .map((serial) => serial.trim().toUpperCase())
+          .filter((serial) => serial.length > 0),
+      ),
+    ).sort();
 
     for (const serial of normalizedSerials) {
       const rows = await tx.$queryRaw<LockedCertificate[]>`
@@ -469,14 +556,18 @@ export class InvoiceIssuingService {
           items: { select: { productId: true, quantity: true } },
         },
       });
-      const taggedItems = giftedItems.filter(
-        (item) =>
-          item.note?.trim().toUpperCase() === `VALE:${serial}` ||
-          item.note?.trim().toUpperCase() === `VALE: ${serial}`,
+      const taggedItems = certificateGiftedItems.filter(
+        (item) => extractCertificateSerialFromNote(item.note) === serial,
       );
       if (taggedItems.length === 0) {
         throw new BadRequestException(
           `El certificado ${serial} no está asociado a productos regalados`,
+        );
+      }
+
+      if (!details?.items?.length && !details?.amount) {
+        throw new BadRequestException(
+          `El certificado ${serial} no tiene productos ni monto autorizado`,
         );
       }
 
@@ -543,6 +634,7 @@ export class InvoiceIssuingService {
       'NOV',
       'DIC',
     ];
-    return `${monthNames[date.getMonth()]}${String(date.getFullYear()).slice(-2)}-`;
+    const { year, month } = getBusinessDateParts(date);
+    return `${monthNames[month - 1]}${String(year).slice(-2)}-`;
   }
 }

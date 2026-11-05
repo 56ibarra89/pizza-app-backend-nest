@@ -28,12 +28,22 @@ import { createHash } from 'node:crypto';
 import { AccessControlService } from '../../access-control/access-control.service';
 import { fromDbRole } from '../mappers/user-role.mapper';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
+import { getBusinessDayBounds } from '../../common/time/business-time.util';
 
 interface PasswordResetJwtPayload {
   sub: string;
   tokenVersion: number;
   type: 'password_reset';
 }
+
+interface SessionRefreshJwtPayload {
+  sub: string;
+  tokenVersion: number;
+  type: 'access' | 'refresh';
+  exp?: number;
+}
+
+const MAX_EXPIRED_ACCESS_TOKEN_REFRESH_GRACE_MS = 24 * 60 * 60 * 1000;
 
 function isPasswordResetJwtPayload(
   payload: unknown,
@@ -43,6 +53,19 @@ function isPasswordResetJwtPayload(
   return (
     candidate.type === 'password_reset' &&
     typeof candidate.sub === 'string' &&
+    Number.isInteger(candidate.tokenVersion)
+  );
+}
+
+function isSessionRefreshJwtPayload(
+  payload: unknown,
+): payload is SessionRefreshJwtPayload {
+  if (typeof payload !== 'object' || payload === null) return false;
+  const candidate = payload as Record<string, unknown>;
+  return (
+    (candidate.type === 'access' || candidate.type === 'refresh') &&
+    typeof candidate.sub === 'string' &&
+    candidate.sub.trim().length > 0 &&
     Number.isInteger(candidate.tokenVersion)
   );
 }
@@ -336,6 +359,7 @@ export class UsersService {
     firstName?: string;
     lastName?: string;
     access_token?: string;
+    refresh_token?: string;
     themePreference?: string;
     accessRoleId?: string;
     accessRoleName?: string;
@@ -382,6 +406,14 @@ export class UsersService {
       tokenVersion: user.tokenVersion,
       type: 'access',
     });
+    const refresh_token = this.jwtService.sign(
+      {
+        sub: user.id,
+        tokenVersion: user.tokenVersion,
+        type: 'refresh',
+      },
+      { expiresIn: '7d' },
+    );
     const authorization = await this.accessControl.authorizationForUser(
       user.id,
     );
@@ -393,6 +425,7 @@ export class UsersService {
       firstName: user.firstName,
       lastName: user.lastName,
       access_token,
+      refresh_token,
       themePreference: user.themePreference,
       ...authorization,
     };
@@ -407,6 +440,7 @@ export class UsersService {
     firstName: string;
     lastName: string;
     access_token: string;
+    refresh_token?: string;
     themePreference: string;
     accessRoleId?: string;
     accessRoleName?: string;
@@ -426,6 +460,14 @@ export class UsersService {
       tokenVersion: user.tokenVersion,
       type: 'access',
     });
+    const refresh_token = this.jwtService.sign(
+      {
+        sub: user.id,
+        tokenVersion: user.tokenVersion,
+        type: 'refresh',
+      },
+      { expiresIn: '7d' },
+    );
     const authorization = await this.accessControl.authorizationForUser(
       user.id,
     );
@@ -435,6 +477,7 @@ export class UsersService {
       firstName: user.firstName,
       lastName: user.lastName,
       access_token,
+      refresh_token,
       themePreference: user.themePreference,
       ...authorization,
     };
@@ -453,12 +496,89 @@ export class UsersService {
     if (!user || !user.isActive) {
       throw new UnauthorizedException('Usuario inactivo o no existe');
     }
+    this.lockoutService.assertCanAuthenticate(user);
     const access_token = this.jwtService.sign({
       sub: user.id,
       tokenVersion: user.tokenVersion,
       type: 'access',
     });
     return { access_token };
+  }
+
+  async refreshSessionToken(
+    rawToken?: string,
+  ): Promise<{ access_token: string; refresh_token: string }> {
+    const trimmed = rawToken?.trim();
+    if (!trimmed) {
+      throw new UnauthorizedException(
+        'Acceso denegado: Token de renovación requerido',
+      );
+    }
+
+    let payload: unknown;
+    try {
+      payload = this.jwtService.verify(trimmed, { ignoreExpiration: true });
+    } catch {
+      throw new UnauthorizedException(
+        'Acceso denegado: Token inválido o malformado',
+      );
+    }
+
+    if (!isSessionRefreshJwtPayload(payload)) {
+      throw new UnauthorizedException(
+        'Token no válido para renovar la sesión',
+      );
+    }
+
+    const nowMs = Date.now();
+    if (typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) {
+      throw new UnauthorizedException(
+        'Token sin marca de expiración verificable',
+      );
+    }
+
+    const expiresAtMs = payload.exp * 1000;
+    if (payload.type === 'refresh') {
+      if (expiresAtMs <= nowMs) {
+        throw new UnauthorizedException(
+          'La credencial de renovación ha expirado. Inicia sesión nuevamente.',
+        );
+      }
+    } else if (
+      nowMs - expiresAtMs >
+      MAX_EXPIRED_ACCESS_TOKEN_REFRESH_GRACE_MS
+    ) {
+      throw new UnauthorizedException(
+        'La ventana de renovación de sesión ha expirado. Inicia sesión nuevamente.',
+      );
+    }
+
+    const user = await this.repo.findById(payload.sub);
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Usuario inactivo o no existe');
+    }
+    if (user.tokenVersion !== payload.tokenVersion) {
+      throw new UnauthorizedException(
+        'La sesión ha sido revocada en este dispositivo.',
+      );
+    }
+    this.lockoutService.assertCanAuthenticate(user);
+
+    const access_token = this.jwtService.sign({
+      sub: user.id,
+      tokenVersion: user.tokenVersion,
+      type: 'access',
+    });
+    const refresh_token = this.jwtService.sign(
+      {
+        sub: user.id,
+        tokenVersion: user.tokenVersion,
+        type: 'refresh',
+      },
+      { expiresIn: '7d' },
+    );
+
+    return { access_token, refresh_token };
   }
 
   async requestPasswordReset(identifier: string, source = 'unknown') {
@@ -628,8 +748,17 @@ export class UsersService {
         'La fecha debe usar el formato YYYY-MM-DD.',
       );
     }
-    const startOfDay = new Date(`${dateStr}T00:00:00.000-06:00`);
-    const endOfDay = new Date(`${dateStr}T23:59:59.999-06:00`);
+    let startOfDay: Date;
+    let endOfDay: Date;
+    try {
+      const bounds = getBusinessDayBounds(dateStr);
+      startOfDay = bounds.startOfDay;
+      endOfDay = bounds.endOfDay;
+    } catch {
+      throw new BadRequestException(
+        'La fecha debe usar el formato YYYY-MM-DD.',
+      );
+    }
 
     // Only count DELIVERED orders, or all orders assigned to driver?
     // Usually they want to see how many were completed today, so DELIVERED.
