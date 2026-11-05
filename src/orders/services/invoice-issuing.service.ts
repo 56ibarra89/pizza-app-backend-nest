@@ -271,7 +271,7 @@ export class InvoiceIssuingService {
       correlativoId = created.id;
     }
 
-    const correlativo = await tx.correlativo.findUnique({
+    let correlativo = await tx.correlativo.findUnique({
       where: { id: correlativoId },
     });
     if (!correlativo) {
@@ -286,7 +286,11 @@ export class InvoiceIssuingService {
         where: { id: correlativo.id },
         data: { status: CorrelativoStatus.VENCIDO },
       });
-      throw new BadRequestException('El correlativo está VENCIDO');
+      if (/^AUTO-/i.test(correlativo.resolutionNumber ?? '')) {
+        correlativo = await this.createDefaultCorrelativo(tx, now);
+      } else {
+        throw new BadRequestException('El correlativo está VENCIDO');
+      }
     }
 
     const issuedNumber = correlativo.currentNumber;
@@ -617,6 +621,39 @@ export class InvoiceIssuingService {
         },
       });
     }
+  }
+
+  private async createDefaultCorrelativo(
+    tx: Prisma.TransactionClient,
+    now: Date,
+  ) {
+    const prefix = this.buildMonthlyPrefix(now);
+    const dgiConfigRecord = await tx.appConfig.findUnique({
+      where: { id: 'dgi_resolution' },
+    });
+    const dgiConfig = readDgiConfig(dgiConfigRecord?.data ?? null);
+    const expirationDate = getBusinessMonthEnd(now);
+
+    const startNumber = Math.max(1, Number(dgiConfig.startNumber ?? 1));
+    const endNumber = Math.max(
+      startNumber,
+      Number(dgiConfig.endNumber ?? 99999),
+    );
+
+    return tx.correlativo.create({
+      data: {
+        documentType: DocumentType.FACTURA,
+        resolutionNumber:
+          dgiConfig.resolutionNumber ?? `AUTO-${prefix.slice(0, -1)}`,
+        prefix,
+        startNumber,
+        endNumber,
+        currentNumber: startNumber,
+        issueDate: now,
+        expirationDate,
+        status: CorrelativoStatus.ACTIVO,
+      },
+    });
   }
 
   private buildMonthlyPrefix(date: Date): string {

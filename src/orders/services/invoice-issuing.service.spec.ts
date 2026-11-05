@@ -278,4 +278,73 @@ describe('InvoiceIssuingService', () => {
     expect(dto.paidAt).toBe(paidAt.toISOString());
     expect(dto.certificateSerials).toEqual(['CERT-01']);
   });
+
+  it('automatically rotates an expired AUTO-* monthly correlativo instead of failing', async () => {
+    let capturedOrderUpdate: unknown;
+    const tx = {
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValueOnce([{ id: 'order-auto-1' }])
+        .mockResolvedValueOnce([{ id: 'corr-auto-old' }]),
+      order: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'order-auto-1',
+          status: 'PENDING',
+          cashierId: 'cashier-1',
+          cashierSnapshotName: 'Caja',
+          invoiceNumber: null,
+          pendingCertificateSerials: null,
+        }),
+        update: jest.fn((args: unknown) => {
+          capturedOrderUpdate = args;
+          return Promise.resolve({});
+        }),
+      },
+      shift: { findFirst: jest.fn().mockResolvedValue({ id: 'shift-open' }) },
+      appConfig: { findUnique: jest.fn().mockResolvedValue(null) },
+      correlativo: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'corr-auto-old',
+          prefix: 'JUN26-',
+          startNumber: 1,
+          currentNumber: 145,
+          endNumber: 99999,
+          expirationDate: new Date('2026-07-01T05:59:59.000Z'),
+          status: 'ACTIVO',
+          resolutionNumber: 'AUTO-JUN26',
+        }),
+        update: jest.fn().mockResolvedValue({}),
+        create: jest.fn().mockResolvedValue({
+          id: 'corr-auto-new',
+          prefix: 'NOV26-',
+          startNumber: 1,
+          currentNumber: 1,
+          endNumber: 99999,
+          expirationDate: new Date('2099-12-01T05:59:59.000Z'),
+          status: 'ACTIVO',
+          resolutionNumber: 'AUTO-NOV26',
+        }),
+      },
+      systemLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+
+    await new InvoiceIssuingService().issue(tx as never, {
+      orderId: 'order-auto-1',
+      dto: {},
+      totals,
+      promotion: { source: 'none' },
+    });
+
+    expect(tx.correlativo.update).toHaveBeenCalledWith({
+      where: { id: 'corr-auto-old' },
+      data: { status: 'VENCIDO' },
+    });
+    expect(tx.correlativo.create).toHaveBeenCalledTimes(1);
+    expect(capturedOrderUpdate).toMatchObject({
+      data: {
+        status: 'PAID',
+        invoiceCorrelativoId: 'corr-auto-new',
+      },
+    });
+  });
 });
