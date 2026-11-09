@@ -1,4 +1,12 @@
-import { Controller, Get, Post, Body, ParseArrayPipe, Patch, Param } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  ParseArrayPipe,
+  Patch,
+  Param,
+} from '@nestjs/common';
 import { MesasService } from './mesas.service';
 import { UpdateFloorDto } from './dto/update-floor.dto';
 import { UpdateMesaStatusDto } from './dto/update-mesa-status.dto';
@@ -41,10 +49,7 @@ export class MesasController {
     UserRoleDto.mesero,
     UserRoleDto.despachador,
   )
-  updateStatus(
-    @Param('id') id: string,
-    @Body() dto: UpdateMesaStatusDto,
-  ) {
+  updateStatus(@Param('id') id: string, @Body() dto: UpdateMesaStatusDto) {
     return this.mesasService.updateStatus(id, dto.estado);
   }
 
@@ -57,10 +62,7 @@ export class MesasController {
     UserRoleDto.mesero,
     UserRoleDto.despachador,
   )
-  reserveMesa(
-    @Param('id') id: string,
-    @Body() dto: ReserveMesaDto,
-  ) {
+  reserveMesa(@Param('id') id: string, @Body() dto: ReserveMesaDto) {
     return this.mesasService.reserveMesa(id, dto);
   }
 

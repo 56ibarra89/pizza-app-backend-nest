@@ -6,10 +6,14 @@ describe('OrderReferenceResolverService', () => {
     const prisma = {
       customer: { findMany: jest.fn(), create: jest.fn() },
     };
-    const service = new OrderReferenceResolverService(prisma as unknown as PrismaService);
+    const service = new OrderReferenceResolverService(
+      prisma as unknown as PrismaService,
+    );
 
     const result = await service.resolve({
-      shiftId: 'shift', cashierId: 'cashier', customerSnapshotName: 'Ana',
+      shiftId: 'shift',
+      cashierId: 'cashier',
+      customerSnapshotName: 'Ana',
     });
 
     expect(result.customerId).toBeUndefined();
@@ -27,10 +31,15 @@ describe('OrderReferenceResolverService', () => {
       $transaction: jest.fn(),
     };
     prisma.$transaction.mockImplementation((fn) => fn(prisma));
-    const service = new OrderReferenceResolverService(prisma as unknown as PrismaService);
+    const service = new OrderReferenceResolverService(
+      prisma as unknown as PrismaService,
+    );
 
     const result = await service.resolve({
-      shiftId: 'shift', cashierId: 'cashier', customerSnapshotName: 'Ana', customerPhone: '123',
+      shiftId: 'shift',
+      cashierId: 'cashier',
+      customerSnapshotName: 'Ana',
+      customerPhone: '123',
     });
 
     expect(result.customerId).toBe('new-customer');
@@ -39,10 +48,23 @@ describe('OrderReferenceResolverService', () => {
   });
 
   it('no vincula un teléfono compartido por varios clientes', async () => {
-    const prisma = { customer: { findMany: jest.fn().mockResolvedValue([{ id: 'a' }, { id: 'b' }]), create: jest.fn() }, $queryRaw: jest.fn().mockResolvedValue([]), $transaction: jest.fn() };
+    const prisma = {
+      customer: {
+        findMany: jest.fn().mockResolvedValue([{ id: 'a' }, { id: 'b' }]),
+        create: jest.fn(),
+      },
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      $transaction: jest.fn(),
+    };
     prisma.$transaction.mockImplementation((fn) => fn(prisma));
-    const service = new OrderReferenceResolverService(prisma as unknown as PrismaService);
-    const result = await service.resolve({ shiftId: 'shift', cashierId: 'cashier', customerPhone: '123' });
+    const service = new OrderReferenceResolverService(
+      prisma as unknown as PrismaService,
+    );
+    const result = await service.resolve({
+      shiftId: 'shift',
+      cashierId: 'cashier',
+      customerPhone: '123',
+    });
     expect(result.customerId).toBeUndefined();
     expect(prisma.customer.create).not.toHaveBeenCalled();
   });

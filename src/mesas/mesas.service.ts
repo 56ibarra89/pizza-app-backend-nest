@@ -180,7 +180,7 @@ export class MesasService implements OnModuleInit {
       return this.prisma.$transaction(runAtomicUpdate);
     }
 
-    return runAtomicUpdate(this.prisma as unknown as Prisma.TransactionClient);
+    return runAtomicUpdate(this.prisma);
   }
 
   async getMesas() {
@@ -255,24 +255,51 @@ export class MesasService implements OnModuleInit {
     });
 
     if (expiredReservations.length > 0) {
+      const releasedReservations: typeof expiredReservations = [];
       for (const mesa of expiredReservations) {
-        await this.releaseMesa(mesa.id);
-        this.logger.log(
-          `Reserva caducada para mesa ${mesa.number} de planta ${mesa.floor}. Liberando mesa automáticamente.`,
-        );
+        if (typeof this.prisma.mesa?.updateMany === 'function') {
+          const updated = await this.prisma.mesa.updateMany({
+            where: {
+              id: mesa.id,
+              estado: 'RESERVADO',
+              expirationTime: { lt: now },
+            },
+            data: {
+              estado: 'DISPONIBLE',
+              reservationName: null,
+              reservationAmount: null,
+              reservationTime: null,
+              expirationTime: null,
+            },
+          });
+          if (updated.count > 0) {
+            releasedReservations.push(mesa);
+            this.logger.log(
+              `Reserva caducada para mesa ${mesa.number} de planta ${mesa.floor}. Liberando mesa automáticamente.`,
+            );
+          }
+        } else {
+          await this.releaseMesa(mesa.id);
+          releasedReservations.push(mesa);
+          this.logger.log(
+            `Reserva caducada para mesa ${mesa.number} de planta ${mesa.floor}. Liberando mesa automáticamente.`,
+          );
+        }
       }
-      await this.systemLogs.createProcess({
-        process: 'RESERVATION_EXPIRATION_MONITOR',
-        action: 'MESAS_EXPIRED_RESERVATIONS_RELEASED',
-        module: 'mesas',
-        operation: 'RELEASE',
-        entity: 'mesa',
-        before: expiredReservations,
-        after: {
-          releasedIds: expiredReservations.map((mesa) => mesa.id),
-          count: expiredReservations.length,
-        },
-      });
+      if (releasedReservations.length > 0) {
+        await this.systemLogs.createProcess({
+          process: 'RESERVATION_EXPIRATION_MONITOR',
+          action: 'MESAS_EXPIRED_RESERVATIONS_RELEASED',
+          module: 'mesas',
+          operation: 'RELEASE',
+          entity: 'mesa',
+          before: releasedReservations,
+          after: {
+            releasedIds: releasedReservations.map((mesa) => mesa.id),
+            count: releasedReservations.length,
+          },
+        });
+      }
     }
   }
 }

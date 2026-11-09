@@ -147,6 +147,7 @@ export interface IOrdersRepository {
       deliveredAt?: Date | null;
       deliverySlaAlertedAt?: Date | null;
       certificateSerials?: string[] | null;
+      allowFinalSplitSettlement?: boolean;
     },
     tx?: Prisma.TransactionClient,
   ): Promise<OrderEntity>;

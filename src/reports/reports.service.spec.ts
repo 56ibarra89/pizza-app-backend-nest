@@ -17,10 +17,29 @@ describe('ReportsService', () => {
   });
 
   it('recorre lotes por clave dentro de una instantánea consistente', async () => {
-    const row = { id: 'last-id', total: 0, discountAmount: 0, timestamp: new Date('2026-10-12T12:00:00Z'), paidAt: null, orderType: 'LOCAL', linkedTables: [], payments: [], items: [] };
-    findMany.mockResolvedValueOnce(Array.from({ length: 2500 }, () => row)).mockResolvedValueOnce([]);
-    await service.getSalesReport({ startDate: new Date('2026-10-12T00:00:00Z'), endDate: new Date('2026-10-13T00:00:00Z'), timezoneOffsetMinutes: 360 });
-    expect(transaction).toHaveBeenCalledWith(expect.any(Function), expect.objectContaining({ isolationLevel: 'RepeatableRead' }));
+    const row = {
+      id: 'last-id',
+      total: 0,
+      discountAmount: 0,
+      timestamp: new Date('2026-10-12T12:00:00Z'),
+      paidAt: null,
+      orderType: 'LOCAL',
+      linkedTables: [],
+      payments: [],
+      items: [],
+    };
+    findMany
+      .mockResolvedValueOnce(Array.from({ length: 2500 }, () => row))
+      .mockResolvedValueOnce([]);
+    await service.getSalesReport({
+      startDate: new Date('2026-10-12T00:00:00Z'),
+      endDate: new Date('2026-10-13T00:00:00Z'),
+      timezoneOffsetMinutes: 360,
+    });
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: 'RepeatableRead' }),
+    );
     expect(findMany.mock.calls[1][0].where.id).toEqual({ gt: 'last-id' });
     expect(findMany.mock.calls[1][0]).not.toHaveProperty('skip');
   });

@@ -111,9 +111,7 @@ describe('AdminDashboardService', () => {
     prisma.order.aggregate.mockResolvedValue({
       _sum: { total: 15400.5 },
     });
-    prisma.mesa.findMany.mockResolvedValue([
-      { id: 'F3-M1' },
-    ]);
+    prisma.mesa.findMany.mockResolvedValue([{ id: 'F3-M1' }]);
     prisma.orderTable.findMany.mockResolvedValue([
       { tableId: 'F2-M6' },
       { tableId: 'F2-M8' },

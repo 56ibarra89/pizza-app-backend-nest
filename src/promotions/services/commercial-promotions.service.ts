@@ -50,6 +50,12 @@ export class CommercialPromotionsService {
     const startMinutes = timeToMinutes(dto.startTime);
     const endMinutes = timeToMinutes(dto.endTime);
     this.validateHappyHourTimes(startMinutes, endMinutes);
+    if (dto.promotionType !== '2x1') {
+      if (typeof dto.promotionValue !== 'number') {
+        throw new BadRequestException('Valor de promoción requerido');
+      }
+      this.validateDiscountValue(dto.promotionType, dto.promotionValue);
+    }
 
     const created = await this.happyHoursRepository.create({
       name: dto.name,
@@ -85,6 +91,17 @@ export class CommercialPromotionsService {
         ? timeToMinutes(dto.endTime)
         : existing.endMinutes;
     this.validateHappyHourTimes(nextStartMinutes, nextEndMinutes);
+    if (nextPromotionType !== '2x1') {
+      const nextPromotionValue =
+        dto.promotionValue ??
+        (existing.promotionValue
+          ? decimalToNumber(existing.promotionValue)
+          : undefined);
+      if (typeof nextPromotionValue !== 'number') {
+        throw new BadRequestException('Valor de promoción requerido');
+      }
+      this.validateDiscountValue(nextPromotionType, nextPromotionValue);
+    }
 
     const updated = await this.happyHoursRepository.update(id, {
       ...(dto.name !== undefined ? { name: dto.name } : {}),

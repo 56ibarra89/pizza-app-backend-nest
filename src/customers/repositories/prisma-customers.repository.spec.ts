@@ -3,9 +3,15 @@ import { PrismaCustomersRepository } from './prisma-customers.repository';
 
 describe('Customer identity protection', () => {
   it('rechaza coincidencias sin sobrescribir datos', async () => {
-    const customer = { findFirst: jest.fn().mockResolvedValue({ id: 'existing' }), update: jest.fn(), create: jest.fn() };
+    const customer = {
+      findFirst: jest.fn().mockResolvedValue({ id: 'existing' }),
+      update: jest.fn(),
+      create: jest.fn(),
+    };
     const repository = new PrismaCustomersRepository({ customer } as never);
-    await expect(repository.upsertByName({ name: 'Ana', phone: '123' })).rejects.toThrow(ConflictException);
+    await expect(
+      repository.upsertByName({ name: 'Ana', phone: '123' }),
+    ).rejects.toThrow(ConflictException);
     expect(customer.update).not.toHaveBeenCalled();
     expect(customer.create).not.toHaveBeenCalled();
   });

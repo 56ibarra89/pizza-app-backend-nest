@@ -9,11 +9,14 @@ import {
   IsPositive,
   IsString,
   Matches,
-  Max,
+  ValidateBy,
   ValidateIf,
 } from 'class-validator';
 import { WeekDay } from '@prisma/client';
-import type { HappyHourPromotionTypeDto, PromoStatusDto } from '../../mappers/promotions.mapper';
+import type {
+  HappyHourPromotionTypeDto,
+  PromoStatusDto,
+} from '../../mappers/promotions.mapper';
 
 export class UpdateHappyHourDto {
   @IsOptional()
@@ -29,25 +32,36 @@ export class UpdateHappyHourDto {
 
   @IsOptional()
   @IsString()
-  @Matches(/^\d{2}:\d{2}$/)
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/)
   startTime?: string;
 
   @IsOptional()
   @IsString()
-  @Matches(/^\d{2}:\d{2}$/)
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/)
   endTime?: string;
 
   @IsOptional()
   @IsString()
-  @IsIn(['2x1', 'porcentaje', 'monto_fijo'] satisfies HappyHourPromotionTypeDto[])
+  @IsIn([
+    '2x1',
+    'porcentaje',
+    'monto_fijo',
+  ] satisfies HappyHourPromotionTypeDto[])
   promotionType?: HappyHourPromotionTypeDto;
 
   @IsOptional()
   @ValidateIf((o: UpdateHappyHourDto) => o.promotionType !== '2x1')
   @IsNumber({ maxDecimalPlaces: 4 })
   @IsPositive()
-  @ValidateIf((o: UpdateHappyHourDto) => o.promotionType === 'porcentaje')
-  @Max(100)
+  @ValidateBy({
+    name: 'maxPercentageUpdateHappyHour',
+    validator: {
+      validate: (value: unknown, args) =>
+        (args?.object as UpdateHappyHourDto)?.promotionType !== 'porcentaje' ||
+        (typeof value === 'number' && value <= 100),
+      defaultMessage: () => 'El porcentaje no puede superar 100',
+    },
+  })
   promotionValue?: number;
 
   @IsOptional()
@@ -71,4 +85,3 @@ export class UpdateHappyHourDto {
   @IsIn(['Activo', 'Inactivo'] satisfies PromoStatusDto[])
   status?: PromoStatusDto;
 }
-

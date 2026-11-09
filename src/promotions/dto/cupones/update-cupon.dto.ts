@@ -1,5 +1,18 @@
-import { IsIn, IsInt, IsISO8601, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, Max, ValidateIf } from 'class-validator';
-import type { DiscountTypeDto, PromoStatusDto } from '../../mappers/promotions.mapper';
+import {
+  IsIn,
+  IsInt,
+  IsISO8601,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsPositive,
+  IsString,
+  ValidateBy,
+} from 'class-validator';
+import type {
+  DiscountTypeDto,
+  PromoStatusDto,
+} from '../../mappers/promotions.mapper';
 
 export class UpdateCuponDto {
   @IsOptional()
@@ -15,8 +28,15 @@ export class UpdateCuponDto {
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 4 })
   @IsPositive()
-  @ValidateIf((o: UpdateCuponDto) => o.discountType === 'porcentaje')
-  @Max(100)
+  @ValidateBy({
+    name: 'maxPercentageUpdateCupon',
+    validator: {
+      validate: (value: unknown, args) =>
+        (args?.object as UpdateCuponDto)?.discountType !== 'porcentaje' ||
+        (typeof value === 'number' && value <= 100),
+      defaultMessage: () => 'El porcentaje de descuento no puede superar 100',
+    },
+  })
   discountValue?: number;
 
   @IsOptional()
@@ -36,4 +56,3 @@ export class UpdateCuponDto {
   @IsIn(['Activo', 'Inactivo'] satisfies PromoStatusDto[])
   manualStatus?: PromoStatusDto;
 }
-

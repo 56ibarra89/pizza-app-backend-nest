@@ -128,4 +128,3 @@ export function fromDbPaymentMethod(method: DbPaymentMethod): PaymentMethodDto {
       throw new Error(`Unsupported DbPaymentMethod: ${String(method)}`);
   }
 }
-

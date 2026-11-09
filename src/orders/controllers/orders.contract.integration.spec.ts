@@ -41,7 +41,13 @@ class HeaderTestAuthGuard implements CanActivate {
           .split(',')
           .map((p) => p.trim())
           .filter(Boolean)
-      : ['orders.read', 'orders.manage', 'orders.status', 'orders.finalize', 'delivery.read'];
+      : [
+          'orders.read',
+          'orders.manage',
+          'orders.status',
+          'orders.finalize',
+          'delivery.read',
+        ];
 
     req.user = {
       id: userId,
@@ -143,12 +149,17 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
         {
           provide: AppConfigService,
           useValue: {
-            getByIdOrDefault: jest.fn().mockImplementation(async (id: string) => {
-              if (id === 'tax_config') {
-                return { id, data: { isExonerated: false, taxes: [{ percentage: 15 }] } };
-              }
-              return { id, data: {} };
-            }),
+            getByIdOrDefault: jest
+              .fn()
+              .mockImplementation(async (id: string) => {
+                if (id === 'tax_config') {
+                  return {
+                    id,
+                    data: { isExonerated: false, taxes: [{ percentage: 15 }] },
+                  };
+                }
+                return { id, data: {} };
+              }),
           },
         },
         {
@@ -168,7 +179,10 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
         },
         {
           provide: HiddenKitchenTicketsService,
-          useValue: { listTicketIds: jest.fn().mockResolvedValue([]), hide: jest.fn() },
+          useValue: {
+            listTicketIds: jest.fn().mockResolvedValue([]),
+            hide: jest.fn(),
+          },
         },
         {
           provide: OrderReferenceResolverService,
@@ -194,7 +208,9 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
         {
           provide: KitchensService,
           useValue: {
-            getAssignedKitchenIdForDate: jest.fn().mockResolvedValue('kitchen-1'),
+            getAssignedKitchenIdForDate: jest
+              .fn()
+              .mockResolvedValue('kitchen-1'),
           },
         },
         {
@@ -202,7 +218,10 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
           useValue: {
             $transaction: jest.fn(async (cb: (tx: any) => any) =>
               cb({
-                order: { count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
+                order: {
+                  count: jest.fn().mockResolvedValue(0),
+                  findMany: jest.fn().mockResolvedValue([]),
+                },
                 certificado: { findMany: jest.fn().mockResolvedValue([]) },
                 cupon: { findUnique: jest.fn().mockResolvedValue(null) },
               }),
@@ -248,14 +267,17 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
     jest.clearAllMocks();
   });
 
-  it.each([{}, { tableIds: 'mesa' }, { tableIds: [42] }, { tableIds: [''] }])('rechaza un contrato de mesas inválido: %j', async (body) => {
-    const response = await request(app.getHttpServer())
-      .patch('/orders/test-order/tables')
-      .set('x-test-role', 'cajero')
-      .set('x-test-permissions', 'orders.read,tables.operate')
-      .send(body);
-    expect(response.status).toBe(400);
-  });
+  it.each([{}, { tableIds: 'mesa' }, { tableIds: [42] }, { tableIds: [''] }])(
+    'rechaza un contrato de mesas inválido: %j',
+    async (body) => {
+      const response = await request(app.getHttpServer())
+        .patch('/orders/test-order/tables')
+        .set('x-test-role', 'cajero')
+        .set('x-test-permissions', 'orders.read,tables.operate')
+        .send(body);
+      expect(response.status).toBe(400);
+    },
+  );
 
   it('rechaza en HTTP (400) regalar productos con nota Vale: vacía sin certificado válido (H01)', async () => {
     const response = await request(app.getHttpServer())

@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { CorrelativoStatus, DocumentType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { ICorrelativosRepository } from '../interfaces/correlativos.repository';
@@ -67,26 +71,45 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
     return executeCreate(this.prisma);
   }
 
-  async update(id: string, params: {
-    documentType?: DocumentType;
-    resolutionNumber?: string;
-    prefix?: string;
-    startNumber?: number;
-    endNumber?: number;
-    currentNumber?: number;
-    issueDate?: Date;
-    expirationDate?: Date;
-    status?: CorrelativoStatus;
-  }): Promise<CorrelativoEntity> {
+  async update(
+    id: string,
+    params: {
+      documentType?: DocumentType;
+      resolutionNumber?: string;
+      prefix?: string;
+      startNumber?: number;
+      endNumber?: number;
+      currentNumber?: number;
+      issueDate?: Date;
+      expirationDate?: Date;
+      status?: CorrelativoStatus;
+    },
+  ): Promise<CorrelativoEntity> {
     const executeUpdate = async (tx: typeof this.prisma) => {
+      const existing = tx.correlativo.findUnique
+        ? await tx.correlativo.findUnique({ where: { id } })
+        : null;
+      if (existing) {
+        const nextStart = params.startNumber ?? existing.startNumber;
+        const nextEnd = params.endNumber ?? existing.endNumber;
+        const nextCurrent = params.currentNumber ?? existing.currentNumber;
+        if (nextEnd < nextStart) {
+          throw new BadRequestException(
+            'endNumber no puede ser menor que startNumber',
+          );
+        }
+        if (nextCurrent < nextStart || nextCurrent > nextEnd + 1) {
+          throw new BadRequestException('currentNumber fuera de rango');
+        }
+      }
       if (params.status === CorrelativoStatus.ACTIVO) {
-        let docType = params.documentType;
+        let docType = params.documentType ?? existing?.documentType;
         if (!docType && tx.correlativo.findUnique) {
-          const existing = await tx.correlativo.findUnique({
+          const found = await tx.correlativo.findUnique({
             where: { id },
             select: { documentType: true },
           });
-          docType = existing?.documentType;
+          docType = found?.documentType;
         }
         if (docType) {
           await tx.correlativo.updateMany({
@@ -122,7 +145,7 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
     nextNumber: number;
     status: CorrelativoStatus;
   }> {
-    return this.prisma.$transaction(async (tx) => {
+    const txResult = await this.prisma.$transaction(async (tx) => {
       let active: Awaited<ReturnType<typeof tx.correlativo.findFirst>> = null;
       if (typeof tx.$queryRaw === 'function') {
         const lockedRows = await tx.$queryRaw<Array<{ id: string }>>`
@@ -151,7 +174,9 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
       }
 
       if (!active) {
-        throw new NotFoundException('No hay correlativo ACTIVO para ese tipo de documento');
+        throw new NotFoundException(
+          'No hay correlativo ACTIVO para ese tipo de documento',
+        );
       }
 
       const now = new Date();
@@ -160,7 +185,7 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
           where: { id: active.id },
           data: { status: CorrelativoStatus.VENCIDO },
         });
-        throw new BadRequestException('El correlativo está VENCIDO');
+        return { __failure: 'El correlativo está VENCIDO' as const };
       }
 
       const issuedNumber = active.currentNumber;
@@ -177,11 +202,14 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
           where: { id: active.id },
           data: { status: CorrelativoStatus.AGOTADO },
         });
-        throw new BadRequestException('El correlativo está AGOTADO');
+        return { __failure: 'El correlativo está AGOTADO' as const };
       }
 
       const nextNumber = issuedNumber + 1;
-      const newStatus = nextNumber > active.endNumber ? CorrelativoStatus.AGOTADO : active.status;
+      const newStatus =
+        nextNumber > active.endNumber
+          ? CorrelativoStatus.AGOTADO
+          : active.status;
 
       await tx.correlativo.update({
         where: { id: active.id },
@@ -200,6 +228,11 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
         status: newStatus,
       };
     });
+
+    if ('__failure' in txResult) {
+      throw new BadRequestException(txResult.__failure);
+    }
+    return txResult;
   }
 
   async deleteById(id: string): Promise<void> {

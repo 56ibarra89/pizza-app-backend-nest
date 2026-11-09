@@ -79,7 +79,7 @@ export class PrismaCashExpensesRepository implements ICashExpensesRepository {
         data: {
           shiftId: data.shiftId,
           amount: new Prisma.Decimal(data.amount),
-          category: data.category as CashExpenseCategory,
+          category: data.category,
           reason: data.reason,
           voucherNumber: data.voucherNumber?.trim() || null,
           notes: data.notes?.trim() || null,
@@ -94,7 +94,7 @@ export class PrismaCashExpensesRepository implements ICashExpensesRepository {
     if (typeof this.prisma.$transaction === 'function') {
       return this.prisma.$transaction((tx) => executeCreate(tx));
     }
-    return executeCreate(this.prisma as unknown as Prisma.TransactionClient);
+    return executeCreate(this.prisma);
   }
 
   async findById(id: string): Promise<CashExpenseEntity | null> {
@@ -109,7 +109,9 @@ export class PrismaCashExpensesRepository implements ICashExpensesRepository {
       where: {
         shiftId: params.shiftId,
         cashierId: params.cashierId,
-        category: params.category ? (params.category as CashExpenseCategory) : undefined,
+        category: params.category
+          ? (params.category as CashExpenseCategory)
+          : undefined,
         createdAt: {
           gte: params.from,
           lte: params.to,

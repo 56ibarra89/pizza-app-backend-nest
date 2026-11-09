@@ -1,5 +1,14 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsEmail, IsEnum, IsOptional, IsString, Matches, IsArray, IsUUID } from 'class-validator';
+import {
+  IsBoolean,
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsString,
+  Matches,
+  IsArray,
+  IsUUID,
+} from 'class-validator';
 import { UserRoleDto } from './user-role.dto';
 
 export class UpdateUserDto {
@@ -33,9 +42,13 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsString()
-  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,128}$/, {
-    message: 'La contraseña debe tener de 8 a 128 caracteres, una mayúscula, una minúscula, un número y un carácter especial (@$!%*?&)'
-  })
+  @Matches(
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,128}$/,
+    {
+      message:
+        'La contraseña debe tener de 8 a 128 caracteres, una mayúscula, una minúscula, un número y un carácter especial (@$!%*?&)',
+    },
+  )
   password?: string;
 
   @IsOptional()

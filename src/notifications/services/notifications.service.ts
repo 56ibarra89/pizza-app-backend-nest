@@ -213,64 +213,70 @@ export class NotificationsService {
       ? `La orden de ${targetName} está lista para ser entregada.`
       : `El producto "${payload.itemName}" de ${targetName} está listo.`;
 
-    // Guardamos notificación para CAJERO (dirigida al cajero que generó la orden)
-    await this.createNotification(
-      title,
-      message,
-      UserRole.CAJERO,
-      payload.targetUsername,
-      payload.orderId,
-    );
-    // Guardamos notificación para CAJERO_PRINCIPAL
-    await this.createNotification(
-      title,
-      message,
-      UserRole.CAJERO_PRINCIPAL,
-      undefined,
-      payload.orderId,
-    );
-    // Guardamos notificación para ADMIN
-    await this.createNotification(
-      title,
-      message,
-      UserRole.ADMIN,
-      undefined,
-      payload.orderId,
-    );
-    // Guardamos notificación para MESERO (dirigida al usuario específico si existe)
-    await this.createNotification(
-      title,
-      message,
-      UserRole.MESERO,
-      payload.targetUsername,
-      payload.orderId,
-    );
+    const baseNotifications = [
+      // Guardamos notificación para CAJERO (dirigida al cajero que generó la orden)
+      this.createNotification(
+        title,
+        message,
+        UserRole.CAJERO,
+        payload.targetUsername,
+        payload.orderId,
+      ),
+      // Guardamos notificación para CAJERO_PRINCIPAL
+      this.createNotification(
+        title,
+        message,
+        UserRole.CAJERO_PRINCIPAL,
+        undefined,
+        payload.orderId,
+      ),
+      // Guardamos notificación para ADMIN
+      this.createNotification(
+        title,
+        message,
+        UserRole.ADMIN,
+        undefined,
+        payload.orderId,
+      ),
+      // Guardamos notificación para MESERO (dirigida al usuario específico si existe)
+      this.createNotification(
+        title,
+        message,
+        UserRole.MESERO,
+        payload.targetUsername,
+        payload.orderId,
+      ),
+    ];
 
     // Guardamos notificación para DESPACHADOR solo si es delivery
     if (payload.orderType === 'delivery') {
-      await this.createNotification(
-        title,
-        message,
-        UserRole.DESPACHADOR,
-        undefined,
-        payload.orderId,
+      baseNotifications.push(
+        this.createNotification(
+          title,
+          message,
+          UserRole.DESPACHADOR,
+          undefined,
+          payload.orderId,
+        ),
       );
+    }
 
-      if (payload.driverId) {
-        const driver = await this.prisma.user.findUnique({
-          where: { id: payload.driverId },
-          select: { username: true, role: true, isActive: true },
-        });
+    await Promise.all(baseNotifications);
 
-        if (driver?.isActive && driver.role === UserRole.MOTORIZADO) {
-          await this.createNotification(
-            title,
-            message,
-            UserRole.MOTORIZADO,
-            driver.username,
-            payload.orderId,
-          );
-        }
+    if (payload.orderType === 'delivery' && payload.driverId) {
+      const driver = await this.prisma.user.findUnique({
+        where: { id: payload.driverId },
+        select: { username: true, role: true, isActive: true },
+      });
+
+      if (driver?.isActive && driver.role === UserRole.MOTORIZADO) {
+        await this.createNotification(
+          title,
+          message,
+          UserRole.MOTORIZADO,
+          driver.username,
+          payload.orderId,
+        );
       }
     }
   }

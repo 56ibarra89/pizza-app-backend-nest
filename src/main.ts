@@ -86,4 +86,4 @@ async function bootstrap() {
     logger.warn('NODE_ENV is not configured; using development behavior.');
   }
 }
-bootstrap();
+void bootstrap();

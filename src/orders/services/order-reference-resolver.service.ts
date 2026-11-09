@@ -146,34 +146,38 @@ export class OrderReferenceResolverService {
       if (byPhone) {
         return { id: byPhone.id, existing: true };
       }
-        const name = normalizedName || `Cliente ${normalizedPhone}`;
-        const created = await tx.customer.create({
-          data: {
-            name,
-            phone: normalizedPhone || null,
-            phones: normalizedPhone
-              ? {
-                  create: {
-                    phone: normalizedPhone,
-                    lastUsed: now,
-                  },
-                }
-              : undefined,
-            addresses: normalizedAddress
-              ? {
-                  create: {
-                    address: normalizedAddress,
-                    lastUsed: now,
-                  },
-                }
-              : undefined,
-          },
-          select: { id: true },
-        });
-        return { id: created.id, existing: false };
+      const name = normalizedName || `Cliente ${normalizedPhone}`;
+      const created = await tx.customer.create({
+        data: {
+          name,
+          phone: normalizedPhone || null,
+          phones: normalizedPhone
+            ? {
+                create: {
+                  phone: normalizedPhone,
+                  lastUsed: now,
+                },
+              }
+            : undefined,
+          addresses: normalizedAddress
+            ? {
+                create: {
+                  address: normalizedAddress,
+                  lastUsed: now,
+                },
+              }
+            : undefined,
+        },
+        select: { id: true },
+      });
+      return { id: created.id, existing: false };
     });
     if (result.id && result.existing) {
-      await this.attachPhoneToExistingCustomer(result.id, normalizedPhone, normalizedAddress);
+      await this.attachPhoneToExistingCustomer(
+        result.id,
+        normalizedPhone,
+        normalizedAddress,
+      );
     }
     return result.id;
   }

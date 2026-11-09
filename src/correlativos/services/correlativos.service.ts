@@ -1,4 +1,9 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { CorrelativoStatus, type DocumentType } from '@prisma/client';
 import {
   CORRELATIVOS_REPOSITORY,
@@ -40,7 +45,7 @@ export class CorrelativosService {
     }
 
     if (dto.status === CorrelativoStatus.ACTIVO) {
-      await this.repo.markActiveAsVencido(dto.documentType);
+      // El repositorio desactiva correlativos previos dentro de la misma transacción.
     }
 
     return this.repo.create({
@@ -57,8 +62,14 @@ export class CorrelativosService {
   }
 
   async update(id: string, dto: UpdateCorrelativoDto) {
-    if (dto.endNumber !== undefined && dto.startNumber !== undefined && dto.endNumber < dto.startNumber) {
-      throw new BadRequestException('endNumber no puede ser menor que startNumber');
+    if (
+      dto.endNumber !== undefined &&
+      dto.startNumber !== undefined &&
+      dto.endNumber < dto.startNumber
+    ) {
+      throw new BadRequestException(
+        'endNumber no puede ser menor que startNumber',
+      );
     }
     if (
       dto.currentNumber !== undefined &&
@@ -75,9 +86,9 @@ export class CorrelativosService {
       throw new BadRequestException('currentNumber fuera de rango');
     }
     if (dto.status === CorrelativoStatus.ACTIVO && dto.documentType) {
-      await this.repo.markActiveAsVencido(dto.documentType);
+      // El repositorio desactiva correlativos previos dentro de la misma transacción.
     }
-    
+
     return this.repo.update(id, {
       documentType: dto.documentType,
       resolutionNumber: dto.resolutionNumber?.trim(),
@@ -86,7 +97,9 @@ export class CorrelativosService {
       endNumber: dto.endNumber,
       currentNumber: dto.currentNumber,
       issueDate: dto.issueDate ? new Date(dto.issueDate) : undefined,
-      expirationDate: dto.expirationDate ? new Date(dto.expirationDate) : undefined,
+      expirationDate: dto.expirationDate
+        ? new Date(dto.expirationDate)
+        : undefined,
       status: dto.status,
     });
   }

@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  getBusinessDateParts,
+  getBusinessDayBounds,
+} from '../../common/time/business-time.util';
 import type {
   ActiveCashRegisterDto,
   WaiterPerformanceDto,
@@ -16,16 +20,6 @@ const AVATAR_COLORS = [
   '#e91e63',
   '#3f51b5',
 ];
-
-const DAY_MAP = [
-  'SUNDAY',
-  'MONDAY',
-  'TUESDAY',
-  'WEDNESDAY',
-  'THURSDAY',
-  'FRIDAY',
-  'SATURDAY',
-] as const;
 
 @Injectable()
 export class AdminDashboardService {
@@ -83,6 +77,15 @@ export class AdminDashboardService {
 
       // 2. Procesar cada orden cobrada y asignarla al colaborador correspondiente
       for (const order of shift.orders) {
+        const orderTotal = Number(order.total) || 0;
+        const hasPayments = Boolean(
+          order.payments && order.payments.length > 0,
+        );
+        // Omitir órdenes padre contenedoras de splitCheckout ya liquidadas
+        if (order.invoiceNumber === null && orderTotal === 0 && !hasPayments) {
+          continue;
+        }
+
         let orderKey: string;
         if (order.cashierId) {
           orderKey = `user-${order.cashierId}`;
@@ -140,7 +143,7 @@ export class AdminDashboardService {
             else entry.revenueCash += amount;
           });
         } else {
-          entry.revenueCash += Number(order.total) || 0;
+          entry.revenueCash += orderTotal;
         }
       }
 
@@ -163,32 +166,14 @@ export class AdminDashboardService {
 
   async getWaiterPerformance(): Promise<WaiterPerformanceDto[]> {
     const now = new Date();
-    const startOfDay = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-      0,
-      0,
-      0,
-      0,
-    );
-    const endOfDay = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-      23,
-      59,
-      59,
-      999,
-    );
-
-    const currentDayEnum = DAY_MAP[now.getDay()];
+    const { startOfDay, endOfDay } = getBusinessDayBounds(now);
+    const { weekday: currentDayEnum } = getBusinessDateParts(now);
 
     const waiters = await this.prisma.user.findMany({
       where: { role: 'MESERO', isActive: true },
       include: {
         waiterZoneAssignments: {
-          where: { day: currentDayEnum as any },
+          where: { day: currentDayEnum },
         },
       },
     });
@@ -209,10 +194,24 @@ export class AdminDashboardService {
       const assignedFloors = new Set(
         waiter.waiterZoneAssignments.map((a) => a.floor),
       );
+      const waiterUsernameLower = waiter.username.toLowerCase();
 
-      const waiterOrders = todayOrders.filter((order) =>
-        order.linkedTables.some((t) => assignedFloors.has(t.mesa.floor)),
-      );
+      const waiterOrders = todayOrders.filter((order) => {
+        if (
+          order.status === 'PAID' &&
+          order.invoiceNumber === null &&
+          (Number(order.total) || 0) === 0
+        ) {
+          return false;
+        }
+        const matchedByTable = order.linkedTables.some((t) =>
+          assignedFloors.has(t.mesa.floor),
+        );
+        const matchedByUser =
+          order.cashierId === waiter.id ||
+          order.cashierSnapshotName?.toLowerCase() === waiterUsernameLower;
+        return matchedByTable || matchedByUser;
+      });
 
       const ordersServed = waiterOrders.length;
       const revenueTotal = waiterOrders.reduce(
@@ -235,24 +234,7 @@ export class AdminDashboardService {
 
   async getLiveKpis(): Promise<LiveKpisDto> {
     const now = new Date();
-    const startOfDay = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-      0,
-      0,
-      0,
-      0,
-    );
-    const endOfDay = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-      23,
-      59,
-      59,
-      999,
-    );
+    const { startOfDay, endOfDay } = getBusinessDayBounds(now);
 
     const [
       paidOrdersToday,

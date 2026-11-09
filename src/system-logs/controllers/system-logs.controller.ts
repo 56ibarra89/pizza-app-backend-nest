@@ -23,6 +23,7 @@ export class SystemLogsController {
   @Post()
   @Roles(
     UserRoleDto.admin,
+    UserRoleDto.cajero_principal,
     UserRoleDto.cajero,
     UserRoleDto.mesero,
     UserRoleDto.cocinero,

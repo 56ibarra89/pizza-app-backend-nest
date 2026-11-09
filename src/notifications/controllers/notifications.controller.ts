@@ -36,6 +36,19 @@ export class NotificationsController {
       const subscription =
         this.notificationsService.notificationStream.subscribe({
           next: (notification) => {
+            if (
+              typeof user.tokenExpiresAtMs === 'number' &&
+              Date.now() >= user.tokenExpiresAtMs
+            ) {
+              subscriber.complete();
+              return;
+            }
+
+            const expectedRole = user.role.toUpperCase() as UserRole;
+            if (notification.role !== expectedRole) {
+              return;
+            }
+
             void this.notificationsService
               .validateStreamSubscriber(user)
               .then((activeSession) => {
@@ -89,7 +102,6 @@ export class NotificationsController {
   @UseGuards(JwtAuthGuard)
   @Get()
   async getRecentNotifications(@CurrentUser() user: AuthenticatedUser) {
-
     return this.notificationsService.getRecentForRole(
       user.role.toUpperCase() as UserRole,
       user.username,
@@ -122,4 +134,3 @@ export class NotificationsController {
     );
   }
 }
-

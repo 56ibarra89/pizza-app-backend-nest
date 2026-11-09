@@ -30,11 +30,41 @@ export class PrismaCouponPromotionsRepository implements ICouponPromotionsReposi
     });
   }
 
-  create(data: CreateCouponPromotionData): Promise<Cupon> {
+  async create(data: CreateCouponPromotionData): Promise<Cupon> {
+    if (typeof this.prisma.cupon?.findFirst === 'function') {
+      const softDeleted = await this.prisma.cupon.findFirst({
+        where: { code: data.code, deletedAt: { not: null } },
+      });
+      if (softDeleted) {
+        await this.prisma.cupon.update({
+          where: { id: softDeleted.id },
+          data: {
+            code: `${softDeleted.code}__DEL_${softDeleted.id}_${Date.now()}`,
+          },
+        });
+      }
+    }
     return this.prisma.cupon.create({ data });
   }
 
-  update(id: number, data: UpdateCouponPromotionData): Promise<Cupon> {
+  async update(id: number, data: UpdateCouponPromotionData): Promise<Cupon> {
+    if (data.code && typeof this.prisma.cupon?.findFirst === 'function') {
+      const softDeleted = await this.prisma.cupon.findFirst({
+        where: {
+          code: data.code,
+          id: { not: id },
+          deletedAt: { not: null },
+        },
+      });
+      if (softDeleted) {
+        await this.prisma.cupon.update({
+          where: { id: softDeleted.id },
+          data: {
+            code: `${softDeleted.code}__DEL_${softDeleted.id}_${Date.now()}`,
+          },
+        });
+      }
+    }
     return this.prisma.cupon.update({ where: { id }, data });
   }
 

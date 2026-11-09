@@ -14,7 +14,10 @@ export interface ICloudBackupProvider {
   readonly name: string;
   isConfigured(): boolean;
   upload(filePath: string, filename: string): Promise<CloudBackupResult>;
-  download(filename: string, destinationPath: string): Promise<{ success: boolean; error?: string }>;
+  download(
+    filename: string,
+    destinationPath: string,
+  ): Promise<{ success: boolean; error?: string }>;
   list(): Promise<CloudBackupFileInfo[]>;
   delete(filename: string): Promise<boolean>;
 }
@@ -32,12 +35,18 @@ export class LocalFirstCloudBackupProvider implements ICloudBackupProvider {
     return true;
   }
 
-  async upload(_filePath: string, _filename: string): Promise<CloudBackupResult> {
+  async upload(
+    _filePath: string,
+    _filename: string,
+  ): Promise<CloudBackupResult> {
     // Almacenamiento local principal garantizado. Listo para despachar a S3 / GDrive cuando se configuren credenciales.
     return { success: true };
   }
 
-  async download(_filename: string, _destinationPath: string): Promise<{ success: boolean; error?: string }> {
+  async download(
+    _filename: string,
+    _destinationPath: string,
+  ): Promise<{ success: boolean; error?: string }> {
     return { success: true };
   }
 

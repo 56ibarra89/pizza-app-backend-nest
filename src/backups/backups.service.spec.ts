@@ -71,9 +71,11 @@ describe('BackupsService restore safeguards (H03)', () => {
       type: 'SAFETY_SNAPSHOT',
       location: 'LOCAL',
     });
-    jest.spyOn(service, 'getBackupFilePath').mockImplementation((name) =>
-      name === 'empty.sql' ? emptySqlFile : validSqlFile,
-    );
+    jest
+      .spyOn(service, 'getBackupFilePath')
+      .mockImplementation((name) =>
+        name === 'empty.sql' ? emptySqlFile : validSqlFile,
+      );
 
     return service;
   }

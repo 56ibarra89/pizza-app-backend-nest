@@ -24,7 +24,7 @@ export class OrderNotificationsListener {
   async handleOrderCancelledEvent(event: OrderCancelledEvent) {
     try {
       const admins = await this.prisma.user.findMany({
-        where: { role: 'ADMIN', isActive: true, email: { not: null } }
+        where: { role: 'ADMIN', isActive: true, email: { not: null } },
       });
 
       if (admins.length > 0) {
@@ -50,16 +50,26 @@ export class OrderNotificationsListener {
 
         for (const admin of admins) {
           if (admin.email) {
-            this.mailerService.sendMail({
-              to: admin.email,
-              subject: `Alerta: Factura Anulada ${event.invoiceNum}`,
-              html: emailHtml,
-            }).catch(e => this.logger.error("Failed to send cancellation email to " + admin.email, e));
+            this.mailerService
+              .sendMail({
+                to: admin.email,
+                subject: `Alerta: Factura Anulada ${event.invoiceNum}`,
+                html: emailHtml,
+              })
+              .catch((e) =>
+                this.logger.error(
+                  'Failed to send cancellation email to ' + admin.email,
+                  e,
+                ),
+              );
           }
         }
       }
     } catch (error) {
-      this.logger.error(`Error enviando correo de cancelación de orden ${event.orderId}`, error);
+      this.logger.error(
+        `Error enviando correo de cancelación de orden ${event.orderId}`,
+        error,
+      );
     }
   }
 }

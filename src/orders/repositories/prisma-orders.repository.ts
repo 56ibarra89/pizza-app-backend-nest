@@ -557,6 +557,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       deliveredAt?: Date | null;
       deliverySlaAlertedAt?: Date | null;
       certificateSerials?: string[] | null;
+      allowFinalSplitSettlement?: boolean;
     },
     tx?: Prisma.TransactionClient,
   ): Promise<OrderEntity> {
@@ -783,8 +784,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       });
 
       const isFinalOrderStatus =
-        data.status === OrderStatusDto.paid ||
-        data.status === OrderStatusDto.cancelled;
+        !data.allowFinalSplitSettlement &&
+        (data.status === OrderStatusDto.paid ||
+          data.status === OrderStatusDto.cancelled);
 
       updateData.items = isFinalOrderStatus
         ? {

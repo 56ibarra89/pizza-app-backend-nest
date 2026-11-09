@@ -36,15 +36,13 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
         }),
       };
       const appConfigService = {
-        getByIdOrDefault: jest
-          .fn()
-          .mockImplementation((key: string) =>
-            key === 'packaging_sizes'
-              ? Promise.resolve({ data: { sizes: [] } })
-              : Promise.resolve({
-                  data: { isExonerated: false, taxes: [{ percentage: 15 }] },
-                }),
-          ),
+        getByIdOrDefault: jest.fn().mockImplementation((key: string) =>
+          key === 'packaging_sizes'
+            ? Promise.resolve({ data: { sizes: [] } })
+            : Promise.resolve({
+                data: { isExonerated: false, taxes: [{ percentage: 15 }] },
+              }),
+        ),
       };
       return new OrderPricingService(
         productsService as never,
@@ -383,23 +381,25 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
           findMany: jest.fn().mockResolvedValue([{ id: 10, extras: [] }]),
         },
         order: {
-          update: jest.fn().mockImplementation((args: typeof capturedUpdateArgs) => {
-            capturedUpdateArgs = args;
-            return Promise.resolve({
-              id: paidOrder.id,
-              status: 'PAID',
-              total: new Prisma.Decimal(115),
-              subTotal: new Prisma.Decimal(100),
-              discountAmount: new Prisma.Decimal(0),
-              taxAmount: new Prisma.Decimal(15),
-              timestamp: paidOrder.timestamp,
-              updatedAt: paidOrder.timestamp,
-              isSentToKitchen: true,
-              payments: [],
-              items: [],
-              linkedTables: [],
-            });
-          }),
+          update: jest
+            .fn()
+            .mockImplementation((args: typeof capturedUpdateArgs) => {
+              capturedUpdateArgs = args;
+              return Promise.resolve({
+                id: paidOrder.id,
+                status: 'PAID',
+                total: new Prisma.Decimal(115),
+                subTotal: new Prisma.Decimal(100),
+                discountAmount: new Prisma.Decimal(0),
+                taxAmount: new Prisma.Decimal(15),
+                timestamp: paidOrder.timestamp,
+                updatedAt: paidOrder.timestamp,
+                isSentToKitchen: true,
+                payments: [],
+                items: [],
+                linkedTables: [],
+              });
+            }),
         },
       };
       const repository = new PrismaOrdersRepository(prisma as never);
@@ -532,7 +532,15 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
         {} as never,
         {} as never,
         {} as never,
-        { $transaction: jest.fn(async (fn) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: baseDeliveryOrder.id }]) })) } as never,
+        {
+          $transaction: jest.fn(async (fn) =>
+            fn({
+              $queryRaw: jest
+                .fn()
+                .mockResolvedValue([{ id: baseDeliveryOrder.id }]),
+            }),
+          ),
+        } as never,
       );
       const motorizadoUser = {
         id: 'driver-other',
@@ -620,7 +628,12 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
           {
             orderId: 'order-1',
             dto: {},
-            totals: { subTotal: 100, discountAmount: 0, taxAmount: 15, total: 115 },
+            totals: {
+              subTotal: 100,
+              discountAmount: 0,
+              taxAmount: 15,
+              total: 115,
+            },
             expectedUpdatedAt: staleTime,
             promotion: { source: 'none' },
           },
@@ -651,12 +664,19 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
         update: jest.fn(),
       };
       const pricing = {
-        normalizeComboItems: jest.fn((items: unknown) => Promise.resolve(items)),
+        normalizeComboItems: jest.fn((items: unknown) =>
+          Promise.resolve(items),
+        ),
         resolvePromotion: jest.fn().mockResolvedValue({ source: 'none' }),
         calculateWithPrices: jest.fn((items: unknown) =>
           Promise.resolve({
             items,
-            totals: { subTotal: 100, discountAmount: 0, taxAmount: 15, total: 115 },
+            totals: {
+              subTotal: 100,
+              discountAmount: 0,
+              taxAmount: 15,
+              total: 115,
+            },
           }),
         ),
       };
@@ -665,7 +685,9 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
           cb({
             $queryRaw: jest
               .fn()
-              .mockResolvedValue([{ id: 'order-1', status: 'PAID', updatedAt: newerTime }]),
+              .mockResolvedValue([
+                { id: 'order-1', status: 'PAID', updatedAt: newerTime },
+              ]),
           }),
         ),
       };
@@ -706,7 +728,9 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
           cb({
             $queryRaw: jest
               .fn()
-              .mockResolvedValue([{ id: 'shift-1', status: ShiftStatus.CLOSED }]),
+              .mockResolvedValue([
+                { id: 'shift-1', status: ShiftStatus.CLOSED },
+              ]),
             cashExpense: { create: jest.fn() },
           }),
         ),
@@ -795,7 +819,12 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
         new InvoiceIssuingService().issue(txExpired as never, {
           orderId: 'order-1',
           dto: {},
-          totals: { subTotal: 100, discountAmount: 0, taxAmount: 15, total: 115 },
+          totals: {
+            subTotal: 100,
+            discountAmount: 0,
+            taxAmount: 15,
+            total: 115,
+          },
           promotion: { source: 'none' },
         }),
       ).rejects.toThrow('El correlativo está VENCIDO');
@@ -827,9 +856,9 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
         ),
       } as never);
 
-      await expect(
-        corrRepo.consumeNext(DocumentType.FACTURA),
-      ).rejects.toThrow(BadRequestException);
+      await expect(corrRepo.consumeNext(DocumentType.FACTURA)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('rejects inconsistent originalAmount/exchangeRate and prevents altering non-cash payments in split reconciliation (H15)', async () => {
@@ -888,7 +917,13 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
       // Card payment is never altered even for a 0.01 difference, and >0.01 is never altered even for cash
       expect(
         reconcileSplitPayments(
-          [{ method: PaymentMethodDto.TARJETA, amount: 100, originalAmount: 100 }],
+          [
+            {
+              method: PaymentMethodDto.TARJETA,
+              amount: 100,
+              originalAmount: 100,
+            },
+          ],
           100.01,
           100,
         ),
@@ -898,7 +933,13 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
 
       expect(
         reconcileSplitPayments(
-          [{ method: PaymentMethodDto.EFECTIVO, amount: 100, originalAmount: 100 }],
+          [
+            {
+              method: PaymentMethodDto.EFECTIVO,
+              amount: 100,
+              originalAmount: 100,
+            },
+          ],
           100.5,
           100,
         ),
@@ -919,15 +960,13 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
         }),
       };
       const appConfigService = {
-        getByIdOrDefault: jest
-          .fn()
-          .mockImplementation((key: string) =>
-            key === 'packaging_sizes'
-              ? Promise.resolve({ data: { sizes: [] } })
-              : Promise.resolve({
-                  data: { isExonerated: false, taxes: [{ percentage: 15 }] },
-                }),
-          ),
+        getByIdOrDefault: jest.fn().mockImplementation((key: string) =>
+          key === 'packaging_sizes'
+            ? Promise.resolve({ data: { sizes: [] } })
+            : Promise.resolve({
+                data: { isExonerated: false, taxes: [{ percentage: 15 }] },
+              }),
+        ),
       };
       const pricing = new OrderPricingService(
         productsService as never,

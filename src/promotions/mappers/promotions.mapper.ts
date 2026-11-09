@@ -6,14 +6,17 @@ import {
   PromoActiveStatus,
 } from '@prisma/client';
 import { Prisma } from '@prisma/client';
-import { getBusinessDayBounds } from '../../common/time/business-time.util';
+import {
+  getBusinessDateParts,
+  getBusinessDayBounds,
+} from '../../common/time/business-time.util';
 
 export type PromoStatusDto = 'Activo' | 'Inactivo';
 export type CuponStatusDto = 'Activo' | 'Inactivo' | 'Agotado' | 'Vencido';
 
 export function isCouponExpired(expiresDate: Date | null, now: Date): boolean {
   if (!expiresDate) return false;
-  const dateKey = expiresDate.toISOString().slice(0, 10);
+  const { ymd: dateKey } = getBusinessDateParts(expiresDate);
   const { endOfDay: endOfBusinessDay } = getBusinessDayBounds(dateKey);
   return endOfBusinessDay < now;
 }
@@ -176,7 +179,7 @@ export function hydrateCuponDerivedFields(data: {
   const expires =
     data.expiresDate === null
       ? 'Sin límite'
-      : data.expiresDate.toISOString().substring(0, 10);
+      : getBusinessDateParts(data.expiresDate).ymd;
 
   return { discount, usage, expires, status };
 }

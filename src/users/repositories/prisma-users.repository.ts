@@ -1,4 +1,9 @@
-import { ConflictException, HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { IUsersRepository } from '../interfaces/users.repository';
 import type { UserEntity } from '../entities/user.entity';
@@ -26,10 +31,32 @@ export class PrismaUsersRepository implements IUsersRepository {
 
   async getAvailableDrivers(date: string) {
     const day = new Date(`${date}T00:00:00Z`);
-    const weekday = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][day.getUTCDay()] as WeekDay;
+    const weekday = [
+      'SUNDAY',
+      'MONDAY',
+      'TUESDAY',
+      'WEDNESDAY',
+      'THURSDAY',
+      'FRIDAY',
+      'SATURDAY',
+    ][day.getUTCDay()] as WeekDay;
     const users = await this.prisma.user.findMany({
-      where: { isActive: true, role: 'MOTORIZADO', OR: [{ workDays: { has: weekday } }, { extraDays: { some: { date: day } } }] },
-      select: { id: true, username: true, firstName: true, lastName: true, role: true, isActive: true },
+      where: {
+        isActive: true,
+        role: 'MOTORIZADO',
+        OR: [
+          { workDays: { has: weekday } },
+          { extraDays: { some: { date: day } } },
+        ],
+      },
+      select: {
+        id: true,
+        username: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        isActive: true,
+      },
       orderBy: { username: 'asc' },
     });
     return users.map((user) => ({ ...user, role: fromDbRole(user.role) }));
@@ -195,25 +222,30 @@ export class PrismaUsersRepository implements IUsersRepository {
   }): Promise<UserEntity> {
     const created = await this.prisma.$transaction(async (tx) => {
       if (data.accessRoleId) {
-        const roles = await tx.$queryRaw<Array<{ isActive: boolean }>>`SELECT "isActive" FROM "AccessRole" WHERE id = ${data.accessRoleId} FOR UPDATE`;
-        if (!roles[0]?.isActive) throw new ConflictException('El rol seleccionado está inactivo o no existe');
+        const roles = await tx.$queryRaw<
+          Array<{ isActive: boolean }>
+        >`SELECT "isActive" FROM "AccessRole" WHERE id = ${data.accessRoleId} FOR UPDATE`;
+        if (!roles[0]?.isActive)
+          throw new ConflictException(
+            'El rol seleccionado está inactivo o no existe',
+          );
       }
       return tx.user.create({
-      data: {
-        username: data.username,
-        email: data.email,
-        firstName: data.firstName,
-        lastName: data.lastName,
-        pinHash: data.pinHash,
-        pinLookup: data.pinLookup,
-        passwordHash: data.passwordHash,
-        role: toDbRole(data.role),
-        accessRoleId: data.accessRoleId,
-        isActive: data.isActive,
-        workDays: data.workDays as any,
-      },
-      include: { extraDays: true, accessRole: true },
-    });
+        data: {
+          username: data.username,
+          email: data.email,
+          firstName: data.firstName,
+          lastName: data.lastName,
+          pinHash: data.pinHash,
+          pinLookup: data.pinLookup,
+          passwordHash: data.passwordHash,
+          role: toDbRole(data.role),
+          accessRoleId: data.accessRoleId,
+          isActive: data.isActive,
+          workDays: data.workDays as any,
+        },
+        include: { extraDays: true, accessRole: true },
+      });
     });
     return this.mapUser(created);
   }
@@ -241,46 +273,71 @@ export class PrismaUsersRepository implements IUsersRepository {
     },
   ): Promise<UserEntity> {
     const updated = await this.prisma.$transaction(async (tx) => {
-      if (data.role !== undefined || data.accessRoleId !== undefined || data.isActive !== undefined) {
+      if (
+        data.role !== undefined ||
+        data.accessRoleId !== undefined ||
+        data.isActive !== undefined
+      ) {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(19731021)::text`;
         if (data.accessRoleId) {
-          const roles = await tx.$queryRaw<Array<{ isActive: boolean }>>`SELECT "isActive" FROM "AccessRole" WHERE id = ${data.accessRoleId} FOR UPDATE`;
-          if (!roles[0]?.isActive) throw new ConflictException('El rol seleccionado está inactivo o no existe');
+          const roles = await tx.$queryRaw<
+            Array<{ isActive: boolean }>
+          >`SELECT "isActive" FROM "AccessRole" WHERE id = ${data.accessRoleId} FOR UPDATE`;
+          if (!roles[0]?.isActive)
+            throw new ConflictException(
+              'El rol seleccionado está inactivo o no existe',
+            );
         }
-        const current = await tx.user.findUnique({ where: { id }, include: { accessRole: true } });
-        const nextAccessRole = data.accessRoleId ? await tx.accessRole.findUnique({ where: { id: data.accessRoleId } }) : current?.accessRole;
-        const wasAdmin = current?.isActive && (current.role === 'ADMIN' || current.accessRole?.code === 'admin');
-        const remainsAdmin = data.isActive !== false &&
-          (data.role ? toDbRole(data.role) === 'ADMIN' : current?.role === 'ADMIN') &&
+        const current = await tx.user.findUnique({
+          where: { id },
+          include: { accessRole: true },
+        });
+        const nextAccessRole = data.accessRoleId
+          ? await tx.accessRole.findUnique({ where: { id: data.accessRoleId } })
+          : current?.accessRole;
+        const wasAdmin =
+          current?.isActive &&
+          (current.role === 'ADMIN' || current.accessRole?.code === 'admin');
+        const remainsAdmin =
+          data.isActive !== false &&
+          (data.role
+            ? toDbRole(data.role) === 'ADMIN'
+            : current?.role === 'ADMIN') &&
           (!data.accessRoleId || nextAccessRole?.baseRole === 'ADMIN');
         if (wasAdmin && !remainsAdmin) {
-          const count = await tx.user.count({ where: { isActive: true, role: 'ADMIN' } });
-          if (count <= 1) throw new ConflictException('No se puede desactivar o cambiar el rol del último administrador activo.');
+          const count = await tx.user.count({
+            where: { isActive: true, role: 'ADMIN' },
+          });
+          if (count <= 1)
+            throw new ConflictException(
+              'No se puede desactivar o cambiar el rol del último administrador activo.',
+            );
         }
       }
       return tx.user.update({
-      where: { id },
-      data: {
-        username: data.username,
-        email: data.email,
-        firstName: data.firstName,
-        lastName: data.lastName,
-        pinHash: data.pinHash,
-        pinLookup: data.pinLookup,
-        passwordHash: data.passwordHash,
-        role: data.role ? toDbRole(data.role) : undefined,
-        accessRoleId: data.accessRoleId,
-        isActive: data.isActive,
-        failedLoginAttempts: data.failedLoginAttempts,
-        lockoutLevel: data.lockoutLevel,
-        lockedUntil: data.lockedUntil,
-        lastVisit: data.lastVisit,
-        themePreference: data.themePreference,
-        tokenVersion: data.tokenVersion === undefined ? undefined : { increment: 1 },
-        workDays: data.workDays as any,
-      },
-      include: { extraDays: true, accessRole: true },
-    });
+        where: { id },
+        data: {
+          username: data.username,
+          email: data.email,
+          firstName: data.firstName,
+          lastName: data.lastName,
+          pinHash: data.pinHash,
+          pinLookup: data.pinLookup,
+          passwordHash: data.passwordHash,
+          role: data.role ? toDbRole(data.role) : undefined,
+          accessRoleId: data.accessRoleId,
+          isActive: data.isActive,
+          failedLoginAttempts: data.failedLoginAttempts,
+          lockoutLevel: data.lockoutLevel,
+          lockedUntil: data.lockedUntil,
+          lastVisit: data.lastVisit,
+          themePreference: data.themePreference,
+          tokenVersion:
+            data.tokenVersion === undefined ? undefined : { increment: 1 },
+          workDays: data.workDays as any,
+        },
+        include: { extraDays: true, accessRole: true },
+      });
     });
 
     return this.mapUser(updated);

@@ -62,8 +62,8 @@ describe('UsersService security boundaries', () => {
     };
     const service = new UsersService(
       repo as any,
-      hasher as any,
-      lockoutService as any,
+      hasher,
+      lockoutService,
       {} as any,
       {} as any,
       jwtService as any,

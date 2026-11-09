@@ -27,7 +27,10 @@ import type { OrderEntity } from '../entities/order.entity';
 import { requiresKitchenPreparation } from '../validators/order-item-kind';
 import { ListOrderHistoryQueryDto } from '../dto/list-order-history-query.dto';
 import { OrderStatusDto } from '../dto/order-status.dto';
-import { getBusinessDayBounds } from '../../common/time/business-time.util';
+import {
+  getBusinessDateParts,
+  getBusinessDayBounds,
+} from '../../common/time/business-time.util';
 
 @ApiTags('orders')
 @Controller('orders')
@@ -139,8 +142,7 @@ export class OrdersController {
     const responses = orders.map(toOrderResponseDto);
     if (user?.role === UserRoleDto.motorizado) {
       return responses.filter(
-        (order) =>
-          order.orderType === 'delivery' && order.driverId === user.id,
+        (order) => order.orderType === 'delivery' && order.driverId === user.id,
       );
     }
     if (user?.role !== UserRoleDto.cocinero) return responses;
@@ -263,9 +265,20 @@ export class OrdersController {
     @Query('endDate') endDate?: string,
   ) {
     const now = new Date();
-    const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const start = startDate ? new Date(startDate) : defaultStart;
-    const end = endDate ? new Date(endDate) : now;
+    const { year, month } = getBusinessDateParts(now);
+    const defaultStart = getBusinessDayBounds(
+      `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-01`,
+    ).startOfDay;
+    const start = startDate
+      ? /^\d{4}-\d{2}-\d{2}$/.test(startDate.trim())
+        ? getBusinessDayBounds(startDate.trim()).startOfDay
+        : new Date(startDate)
+      : defaultStart;
+    const end = endDate
+      ? /^\d{4}-\d{2}-\d{2}$/.test(endDate.trim())
+        ? getBusinessDayBounds(endDate.trim()).endOfDay
+        : new Date(endDate)
+      : now;
     return this.orders.getCancellationMetrics(start, end);
   }
 
@@ -277,11 +290,21 @@ export class OrdersController {
     @Query('endDate') endDate?: string,
   ) {
     const now = new Date();
+    const { year, month } = getBusinessDateParts(now);
+    const defaultStart = getBusinessDayBounds(
+      `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-01`,
+    ).startOfDay;
     return this.orders.getPaymentMetrics(
       startDate
-        ? new Date(startDate)
-        : new Date(now.getFullYear(), now.getMonth(), 1),
-      endDate ? new Date(endDate) : now,
+        ? /^\d{4}-\d{2}-\d{2}$/.test(startDate.trim())
+          ? getBusinessDayBounds(startDate.trim()).startOfDay
+          : new Date(startDate)
+        : defaultStart,
+      endDate
+        ? /^\d{4}-\d{2}-\d{2}$/.test(endDate.trim())
+          ? getBusinessDayBounds(endDate.trim()).endOfDay
+          : new Date(endDate)
+        : now,
     );
   }
 

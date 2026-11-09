@@ -17,7 +17,9 @@ describe('AuthController session revocation', () => {
 
   it('delegates refresh token requests to UsersService', async () => {
     const users = {
-      refreshToken: jest.fn(() => Promise.resolve({ access_token: 'new-token' })),
+      refreshToken: jest.fn(() =>
+        Promise.resolve({ access_token: 'new-token' }),
+      ),
     };
     const controller = new AuthController(users as any);
 
@@ -62,7 +64,9 @@ describe('AuthController session revocation', () => {
       { refresh_token: 'body.refresh.token' },
     );
 
-    expect(users.refreshSessionToken).toHaveBeenCalledWith('body.refresh.token');
+    expect(users.refreshSessionToken).toHaveBeenCalledWith(
+      'body.refresh.token',
+    );
     expect(resultFromBody).toEqual({
       access_token: 'fresh-access-token',
       refresh_token: 'fresh-refresh-token',

@@ -21,7 +21,12 @@ import type { AuthenticatedUser } from '../../common/interfaces/authenticated-us
 @ApiTags('cash-expenses')
 @Controller('cash-expenses')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRoleDto.admin, UserRoleDto.cajero_principal, UserRoleDto.cajero)
+@Roles(
+  UserRoleDto.admin,
+  UserRoleDto.cajero_principal,
+  UserRoleDto.cajero,
+  UserRoleDto.despachador,
+)
 @Permissions('cash.expenses')
 export class CashExpensesController {
   constructor(private readonly expensesService: CashExpensesService) {}

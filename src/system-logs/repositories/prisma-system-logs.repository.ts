@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { LogLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { getBusinessDayBounds } from '../../common/time/business-time.util';
 import type {
   ISystemLogsRepository,
   SystemLogCreateParams,
@@ -92,18 +93,33 @@ export class PrismaSystemLogsRepository implements ISystemLogsRepository {
     if (params.startDate || params.endDate) {
       const timestamp: Prisma.DateTimeFilter = {};
       if (params.startDate) {
-        const start = new Date(params.startDate);
-        if (!isNaN(start.getTime())) {
-          timestamp.gte = start;
+        const trimmedStart = params.startDate.trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(trimmedStart)) {
+          try {
+            timestamp.gte = getBusinessDayBounds(trimmedStart).startOfDay;
+          } catch {
+            // Ignorar si formato es inválido
+          }
+        } else {
+          const start = new Date(trimmedStart);
+          if (!isNaN(start.getTime())) {
+            timestamp.gte = start;
+          }
         }
       }
       if (params.endDate) {
-        const end = new Date(params.endDate);
-        if (!isNaN(end.getTime())) {
-          if (params.endDate.length <= 10) {
-            end.setHours(23, 59, 59, 999);
+        const trimmedEnd = params.endDate.trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(trimmedEnd)) {
+          try {
+            timestamp.lte = getBusinessDayBounds(trimmedEnd).endOfDay;
+          } catch {
+            // Ignorar si formato es inválido
           }
-          timestamp.lte = end;
+        } else {
+          const end = new Date(trimmedEnd);
+          if (!isNaN(end.getTime())) {
+            timestamp.lte = end;
+          }
         }
       }
       where.timestamp = timestamp;

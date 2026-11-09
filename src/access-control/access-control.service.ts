@@ -164,8 +164,13 @@ export class AccessControlService implements OnModuleInit {
 
     await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "AccessRole" WHERE id = ${id} FOR UPDATE`;
-      if (dto.isActive === false && await tx.user.count({ where: { accessRoleId: id } }) > 0) {
-        throw new ConflictException('Reasigna los usuarios de este rol antes de desactivarlo.');
+      if (
+        dto.isActive === false &&
+        (await tx.user.count({ where: { accessRoleId: id } })) > 0
+      ) {
+        throw new ConflictException(
+          'Reasigna los usuarios de este rol antes de desactivarlo.',
+        );
       }
       await tx.accessRole.update({
         where: { id },
@@ -235,16 +240,21 @@ export class AccessControlService implements OnModuleInit {
       );
     }
     const user = await this.prisma.$transaction(async (tx) => {
-      const roles = await tx.$queryRaw<Array<{ isActive: boolean }>>`SELECT "isActive" FROM "AccessRole" WHERE id = ${accessRoleId} FOR UPDATE`;
-      if (!roles[0]?.isActive) throw new BadRequestException('El rol seleccionado está inactivo o no existe');
+      const roles = await tx.$queryRaw<
+        Array<{ isActive: boolean }>
+      >`SELECT "isActive" FROM "AccessRole" WHERE id = ${accessRoleId} FOR UPDATE`;
+      if (!roles[0]?.isActive)
+        throw new BadRequestException(
+          'El rol seleccionado está inactivo o no existe',
+        );
       return tx.user.update({
-      where: { id: userId },
-      data: {
-        accessRoleId: role.id,
-        role: role.baseRole,
-        tokenVersion: { increment: 1 },
-      },
-    });
+        where: { id: userId },
+        data: {
+          accessRoleId: role.id,
+          role: role.baseRole,
+          tokenVersion: { increment: 1 },
+        },
+      });
     });
     if (actor) {
       await this.audit(actor, 'USER_ACCESS_ROLE_ASSIGNED', {
@@ -301,6 +311,8 @@ export class AccessControlService implements OnModuleInit {
       'kitchen.configure': ['kitchen.read'],
       'delivery.manage': ['delivery.read'],
       'delivery.own': ['delivery.read'],
+      'cash.open': ['cash.status', 'cash.read'],
+      'cash.close': ['cash.status', 'cash.read'],
       'cash.configure': ['cash.read'],
       'reports.export': ['reports.read'],
       'customers.manage': ['customers.read'],

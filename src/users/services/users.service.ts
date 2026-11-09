@@ -104,7 +104,9 @@ export class UsersService {
   getAll() {
     return this.repo.getAll();
   }
-  getAvailableDrivers(date: string) { return this.repo.getAvailableDrivers(date); }
+  getAvailableDrivers(date: string) {
+    return this.repo.getAvailableDrivers(date);
+  }
 
   async getById(id: string) {
     const found = await this.repo.findById(id);
@@ -526,9 +528,7 @@ export class UsersService {
     }
 
     if (!isSessionRefreshJwtPayload(payload)) {
-      throw new UnauthorizedException(
-        'Token no válido para renovar la sesión',
-      );
+      throw new UnauthorizedException('Token no válido para renovar la sesión');
     }
 
     const nowMs = Date.now();

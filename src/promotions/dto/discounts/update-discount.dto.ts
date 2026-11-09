@@ -1,4 +1,13 @@
-import { IsArray, IsIn, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, Max, ValidateIf } from 'class-validator';
+import {
+  IsArray,
+  IsIn,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsPositive,
+  IsString,
+  ValidateBy,
+} from 'class-validator';
 import type { PromoStatusDto } from '../../mappers/promotions.mapper';
 
 export class UpdateDiscountDto {
@@ -15,8 +24,15 @@ export class UpdateDiscountDto {
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 4 })
   @IsPositive()
-  @ValidateIf((o: UpdateDiscountDto) => o.type === 'Porcentaje')
-  @Max(100)
+  @ValidateBy({
+    name: 'maxPercentageUpdateDiscount',
+    validator: {
+      validate: (value: unknown, args) =>
+        (args?.object as UpdateDiscountDto)?.type !== 'Porcentaje' ||
+        (typeof value === 'number' && value <= 100),
+      defaultMessage: () => 'El porcentaje no puede superar 100',
+    },
+  })
   value?: number;
 
   @IsOptional()
@@ -34,4 +50,3 @@ export class UpdateDiscountDto {
   @IsString({ each: true })
   categoryIds?: string[];
 }
-

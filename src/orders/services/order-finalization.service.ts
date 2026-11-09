@@ -71,23 +71,28 @@ export class OrderFinalizationService {
     const payments = dto.payments ?? order.payments;
     assertPaymentsMatchTotal(totals.total, payments);
 
-    await this.prisma.$transaction((tx) =>
-      this.invoiceIssuing.issue(tx, {
-        orderId: order.id,
-        dto,
-        totals,
-        items: pricedItems,
-        expectedUpdatedAt: order.updatedAt,
-        promotion,
-        cashierId: typeof user === 'string' ? undefined : user?.id,
-        cashierSnapshotName:
-          typeof user === 'string'
-            ? user === 'system'
-              ? undefined
-              : user
-            : user?.username,
-      }),
-    );
+    try {
+      await this.prisma.$transaction((tx) =>
+        this.invoiceIssuing.issue(tx, {
+          orderId: order.id,
+          dto,
+          totals,
+          items: pricedItems,
+          expectedUpdatedAt: order.updatedAt,
+          promotion,
+          cashierId: typeof user === 'string' ? undefined : user?.id,
+          cashierSnapshotName:
+            typeof user === 'string'
+              ? user === 'system'
+                ? undefined
+                : user
+              : user?.username,
+        }),
+      );
+    } catch (error) {
+      await this.persistTerminalCorrelativoStatusIfNeeded(error);
+      throw error;
+    }
   }
 
   async issueInTransaction(
@@ -101,5 +106,37 @@ export class OrderFinalizationService {
     },
   ): Promise<void> {
     await this.invoiceIssuing.issue(tx, params);
+  }
+
+  async persistTerminalCorrelativoStatusIfNeeded(
+    error: unknown,
+  ): Promise<void> {
+    if (
+      !(error instanceof BadRequestException) ||
+      !this.prisma.correlativo?.updateMany
+    ) {
+      return;
+    }
+    if (error.message === 'El correlativo está VENCIDO') {
+      await this.prisma.correlativo.updateMany({
+        where: {
+          documentType: 'FACTURA',
+          status: 'ACTIVO',
+          expirationDate: { lt: new Date() },
+        },
+        data: { status: 'VENCIDO' },
+      });
+    } else if (error.message === 'El correlativo está AGOTADO') {
+      const active = await this.prisma.correlativo.findFirst?.({
+        where: { documentType: 'FACTURA', status: 'ACTIVO' },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (active && active.currentNumber > active.endNumber) {
+        await this.prisma.correlativo.update({
+          where: { id: active.id },
+          data: { status: 'AGOTADO' },
+        });
+      }
+    }
   }
 }

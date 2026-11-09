@@ -24,6 +24,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { Permissions } from '../../common';
 import { AvailableDriversQueryDto } from '../dto/available-drivers-query.dto';
+import { getBusinessDateParts } from '../../common/time/business-time.util';
 
 const AUTHENTICATED_ROLES = [
   UserRoleDto.admin,
@@ -97,8 +98,7 @@ export class UsersController {
   )
   async getDeliveryStats(@Query('date') date: string) {
     if (!date) {
-      const now = new Date();
-      date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      date = getBusinessDateParts(new Date()).ymd;
     }
     return this.users.getDeliveryStats(date);
   }

@@ -73,23 +73,20 @@ describe('OrdersController delivery and kitchen access', () => {
     UserRoleDto.cajero,
     UserRoleDto.cajero_principal,
     UserRoleDto.despachador,
-  ])(
-    'permite al rol %s consultar al motorizado solicitado',
-    async (role) => {
-      const expectedBounds = getBusinessDayBounds('2026-10-11');
-      await controller.getDriverTodayOrders(
-        'motorizado-solicitado',
-        user(`usuario-${role}`, role),
-        '2026-10-11',
-      );
+  ])('permite al rol %s consultar al motorizado solicitado', async (role) => {
+    const expectedBounds = getBusinessDayBounds('2026-10-11');
+    await controller.getDriverTodayOrders(
+      'motorizado-solicitado',
+      user(`usuario-${role}`, role),
+      '2026-10-11',
+    );
 
-      expect(listByDriverAndDate).toHaveBeenCalledWith(
-        'motorizado-solicitado',
-        expectedBounds.startOfDay,
-        expectedBounds.endOfDay,
-      );
-    },
-  );
+    expect(listByDriverAndDate).toHaveBeenCalledWith(
+      'motorizado-solicitado',
+      expectedBounds.startOfDay,
+      expectedBounds.endOfDay,
+    );
+  });
 
   it('delega filtros de motorizado y cocina a SQL en listTodayOrActive (H23)', async () => {
     const getAssignedKitchenIdForDate = jest

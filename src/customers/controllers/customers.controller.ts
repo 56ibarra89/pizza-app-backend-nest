@@ -27,8 +27,15 @@ export class CustomersController {
 
   @Get('page')
   async getPage(@Query() query: ListCustomersDto) {
-    const result = await this.customers.getPage(query.page, query.limit, query.query);
-    return { items: result.items.map(toCustomerResponseDto), total: result.total };
+    const result = await this.customers.getPage(
+      query.page,
+      query.limit,
+      query.query,
+    );
+    return {
+      items: result.items.map(toCustomerResponseDto),
+      total: result.total,
+    };
   }
 
   @Get()

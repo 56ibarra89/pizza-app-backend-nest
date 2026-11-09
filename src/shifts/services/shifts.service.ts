@@ -26,7 +26,7 @@ export class ShiftsService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  async getActive(user?: AuthenticatedUser) {
+  async getActive(_user?: AuthenticatedUser) {
     return this.repo.findActive();
   }
 
@@ -46,7 +46,9 @@ export class ShiftsService {
   async open(dto: OpenShiftDto, user: AuthenticatedUser) {
     const existing = await this.repo.findActive();
     if (existing) {
-      throw new BadRequestException('Ya existe un turno de caja abierto en el sistema.');
+      throw new BadRequestException(
+        'Ya existe un turno de caja abierto en el sistema.',
+      );
     }
 
     const opened = await this.repo.open({

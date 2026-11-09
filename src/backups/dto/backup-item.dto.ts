@@ -1,6 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-export type BackupType = 'AUTOMATIC' | 'MANUAL' | 'SHIFT_CLOSE' | 'SAFETY_SNAPSHOT';
+export type BackupType =
+  | 'AUTOMATIC'
+  | 'MANUAL'
+  | 'SHIFT_CLOSE'
+  | 'SAFETY_SNAPSHOT';
 export type BackupLocation = 'LOCAL' | 'CLOUD' | 'SYNCED';
 
 export class BackupItemDto {
@@ -16,7 +20,9 @@ export class BackupItemDto {
   @ApiProperty()
   createdAt: Date;
 
-  @ApiProperty({ enum: ['AUTOMATIC', 'MANUAL', 'SHIFT_CLOSE', 'SAFETY_SNAPSHOT'] })
+  @ApiProperty({
+    enum: ['AUTOMATIC', 'MANUAL', 'SHIFT_CLOSE', 'SAFETY_SNAPSHOT'],
+  })
   type: BackupType;
 
   @ApiProperty({ enum: ['LOCAL', 'CLOUD', 'SYNCED'] })

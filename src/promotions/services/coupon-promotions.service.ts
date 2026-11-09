@@ -44,6 +44,7 @@ export class CouponPromotionsService {
   }
 
   async create(dto: CreateCuponDto) {
+    this.validateCouponDiscountValue(dto.discountType, dto.discountValue);
     const created = await this.repository.create({
       code: this.normalizeCode(dto.code),
       discountType: toDbDiscountType(dto.discountType),
@@ -60,6 +61,14 @@ export class CouponPromotionsService {
   async update(id: number, dto: UpdateCuponDto) {
     const existing = await this.repository.findById(id);
     if (!existing) throw new NotFoundException('Cupón no encontrado');
+    const effectiveDiscountType =
+      dto.discountType ?? fromDbDiscountType(existing.discountType);
+    const effectiveDiscountValue =
+      dto.discountValue ?? decimalToNumber(existing.discountValue);
+    this.validateCouponDiscountValue(
+      effectiveDiscountType,
+      effectiveDiscountValue,
+    );
 
     const updated = await this.repository.update(id, {
       ...(dto.code !== undefined ? { code: this.normalizeCode(dto.code) } : {}),
@@ -112,6 +121,20 @@ export class CouponPromotionsService {
         discountValue: mappedCoupon.discountValue,
       },
     };
+  }
+
+  private validateCouponDiscountValue(
+    discountType: 'porcentaje' | 'monto_fijo',
+    discountValue: number,
+  ): void {
+    if (!Number.isFinite(discountValue) || discountValue <= 0) {
+      throw new BadRequestException('Valor de descuento inválido');
+    }
+    if (discountType === 'porcentaje' && discountValue > 100) {
+      throw new BadRequestException(
+        'El porcentaje de descuento no puede superar 100',
+      );
+    }
   }
 
   private normalizeCode(code: string): string {

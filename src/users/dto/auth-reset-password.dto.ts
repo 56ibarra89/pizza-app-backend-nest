@@ -8,8 +8,12 @@ export class AuthResetPasswordDto {
 
   @IsString()
   @IsNotEmpty({ message: 'La nueva contraseña es obligatoria' })
-  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,128}$/, {
-    message: 'La contraseña debe tener de 8 a 128 caracteres, una mayúscula, una minúscula, un número y un carácter especial (@$!%*?&)'
-  })
+  @Matches(
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,128}$/,
+    {
+      message:
+        'La contraseña debe tener de 8 a 128 caracteres, una mayúscula, una minúscula, un número y un carácter especial (@$!%*?&)',
+    },
+  )
   newPassword: string;
 }

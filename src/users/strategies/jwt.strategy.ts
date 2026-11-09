@@ -74,7 +74,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       accessRoleId: user.accessRole?.id,
       accessRoleName: user.accessRole?.name,
       permissions:
-        user.accessRole?.permissions.map((entry) => entry.permission.code) ?? [],
+        user.accessRole?.permissions.map((entry) => entry.permission.code) ??
+        [],
       tokenVersion: user.tokenVersion,
       tokenExpiresAtMs:
         typeof payload.exp === 'number' ? payload.exp * 1000 : undefined,

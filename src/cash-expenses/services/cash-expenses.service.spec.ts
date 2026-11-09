@@ -49,7 +49,7 @@ describe('CashExpensesService', () => {
     });
     repo.getTotalExpensesByShiftId.mockResolvedValue(0);
     service = new CashExpensesService(
-      repo as any,
+      repo,
       shiftsService as any,
       configService as any,
       usersRepository as any,

@@ -1,5 +1,13 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 
 export class CertificadoItemDto {
   @IsString()
@@ -35,4 +43,3 @@ export class CreateCertificadoDto {
   @IsString()
   description?: string;
 }
-

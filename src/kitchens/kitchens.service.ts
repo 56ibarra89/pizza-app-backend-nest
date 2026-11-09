@@ -1,8 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { CreateKitchenDto } from './dto/create-kitchen.dto';
 import { UpdateKitchenDto } from './dto/update-kitchen.dto';
 import { PrismaService } from '../prisma/prisma.service';
-import type { WeekDay } from '@prisma/client';
+import type { Prisma, WeekDay } from '@prisma/client';
 import { getBusinessDateParts } from '../common/time/business-time.util';
 
 @Injectable()
@@ -89,24 +93,48 @@ export class KitchensService {
     userId: string,
     assignments: { dayOfWeek: WeekDay; kitchenId: string | null }[],
   ) {
-    // Delete existing assignments for the given user
-    await this.prisma.cookKitchenAssignment.deleteMany({
-      where: { userId },
-    });
-
-    // Filter out null kitchenIds
-    const validAssignments = assignments.filter((a) => a.kitchenId !== null);
-
-    if (validAssignments.length > 0) {
-      await this.prisma.cookKitchenAssignment.createMany({
-        data: validAssignments.map((a) => ({
-          userId,
-          dayOfWeek: a.dayOfWeek,
-          kitchenId: a.kitchenId as string,
-        })),
-      });
+    if (!Array.isArray(assignments)) {
+      throw new BadRequestException(
+        'El listado de asignaciones de cocina no es válido.',
+      );
     }
 
-    return { success: true };
+    const deduplicatedByDay = new Map<WeekDay, string>();
+    for (const assignment of assignments) {
+      if (!assignment?.dayOfWeek) continue;
+      if (assignment.kitchenId) {
+        deduplicatedByDay.set(assignment.dayOfWeek, assignment.kitchenId);
+      } else {
+        deduplicatedByDay.delete(assignment.dayOfWeek);
+      }
+    }
+
+    const validAssignments = Array.from(deduplicatedByDay.entries()).map(
+      ([dayOfWeek, kitchenId]) => ({
+        userId,
+        dayOfWeek,
+        kitchenId,
+      }),
+    );
+
+    const runUpdate = async (tx: Prisma.TransactionClient) => {
+      await tx.cookKitchenAssignment.deleteMany({
+        where: { userId },
+      });
+
+      if (validAssignments.length > 0) {
+        await tx.cookKitchenAssignment.createMany({
+          data: validAssignments,
+        });
+      }
+
+      return { success: true };
+    };
+
+    if (typeof this.prisma.$transaction === 'function') {
+      return this.prisma.$transaction(runUpdate);
+    }
+
+    return runUpdate(this.prisma);
   }
 }

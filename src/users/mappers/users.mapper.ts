@@ -18,6 +18,9 @@ export function toUserResponseDto(entity: UserEntity): UserResponseDto {
     lastVisit: entity.lastVisit ? entity.lastVisit.toISOString() : undefined,
     themePreference: entity.themePreference,
     workDays: entity.workDays,
-    extraDays: entity.extraDays?.map(ed => ({ date: ed.date.toISOString(), notes: ed.notes })),
+    extraDays: entity.extraDays?.map((ed) => ({
+      date: ed.date.toISOString(),
+      notes: ed.notes,
+    })),
   };
 }

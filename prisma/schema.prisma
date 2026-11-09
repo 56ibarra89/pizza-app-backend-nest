@@ -310,6 +310,9 @@ model Order {
   @@index([paidAt])
   @@index([parentOrderId])
   @@index([invoiceIssuedNumber])
+  @@index([status, paidAt])
+  @@index([shiftId, status])
+  @@index([orderType, status])
 }
 
 /// Registro atómico de cada pago recibido en una orden.
@@ -381,6 +384,7 @@ model OrderItem {
   @@index([isSentToKitchen])
   @@index([kitchenStatus])
   @@index([sentAt])
+  @@index([kitchenId])
 }
 
 model OrderItemExtra {

@@ -70,12 +70,8 @@ import {
 import {
   DEFAULT_PAYMENT_METHODS_CONFIG,
   PAYMENT_METHODS_CONFIG_ID,
-  isValidPosReference,
-  normalizePosReference,
   normalizePaymentMethodsConfig,
-  type PaymentMethodConfig,
 } from '../../common/payment-methods.config';
-import { PaymentMethodDto } from '../dto/payment-method.dto';
 import type { OrderPaymentDto } from '../dto/order-payment.dto';
 
 @Injectable()
@@ -638,10 +634,13 @@ export class OrdersService {
               SELECT status FROM "Shift" WHERE id = ${existing.shiftId} FOR UPDATE
             `;
             if (shifts[0]?.status !== 'OPEN') {
-              throw new ConflictException('El turno fue cerrado mientras se procesaba la anulación.');
+              throw new ConflictException(
+                'El turno fue cerrado mientras se procesaba la anulación.',
+              );
             }
           }
-          if (!shouldReversePaidBenefits) return this.repo.update(id, updateData, tx);
+          if (!shouldReversePaidBenefits)
+            return this.repo.update(id, updateData, tx);
           if (splitRestore) {
             await this.lockUnchangedSplitParent(tx, splitRestore.parent, true);
             restoredSplitParent = await this.repo.update(
@@ -710,41 +709,47 @@ export class OrdersService {
 
   async startDelivery(id: string, user: AuthenticatedUser) {
     const updated = await this.prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${id} FOR UPDATE`;
-    const existing = await this.repo.findById(id, tx);
-    if (!existing) throw new NotFoundException('Orden no encontrada');
-    if (existing.status === OrderStatusDto.cancelled) {
-      throw new BadRequestException('No se puede iniciar la entrega de una orden anulada');
-    }
-    if (existing.orderType !== OrderTypeDto.delivery) {
-      throw new BadRequestException('La orden no corresponde a un delivery.');
-    }
-    if (
-      user.role === UserRoleDto.motorizado &&
-      (!existing.driverId || existing.driverId !== user.id)
-    ) {
-      throw new ForbiddenException(
-        'Solo puedes iniciar la entrega de pedidos asignados a tu usuario.',
+      await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${id} FOR UPDATE`;
+      const existing = await this.repo.findById(id, tx);
+      if (!existing) throw new NotFoundException('Orden no encontrada');
+      if (existing.status === OrderStatusDto.cancelled) {
+        throw new BadRequestException(
+          'No se puede iniciar la entrega de una orden anulada',
+        );
+      }
+      if (existing.orderType !== OrderTypeDto.delivery) {
+        throw new BadRequestException('La orden no corresponde a un delivery.');
+      }
+      if (
+        user.role === UserRoleDto.motorizado &&
+        (!existing.driverId || existing.driverId !== user.id)
+      ) {
+        throw new ForbiddenException(
+          'Solo puedes iniciar la entrega de pedidos asignados a tu usuario.',
+        );
+      }
+      if (existing.deliveryStartedAt) return existing;
+      const hasKitchenItems = existing.items.some(
+        (item) => requiresKitchenPreparation(item) && item.isSentToKitchen,
       );
-    }
-    if (existing.deliveryStartedAt) return existing;
-    const hasKitchenItems = existing.items.some(
-      (item) => requiresKitchenPreparation(item) && item.isSentToKitchen,
-    );
-    if (
-      hasKitchenItems &&
-      existing.status !== OrderStatusDto.ready &&
-      !this.isReadyForPickup(existing.items)
-    ) {
-      throw new BadRequestException(
-        'El pedido aún no está listo para iniciar la ruta.',
-      );
-    }
+      if (
+        hasKitchenItems &&
+        existing.status !== OrderStatusDto.ready &&
+        !this.isReadyForPickup(existing.items)
+      ) {
+        throw new BadRequestException(
+          'El pedido aún no está listo para iniciar la ruta.',
+        );
+      }
 
-    return this.repo.update(id, {
-      deliveryStartedAt: new Date(),
-      deliverySlaAlertedAt: null,
-    }, tx);
+      return this.repo.update(
+        id,
+        {
+          deliveryStartedAt: new Date(),
+          deliverySlaAlertedAt: null,
+        },
+        tx,
+      );
     });
     this.publishOrder(updated, 'updated');
     return updated;
@@ -842,6 +847,7 @@ export class OrdersService {
         cancelledAt: { gte: startDate, lte: endDate },
       },
       orderBy: { cancelledAt: 'desc' },
+      take: 5000,
       select: {
         id: true,
         invoiceNumber: true,
@@ -951,6 +957,7 @@ export class OrdersService {
           ],
         },
       },
+      take: 5000,
       select: {
         method: true,
         amount: true,
@@ -1347,7 +1354,9 @@ export class OrdersService {
       throw new ForbiddenException('Los cocineros no pueden facturar órdenes.');
     }
     if (user?.role === UserRoleDto.motorizado) {
-      throw new ForbiddenException('Los motorizados no pueden dividir cuentas.');
+      throw new ForbiddenException(
+        'Los motorizados no pueden dividir cuentas.',
+      );
     }
 
     const existing = await this.getById(id);
@@ -1684,11 +1693,17 @@ export class OrdersService {
     const { paidOrder, parentOrder } = await this.prisma.$transaction(
       async (tx) => {
         await this.lockUnchangedSplitParent(tx, existing);
-        await this.assertPendingBenefitsAvailable({
-          cuponId: childCuponId !== undefined && childCuponId !== existing.cuponId ? childCuponId : undefined,
-          certificateSerials: childCertificateSerials,
-          excludeOrderId: existing.id,
-        }, tx);
+        await this.assertPendingBenefitsAvailable(
+          {
+            cuponId:
+              childCuponId !== undefined && childCuponId !== existing.cuponId
+                ? childCuponId
+                : undefined,
+            certificateSerials: childCertificateSerials,
+            excludeOrderId: existing.id,
+          },
+          tx,
+        );
         const sharesParentCoupon =
           childCuponId !== undefined && childCuponId === parentCuponId;
         const recordedSiblingCount = sharesParentCoupon
@@ -1720,6 +1735,7 @@ export class OrdersService {
                 : null,
             status: nextParentStatus,
             paidAt: settlesSplit ? new Date(nowMs) : undefined,
+            allowFinalSplitSettlement: settlesSplit,
             isSentToKitchen: finalParentItems.some(
               (item) =>
                 requiresKitchenPreparation(item) && item.isSentToKitchen,
@@ -1869,11 +1885,15 @@ export class OrdersService {
 
     const finalized = await this.prisma.$transaction(async (tx) => {
       await this.lockUnchangedSplitParent(tx, existing);
-      await this.assertPendingBenefitsAvailable({
-        cuponId: promotion.source === 'coupon' ? promotion.cuponId : undefined,
-        certificateSerials,
-        excludeOrderId: existing.id,
-      }, tx);
+      await this.assertPendingBenefitsAvailable(
+        {
+          cuponId:
+            promotion.source === 'coupon' ? promotion.cuponId : undefined,
+          certificateSerials,
+          excludeOrderId: existing.id,
+        },
+        tx,
+      );
       await this.repo.update(
         existing.id,
         {
@@ -2000,7 +2020,9 @@ export class OrdersService {
     return {
       parent,
       update: {
-        items: items.map((item) => parentItemIds.has(item.id) ? item : { ...item, id: undefined }),
+        items: items.map((item) =>
+          parentItemIds.has(item.id) ? item : { ...item, id: undefined },
+        ),
         total: totals.total,
         subTotal: totals.subTotal,
         discountAmount: totals.discountAmount,
@@ -2271,7 +2293,10 @@ export class OrdersService {
         incoming = incomingById.get(prev.id);
         const foundIdx = incomingItems.indexOf(incoming!);
         if (foundIdx >= 0) usedIncomingIndexes.add(foundIdx);
-      } else if (!usedIncomingIndexes.has(idx) && incomingItems[idx]?.id === undefined) {
+      } else if (
+        !usedIncomingIndexes.has(idx) &&
+        incomingItems[idx]?.id === undefined
+      ) {
         incoming = incomingItems[idx];
         usedIncomingIndexes.add(idx);
       }
@@ -2293,7 +2318,8 @@ export class OrdersService {
               return incSel
                 ? {
                     ...prevSel,
-                    kitchenStatus: incSel.kitchenStatus ?? prevSel.kitchenStatus,
+                    kitchenStatus:
+                      incSel.kitchenStatus ?? prevSel.kitchenStatus,
                   }
                 : prevSel;
             })
@@ -2301,7 +2327,9 @@ export class OrdersService {
 
       return {
         ...prev,
-        isSentToKitchen: Boolean(prev.isSentToKitchen || incoming.isSentToKitchen),
+        isSentToKitchen: Boolean(
+          prev.isSentToKitchen || incoming.isSentToKitchen,
+        ),
         sentAt: incoming.sentAt ?? prev.sentAt,
         kitchenStatus: incoming.kitchenStatus ?? prev.kitchenStatus,
         comboSelections: mergedComboSelections,
@@ -2652,8 +2680,10 @@ export class OrdersService {
       !Array.isArray(general.data)
         ? (general.data as Record<string, unknown>)
         : undefined;
-    const defaultExchangeRate =
-      Math.max(0.0001, Number(generalData?.exchangeRate) || 36.5);
+    const defaultExchangeRate = Math.max(
+      0.0001,
+      Number(generalData?.exchangeRate) || 36.5,
+    );
 
     return normalizeAndValidateOrderPayments(
       payments,

@@ -5,7 +5,9 @@ import type {
   CustomerPhoneResponseDto,
 } from '../dto/customer-response.dto';
 
-export function toCustomerResponseDto(entity: CustomerEntity): CustomerResponseDto {
+export function toCustomerResponseDto(
+  entity: CustomerEntity,
+): CustomerResponseDto {
   const addresses: CustomerAddressResponseDto[] = [...(entity.addresses || [])]
     .sort((a, b) => {
       if (a.isDefault && !b.isDefault) return -1;

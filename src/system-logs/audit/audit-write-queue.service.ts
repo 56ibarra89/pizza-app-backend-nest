@@ -1,4 +1,9 @@
-import { Injectable, Logger, Optional, type OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  type OnModuleDestroy,
+} from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -118,7 +123,10 @@ export class AuditWriteQueueService implements OnModuleDestroy {
           recovered += batch.length;
         } catch (error: unknown) {
           const remaining = spooled.slice(index);
-          this.rewriteSpoolFile([...remaining, ...this.readAppendedEntries(snapshotSize)]);
+          this.rewriteSpoolFile([
+            ...remaining,
+            ...this.readAppendedEntries(snapshotSize),
+          ]);
           this.logger.warn(
             `Reintento de spool de auditoría pospuesto (${remaining.length} pendientes): ${error instanceof Error ? error.message : String(error)}`,
           );
@@ -220,7 +228,10 @@ export class AuditWriteQueueService implements OnModuleDestroy {
         try {
           parsed.push(JSON.parse(line) as AutomaticAuditParams);
         } catch {
-          this.logger.error('Spool de auditoría contiene una línea inválida; se conserva el archivo para revisión');
+          this.logger.error(
+            'Spool de auditoría contiene una línea inválida; se conserva el archivo para revisión',
+          );
+          this.hasSpooledEntries = false;
           return [];
         }
       }
@@ -231,16 +242,35 @@ export class AuditWriteQueueService implements OnModuleDestroy {
   }
 
   private readAppendedEntries(offset: number): AutomaticAuditParams[] {
-    const content = fs.readFileSync(this.spoolFilePath).subarray(offset).toString('utf8');
-    return content.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line) as AutomaticAuditParams);
+    try {
+      if (!fs.existsSync(this.spoolFilePath)) return [];
+      const content = fs
+        .readFileSync(this.spoolFilePath)
+        .subarray(offset)
+        .toString('utf8');
+      const parsed: AutomaticAuditParams[] = [];
+      for (const line of content.split(/\r?\n/).filter(Boolean)) {
+        try {
+          parsed.push(JSON.parse(line) as AutomaticAuditParams);
+        } catch {
+          this.logger.error(
+            'Entrada agregada al spool de auditoría inválida; se omite para evitar pérdida del lote',
+          );
+        }
+      }
+      return parsed;
+    } catch {
+      return [];
+    }
   }
 
   private rewriteSpoolFile(entries: readonly AutomaticAuditParams[]): void {
     const tempPath = `${this.spoolFilePath}.${process.pid}.tmp`;
     try {
       this.ensureSpoolDir();
-      const payload =
-        entries.length ? entries.map((item) => JSON.stringify(item)).join('\n') + '\n' : '';
+      const payload = entries.length
+        ? entries.map((item) => JSON.stringify(item)).join('\n') + '\n'
+        : '';
       const fd = fs.openSync(tempPath, 'w');
       try {
         fs.writeFileSync(fd, payload, 'utf8');
@@ -251,7 +281,11 @@ export class AuditWriteQueueService implements OnModuleDestroy {
       fs.renameSync(tempPath, this.spoolFilePath);
       this.hasSpooledEntries = entries.length > 0;
     } catch (error: unknown) {
-      try { fs.unlinkSync(tempPath); } catch { /* no temporal file to remove */ }
+      try {
+        fs.unlinkSync(tempPath);
+      } catch {
+        /* no temporal file to remove */
+      }
       this.logger.error(
         `No se pudo actualizar archivo spool de auditoría: ${error instanceof Error ? error.message : String(error)}`,
       );

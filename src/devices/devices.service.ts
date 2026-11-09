@@ -37,11 +37,7 @@ export class DevicesService {
     );
     const data = config.data as { printers?: PrinterConfigDto[] } | null;
 
-    if (
-      data &&
-      Array.isArray(data.printers) &&
-      data.printers.length > 0
-    ) {
+    if (data && Array.isArray(data.printers) && data.printers.length > 0) {
       return data.printers;
     }
 

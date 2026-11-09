@@ -1,4 +1,10 @@
-import { IsArray, IsBoolean, IsOptional, IsString, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsOptional,
+  IsString,
+  ValidateNested,
+} from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
 export class UpdateCustomerPhoneItemDto {

@@ -6,16 +6,10 @@ import type { UpdateCustomerDto } from '../dto/update-customer.dto';
 
 const CUSTOMER_INCLUDE = {
   phones: {
-    orderBy: [
-      { isDefault: 'desc' as const },
-      { lastUsed: 'desc' as const },
-    ],
+    orderBy: [{ isDefault: 'desc' as const }, { lastUsed: 'desc' as const }],
   },
   addresses: {
-    orderBy: [
-      { isDefault: 'desc' as const },
-      { lastUsed: 'desc' as const },
-    ],
+    orderBy: [{ isDefault: 'desc' as const }, { lastUsed: 'desc' as const }],
   },
 };
 
@@ -25,11 +19,28 @@ export class PrismaCustomersRepository implements ICustomersRepository {
 
   async getPage(page: number, limit: number, query = '') {
     const q = query.trim();
-    const where = q ? { OR: [ { name: { contains: q, mode: 'insensitive' as const } }, { phone: { contains: q } }, { phones: { some: { phone: { contains: q } } } } ] } : {};
-    const [rows, total] = await this.prisma.$transaction([
-      this.prisma.customer.findMany({ where, skip: page * limit, take: limit, orderBy: [{ name: 'asc' }, { id: 'asc' }], include: CUSTOMER_INCLUDE }),
-      this.prisma.customer.count({ where }),
-    ], { isolationLevel: 'RepeatableRead' });
+    const where = q
+      ? {
+          OR: [
+            { name: { contains: q, mode: 'insensitive' as const } },
+            { phone: { contains: q } },
+            { phones: { some: { phone: { contains: q } } } },
+          ],
+        }
+      : {};
+    const [rows, total] = await this.prisma.$transaction(
+      [
+        this.prisma.customer.findMany({
+          where,
+          skip: page * limit,
+          take: limit,
+          orderBy: [{ name: 'asc' }, { id: 'asc' }],
+          include: CUSTOMER_INCLUDE,
+        }),
+        this.prisma.customer.count({ where }),
+      ],
+      { isolationLevel: 'RepeatableRead' },
+    );
     return { items: rows.map((row) => this.mapCustomer(row)), total };
   }
 
@@ -115,13 +126,22 @@ export class PrismaCustomersRepository implements ICustomersRepository {
     const phone = params.phone?.trim();
     const name = params.name.trim();
     const existing = await this.prisma.customer.findFirst({
-      where: { OR: [
-        { name: { equals: name, mode: 'insensitive' } },
-        ...(phone ? [{ phone }, { phones: { some: { phone } } }] : []),
-      ] }, select: { id: true },
+      where: {
+        OR: [
+          { name: { equals: name, mode: 'insensitive' } },
+          ...(phone ? [{ phone }, { phones: { some: { phone } } }] : []),
+        ],
+      },
+      select: { id: true },
     });
-    if (existing) throw new ConflictException('Hay clientes coincidentes. Selecciona uno por su ID o crea explícitamente un cliente nuevo.');
-    return { customer: await this.create({ ...params, name, phone }), isNew: true };
+    if (existing)
+      throw new ConflictException(
+        'Hay clientes coincidentes. Selecciona uno por su ID o crea explícitamente un cliente nuevo.',
+      );
+    return {
+      customer: await this.create({ ...params, name, phone }),
+      isNew: true,
+    };
   }
 
   async updateById(
@@ -144,9 +164,20 @@ export class PrismaCustomersRepository implements ICustomersRepository {
           where: { customerId: id },
         });
 
-        const incomingPhones = dto.phones
-          .map((p) => ({ ...p, phone: p.phone.trim() }))
-          .filter((p) => Boolean(p.phone));
+        const phoneMap = new Map<
+          string,
+          { phone: string; isDefault?: boolean }
+        >();
+        for (const p of dto.phones) {
+          const cleanPhone = p.phone.trim();
+          if (!cleanPhone) continue;
+          const prev = phoneMap.get(cleanPhone);
+          phoneMap.set(cleanPhone, {
+            phone: cleanPhone,
+            isDefault: Boolean(prev?.isDefault || p.isDefault),
+          });
+        }
+        const incomingPhones = Array.from(phoneMap.values());
 
         // Teléfonos a eliminar (no presentes en el array entrante)
         const phonesToDelete = existingPhones.filter(
@@ -173,7 +204,10 @@ export class PrismaCustomersRepository implements ICustomersRepository {
           if (matched) {
             await tx.customerPhone.update({
               where: { id: matched.id },
-              data: { isDefault: isDef, lastUsed: isDef ? now : matched.lastUsed },
+              data: {
+                isDefault: isDef,
+                lastUsed: isDef ? now : matched.lastUsed,
+              },
             });
           } else {
             await tx.customerPhone.create({
@@ -221,9 +255,21 @@ export class PrismaCustomersRepository implements ICustomersRepository {
           where: { customerId: id },
         });
 
-        const incomingAddresses = dto.addresses
-          .map((a) => ({ ...a, address: a.address.trim() }))
-          .filter((a) => Boolean(a.address));
+        const addressMap = new Map<
+          string,
+          { address: string; isDefault?: boolean }
+        >();
+        for (const a of dto.addresses) {
+          const cleanAddress = a.address.trim();
+          if (!cleanAddress) continue;
+          const key = cleanAddress.toLowerCase();
+          const prev = addressMap.get(key);
+          addressMap.set(key, {
+            address: prev?.address ?? cleanAddress,
+            isDefault: Boolean(prev?.isDefault || a.isDefault),
+          });
+        }
+        const incomingAddresses = Array.from(addressMap.values());
 
         // Direcciones a eliminar
         const addressesToDelete = existingAddresses.filter(
@@ -254,7 +300,10 @@ export class PrismaCustomersRepository implements ICustomersRepository {
           if (matched) {
             await tx.customerAddress.update({
               where: { id: matched.id },
-              data: { isDefault: isDef, lastUsed: isDef ? now : matched.lastUsed },
+              data: {
+                isDefault: isDef,
+                lastUsed: isDef ? now : matched.lastUsed,
+              },
             });
           } else {
             await tx.customerAddress.create({
@@ -309,8 +358,18 @@ export class PrismaCustomersRepository implements ICustomersRepository {
     phone: string | null;
     createdAt: Date;
     updatedAt: Date;
-    phones?: { id: string; phone: string; isDefault?: boolean; lastUsed: Date }[];
-    addresses: { id: string; address: string; isDefault?: boolean; lastUsed: Date }[];
+    phones?: {
+      id: string;
+      phone: string;
+      isDefault?: boolean;
+      lastUsed: Date;
+    }[];
+    addresses: {
+      id: string;
+      address: string;
+      isDefault?: boolean;
+      lastUsed: Date;
+    }[];
   }): CustomerEntity {
     return {
       id: c.id,
