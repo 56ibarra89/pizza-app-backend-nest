@@ -128,9 +128,10 @@ export class OrderReferenceResolverService {
     const normalizedAddress = customerAddress?.trim();
     const now = new Date();
 
-    // 1. Si se proporciona teléfono, buscar en Customer o CustomerPhone
-    if (normalizedPhone) {
-      const byPhone = await this.prisma.customer.findFirst({
+    if (!normalizedPhone) return undefined;
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${normalizedPhone}, 0))::text`;
+      const matches = await tx.customer.findMany({
         where: {
           OR: [
             { phone: normalizedPhone },
@@ -138,30 +139,15 @@ export class OrderReferenceResolverService {
           ],
         },
         select: { id: true },
+        take: 2,
       });
+      if (matches.length > 1) return { id: undefined, existing: false };
+      const byPhone = matches[0];
       if (byPhone) {
-        await this.attachPhoneToExistingCustomer(byPhone.id, normalizedPhone, normalizedAddress);
-        return byPhone.id;
+        return { id: byPhone.id, existing: true };
       }
-    }
-
-    // 2. Si no se encontró por teléfono pero se dio un nombre, buscar por nombre
-    if (normalizedName) {
-      const byName = await this.prisma.customer.findFirst({
-        where: { name: { equals: normalizedName, mode: 'insensitive' } },
-        select: { id: true },
-      });
-      if (byName) {
-        await this.attachPhoneToExistingCustomer(byName.id, normalizedPhone, normalizedAddress);
-        return byName.id;
-      }
-    }
-
-    // 3. Si no existe, crear un nuevo cliente independiente con su propio UUID
-    if (normalizedName || normalizedPhone) {
-      try {
         const name = normalizedName || `Cliente ${normalizedPhone}`;
-        const created = await this.prisma.customer.create({
+        const created = await tx.customer.create({
           data: {
             name,
             phone: normalizedPhone || null,
@@ -184,13 +170,12 @@ export class OrderReferenceResolverService {
           },
           select: { id: true },
         });
-        return created.id;
-      } catch {
-        return undefined;
-      }
+        return { id: created.id, existing: false };
+    });
+    if (result.id && result.existing) {
+      await this.attachPhoneToExistingCustomer(result.id, normalizedPhone, normalizedAddress);
     }
-
-    return undefined;
+    return result.id;
   }
 
   private async findCashierId(

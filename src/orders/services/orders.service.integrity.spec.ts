@@ -532,7 +532,7 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
         {} as never,
         {} as never,
         {} as never,
-        {} as never,
+        { $transaction: jest.fn(async (fn) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: baseDeliveryOrder.id }]) })) } as never,
       );
       const motorizadoUser = {
         id: 'driver-other',

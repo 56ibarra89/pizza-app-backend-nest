@@ -623,16 +623,25 @@ export class OrdersService {
       updateData.cancellationCountsAsWaste = false;
     }
     let restoredSplitParent: OrderEntity | undefined;
-    const updated = shouldReversePaidBenefits
+    const updated = cancellationPolicy
       ? await this.prisma.$transaction(async (tx) => {
           const lockedChild = await tx.$queryRaw<Array<{ status: string }>>`
             SELECT status FROM "Order" WHERE id = ${id} FOR UPDATE
           `;
-          if (lockedChild[0]?.status !== 'PAID') {
+          if (lockedChild[0]?.status !== existing.status.toUpperCase()) {
             throw new ConflictException(
               'La factura cambió mientras se procesaba su anulación.',
             );
           }
+          if (shouldReversePaidBenefits && existing.shiftId) {
+            const shifts = await tx.$queryRaw<Array<{ status: string }>>`
+              SELECT status FROM "Shift" WHERE id = ${existing.shiftId} FOR UPDATE
+            `;
+            if (shifts[0]?.status !== 'OPEN') {
+              throw new ConflictException('El turno fue cerrado mientras se procesaba la anulación.');
+            }
+          }
+          if (!shouldReversePaidBenefits) return this.repo.update(id, updateData, tx);
           if (splitRestore) {
             await this.lockUnchangedSplitParent(tx, splitRestore.parent, true);
             restoredSplitParent = await this.repo.update(
@@ -700,7 +709,13 @@ export class OrdersService {
   }
 
   async startDelivery(id: string, user: AuthenticatedUser) {
-    const existing = await this.getById(id);
+    const updated = await this.prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${id} FOR UPDATE`;
+    const existing = await this.repo.findById(id, tx);
+    if (!existing) throw new NotFoundException('Orden no encontrada');
+    if (existing.status === OrderStatusDto.cancelled) {
+      throw new BadRequestException('No se puede iniciar la entrega de una orden anulada');
+    }
     if (existing.orderType !== OrderTypeDto.delivery) {
       throw new BadRequestException('La orden no corresponde a un delivery.');
     }
@@ -726,9 +741,10 @@ export class OrdersService {
       );
     }
 
-    const updated = await this.repo.update(id, {
+    return this.repo.update(id, {
       deliveryStartedAt: new Date(),
       deliverySlaAlertedAt: null,
+    }, tx);
     });
     this.publishOrder(updated, 'updated');
     return updated;
@@ -1668,6 +1684,11 @@ export class OrdersService {
     const { paidOrder, parentOrder } = await this.prisma.$transaction(
       async (tx) => {
         await this.lockUnchangedSplitParent(tx, existing);
+        await this.assertPendingBenefitsAvailable({
+          cuponId: childCuponId !== undefined && childCuponId !== existing.cuponId ? childCuponId : undefined,
+          certificateSerials: childCertificateSerials,
+          excludeOrderId: existing.id,
+        }, tx);
         const sharesParentCoupon =
           childCuponId !== undefined && childCuponId === parentCuponId;
         const recordedSiblingCount = sharesParentCoupon
@@ -1848,6 +1869,11 @@ export class OrdersService {
 
     const finalized = await this.prisma.$transaction(async (tx) => {
       await this.lockUnchangedSplitParent(tx, existing);
+      await this.assertPendingBenefitsAvailable({
+        cuponId: promotion.source === 'coupon' ? promotion.cuponId : undefined,
+        certificateSerials,
+        excludeOrderId: existing.id,
+      }, tx);
       await this.repo.update(
         existing.id,
         {
@@ -1918,7 +1944,7 @@ export class OrdersService {
             !isDeliveryChargeOrderItem(item) &&
             !isSplitBillOrderItem(item),
         )
-        .map((item) => ({ ...item, id: undefined }));
+        .map((item) => ({ ...item }));
       restoredItems = [...parent.items, ...productItems];
       const sharesParentPromotion =
         child.cuponId === parent.cuponId &&
@@ -1964,17 +1990,17 @@ export class OrdersService {
       },
       parent.timestamp,
     );
-    const normalizedItems =
-      await this.pricing.normalizeComboItems(restoredItems);
     const { items, totals } = await this.pricing.calculateWithPrices(
-      normalizedItems,
+      restoredItems,
       promotion,
       restoredDiscount,
+      { useSnapshotPrices: true },
     );
+    const parentItemIds = new Set(parent.items.map((item) => item.id));
     return {
       parent,
       update: {
-        items,
+        items: items.map((item) => parentItemIds.has(item.id) ? item : { ...item, id: undefined }),
         total: totals.total,
         subTotal: totals.subTotal,
         discountAmount: totals.discountAmount,

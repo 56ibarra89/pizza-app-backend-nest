@@ -14,6 +14,7 @@ import { OrdersService } from '../services/orders.service';
 import { CreateOrderDto } from '../dto/create-order.dto';
 import { UpdateOrderStatusDto } from '../dto/update-order-status.dto';
 import { UpdateOrderItemsDto } from '../dto/update-order-items.dto';
+import { UpdateOrderTablesDto } from '../dto/update-order-tables.dto';
 import { FinalizeOrderDto } from '../dto/finalize-order.dto';
 import { SplitOrderCheckoutDto } from '../dto/split-order-checkout.dto';
 import { toOrderResponseDto } from '../mappers/orders.mapper';
@@ -378,9 +379,9 @@ export class OrdersController {
   )
   async updateTables(
     @Param('id') id: string,
-    @Body('tableIds') tableIds: string[],
+    @Body() dto: UpdateOrderTablesDto,
   ) {
-    const updated = await this.orders.updateTables(id, tableIds);
+    const updated = await this.orders.updateTables(id, dto.tableIds);
     return toOrderResponseDto(updated);
   }
 

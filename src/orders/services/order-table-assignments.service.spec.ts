@@ -4,6 +4,7 @@ import { OrderTableAssignmentsService } from './order-table-assignments.service'
 describe('OrderTableAssignmentsService', () => {
   it('moves the parent and paid children that still have active kitchen items', async () => {
     const transaction = {
+      $queryRaw: jest.fn().mockResolvedValue([{ status: 'PENDING' }]),
       order: {
         findMany: jest.fn().mockResolvedValue([{ id: 'paid-child' }]),
       },

@@ -180,13 +180,13 @@ export class ReportsService {
     );
     const groupByDay = Math.floor((endDayUtc - startDayUtc) / DAY_MS) >= 1;
 
-    let offset = 0;
+    await this.prisma.$transaction(async (tx) => {
+    let lastId: string | undefined;
     while (true) {
-      const orders = await this.prisma.order.findMany({
-        where: reportWhere,
+      const orders = await tx.order.findMany({
+        where: { ...reportWhere, ...(lastId ? { id: { gt: lastId } } : {}) },
         select: reportSelect,
-        orderBy: [{ timestamp: 'asc' }, { id: 'asc' }],
-        skip: offset,
+        orderBy: { id: 'asc' },
         take: REPORT_BATCH_SIZE,
       });
 
@@ -319,8 +319,9 @@ export class ReportsService {
       if (orders.length < REPORT_BATCH_SIZE) {
         break;
       }
-      offset += REPORT_BATCH_SIZE;
+      lastId = orders[orders.length - 1].id;
     }
+    }, { isolationLevel: 'RepeatableRead', timeout: 60_000 });
 
     const channelLabels: Record<ChannelType, string> = {
       delivery: 'Delivery',

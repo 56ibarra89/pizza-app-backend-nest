@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { KitchenStatus, OrderStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -13,6 +13,13 @@ export class OrderTableAssignmentsService {
     const uniqueTableIds = [...new Set((tableIds ?? []).filter(Boolean))];
 
     return this.prisma.$transaction(async (transaction) => {
+      const rows = await transaction.$queryRaw<Array<{ status: string }>>`
+        SELECT status FROM "Order" WHERE id = ${orderId} FOR UPDATE
+      `;
+      if (!rows.length) throw new NotFoundException('Orden no encontrada');
+      if (rows[0].status === OrderStatus.CANCELLED) {
+        throw new BadRequestException('No se pueden asignar mesas a una orden anulada');
+      }
       const activePaidChildren = await transaction.order.findMany({
         where: {
           parentOrderId: orderId,

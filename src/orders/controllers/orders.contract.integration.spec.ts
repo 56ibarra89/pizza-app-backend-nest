@@ -248,6 +248,15 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
     jest.clearAllMocks();
   });
 
+  it.each([{}, { tableIds: 'mesa' }, { tableIds: [42] }, { tableIds: [''] }])('rechaza un contrato de mesas inválido: %j', async (body) => {
+    const response = await request(app.getHttpServer())
+      .patch('/orders/test-order/tables')
+      .set('x-test-role', 'cajero')
+      .set('x-test-permissions', 'orders.read,tables.operate')
+      .send(body);
+    expect(response.status).toBe(400);
+  });
+
   it('rechaza en HTTP (400) regalar productos con nota Vale: vacía sin certificado válido (H01)', async () => {
     const response = await request(app.getHttpServer())
       .post('/orders')

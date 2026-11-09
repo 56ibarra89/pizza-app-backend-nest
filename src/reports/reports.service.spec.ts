@@ -5,12 +5,24 @@ import { ReportsService } from './reports.service';
 
 describe('ReportsService', () => {
   const findMany = jest.fn();
+  const transaction = jest.fn(async (fn) => fn({ order: { findMany } }));
   const service = new ReportsService({
     order: { findMany },
+    $transaction: transaction,
   } as unknown as PrismaService);
 
   beforeEach(() => {
     findMany.mockReset();
+    transaction.mockClear();
+  });
+
+  it('recorre lotes por clave dentro de una instantánea consistente', async () => {
+    const row = { id: 'last-id', total: 0, discountAmount: 0, timestamp: new Date('2026-10-12T12:00:00Z'), paidAt: null, orderType: 'LOCAL', linkedTables: [], payments: [], items: [] };
+    findMany.mockResolvedValueOnce(Array.from({ length: 2500 }, () => row)).mockResolvedValueOnce([]);
+    await service.getSalesReport({ startDate: new Date('2026-10-12T00:00:00Z'), endDate: new Date('2026-10-13T00:00:00Z'), timezoneOffsetMinutes: 360 });
+    expect(transaction).toHaveBeenCalledWith(expect.any(Function), expect.objectContaining({ isolationLevel: 'RepeatableRead' }));
+    expect(findMany.mock.calls[1][0].where.id).toEqual({ gt: 'last-id' });
+    expect(findMany.mock.calls[1][0]).not.toHaveProperty('skip');
   });
 
   it('aggregates paid-order data without returning raw orders', async () => {

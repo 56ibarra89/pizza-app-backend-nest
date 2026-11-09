@@ -34,6 +34,40 @@ describe('AuditWriteQueueService', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
+  it('conserva el archivo original si falla el reemplazo', async () => {
+    const original = JSON.stringify(entry('old')) + '\n';
+    fs.writeFileSync(spoolFilePath, original);
+    const queue = new AuditWriteQueueService({ createAutomaticBatch: jest.fn().mockResolvedValue(1) } as unknown as SystemLogsService, { spoolFilePath });
+    const rename = jest.spyOn(jest.requireActual<typeof import('fs')>('fs'), 'renameSync').mockImplementation(() => { throw new Error('disk error'); });
+    try {
+      await queue.replaySpool();
+      expect(fs.readFileSync(spoolFilePath, 'utf8')).toBe(original);
+    } finally { rename.mockRestore(); }
+  });
+
+  it('conserva el spool completo cuando contiene una línea inválida', async () => {
+    const original = JSON.stringify(entry('old')) + '\n{invalido\n';
+    fs.writeFileSync(spoolFilePath, original);
+    const createAutomaticBatch = jest.fn();
+    const queue = new AuditWriteQueueService({ createAutomaticBatch } as unknown as SystemLogsService, { spoolFilePath });
+    await queue.replaySpool();
+    expect(createAutomaticBatch).not.toHaveBeenCalled();
+    expect(fs.readFileSync(spoolFilePath, 'utf8')).toBe(original);
+  });
+
+  it('conserva eventos agregados mientras recupera el spool', async () => {
+    fs.writeFileSync(spoolFilePath, JSON.stringify(entry('old')) + '\n');
+    let release!: () => void;
+    const createAutomaticBatch = jest.fn().mockImplementation(() => new Promise<number>((resolve) => { release = () => resolve(1); }));
+    const queue = new AuditWriteQueueService({ createAutomaticBatch } as unknown as SystemLogsService, { spoolFilePath });
+    const replay = queue.replaySpool();
+    fs.appendFileSync(spoolFilePath, JSON.stringify(entry('new')) + '\n');
+    release();
+    await replay;
+    expect(fs.readFileSync(spoolFilePath, 'utf8')).toContain('new');
+    expect(queue.getSpooledEntriesCount()).toBe(1);
+  });
+
   it('agrupa escrituras y no bloquea a quien encola la auditoría', async () => {
     let release!: () => void;
     const pendingWrite = new Promise<number>((resolve) => {
