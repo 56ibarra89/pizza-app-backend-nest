@@ -17,6 +17,7 @@ import { UpdateCustomerDto } from '../dto/update-customer.dto';
 import { toCustomerResponseDto } from '../mappers/customers.mapper';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Permissions, UserRoleDto } from '../../common';
+import { ListCustomersDto } from '../dto/list-customers.dto';
 
 @ApiTags('customers')
 @Controller('customers')
@@ -24,9 +25,15 @@ import { Permissions, UserRoleDto } from '../../common';
 export class CustomersController {
   constructor(private readonly customers: CustomersService) {}
 
+  @Get('page')
+  async getPage(@Query() query: ListCustomersDto) {
+    const result = await this.customers.getPage(query.page, query.limit, query.query);
+    return { items: result.items.map(toCustomerResponseDto), total: result.total };
+  }
+
   @Get()
   async getCustomers(@Query('query') query?: string) {
-    const list = query ? await this.customers.search(query) : await this.customers.getAll();
+    const list = await this.customers.search(query ?? '');
     return list.map(toCustomerResponseDto);
   }
 

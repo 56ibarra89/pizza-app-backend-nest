@@ -5,6 +5,7 @@ export const USERS_REPOSITORY = Symbol('USERS_REPOSITORY');
 
 export interface IUsersRepository {
   getAll(): Promise<UserEntity[]>;
+  getAvailableDrivers(date: string): Promise<Array<{ id: string; username: string; firstName: string; lastName: string; role: string; isActive: boolean }>>;
   findById(id: string): Promise<UserEntity | null>;
   findByUsername(username: string): Promise<UserEntity | null>;
   findByEmail(email: string): Promise<UserEntity | null>;

@@ -13,6 +13,7 @@ export class CustomersService {
   getAll() {
     return this.repo.getAll();
   }
+  getPage(page: number, limit: number, query?: string) { return this.repo.getPage(page, limit, query); }
 
   search(query: string) {
     return this.repo.search(query);

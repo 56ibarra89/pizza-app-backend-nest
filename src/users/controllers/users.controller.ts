@@ -23,6 +23,7 @@ import { UserRoleDto } from '../dto/user-role.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { Permissions } from '../../common';
+import { AvailableDriversQueryDto } from '../dto/available-drivers-query.dto';
 
 const AUTHENTICATED_ROLES = [
   UserRoleDto.admin,
@@ -39,6 +40,13 @@ const AUTHENTICATED_ROLES = [
 @Controller('users')
 export class UsersController {
   constructor(private readonly users: UsersService) {}
+
+  @Get('drivers')
+  @Permissions('users.directory')
+  @Roles(...AUTHENTICATED_ROLES)
+  getAvailableDrivers(@Query() query: AvailableDriversQueryDto) {
+    return this.users.getAvailableDrivers(query.date);
+  }
 
   @Get('directory')
   @Permissions('users.directory')

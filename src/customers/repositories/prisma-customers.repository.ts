@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { ICustomersRepository } from '../interfaces/customers.repository';
 import type { CustomerEntity } from '../entities/customer.entity';
@@ -23,6 +23,16 @@ const CUSTOMER_INCLUDE = {
 export class PrismaCustomersRepository implements ICustomersRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  async getPage(page: number, limit: number, query = '') {
+    const q = query.trim();
+    const where = q ? { OR: [ { name: { contains: q, mode: 'insensitive' as const } }, { phone: { contains: q } }, { phones: { some: { phone: { contains: q } } } } ] } : {};
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.customer.findMany({ where, skip: page * limit, take: limit, orderBy: [{ name: 'asc' }, { id: 'asc' }], include: CUSTOMER_INCLUDE }),
+      this.prisma.customer.count({ where }),
+    ], { isolationLevel: 'RepeatableRead' });
+    return { items: rows.map((row) => this.mapCustomer(row)), total };
+  }
+
   async getAll(): Promise<CustomerEntity[]> {
     const customers = await this.prisma.customer.findMany({
       orderBy: { name: 'asc' },
@@ -33,7 +43,7 @@ export class PrismaCustomersRepository implements ICustomersRepository {
 
   async search(query: string): Promise<CustomerEntity[]> {
     const q = query.trim();
-    if (!q) return this.getAll();
+    if (!q) return [];
 
     const customers = await this.prisma.customer.findMany({
       where: {
@@ -43,6 +53,7 @@ export class PrismaCustomersRepository implements ICustomersRepository {
           { phones: { some: { phone: { contains: q } } } },
         ],
       },
+      take: 20,
       orderBy: { name: 'asc' },
       include: CUSTOMER_INCLUDE,
     });
@@ -101,105 +112,16 @@ export class PrismaCustomersRepository implements ICustomersRepository {
     phone?: string;
     address?: string;
   }): Promise<{ customer: CustomerEntity; isNew: boolean }> {
-    const now = new Date();
-    const cleanName = params.name.trim();
-    const nameLower = cleanName.toLowerCase();
-    const phone = params.phone?.trim() || undefined;
-    const address = params.address?.trim() || undefined;
-
-    return this.prisma.$transaction(async (tx) => {
-      // 1. Priorizar búsqueda por teléfono en Customer o en CustomerPhone
-      let existing = phone
-        ? await tx.customer.findFirst({
-            where: {
-              OR: [
-                { phone },
-                { phones: { some: { phone } } },
-              ],
-            },
-            include: CUSTOMER_INCLUDE,
-          })
-        : null;
-
-      // 2. Si no se encontró por teléfono (o es un número nuevo), buscar por nombre del cliente
-      if (!existing && cleanName) {
-        existing = await tx.customer.findFirst({
-          where: { name: { equals: nameLower, mode: 'insensitive' } },
-          include: CUSTOMER_INCLUDE,
-        });
-      }
-
-      const isNew = !existing;
-
-      if (!existing) {
-        const created = await tx.customer.create({
-          data: {
-            name: cleanName,
-            phone: phone || null,
-            phones: phone
-              ? {
-                  create: [{ phone, isDefault: true, lastUsed: now }],
-                }
-              : undefined,
-            addresses: address
-              ? {
-                  create: [{ address, isDefault: true, lastUsed: now }],
-                }
-              : undefined,
-          },
-          include: CUSTOMER_INCLUDE,
-        });
-
-        return { customer: this.mapCustomer(created), isNew };
-      }
-
-      const updatedCustomer = await tx.customer.update({
-        where: { id: existing.id },
-        data: {
-          name: cleanName,
-          phone: phone ?? existing.phone,
-        },
-      });
-
-      if (phone) {
-        const matchedPhone = existing.phones.find((p) => p.phone === phone);
-        if (matchedPhone) {
-          await tx.customerPhone.update({
-            where: { id: matchedPhone.id },
-            data: { lastUsed: now },
-          });
-        } else {
-          await tx.customerPhone.create({
-            data: { customerId: existing.id, phone, lastUsed: now },
-          });
-        }
-      }
-
-      if (address) {
-        const addrLower = address.toLowerCase();
-        const matched = existing.addresses.find(
-          (a) => a.address.toLowerCase() === addrLower,
-        );
-
-        if (matched) {
-          await tx.customerAddress.update({
-            where: { id: matched.id },
-            data: { lastUsed: now },
-          });
-        } else {
-          await tx.customerAddress.create({
-            data: { customerId: existing.id, address, lastUsed: now },
-          });
-        }
-      }
-
-      const reloaded = await tx.customer.findUniqueOrThrow({
-        where: { id: updatedCustomer.id },
-        include: CUSTOMER_INCLUDE,
-      });
-
-      return { customer: this.mapCustomer(reloaded), isNew };
+    const phone = params.phone?.trim();
+    const name = params.name.trim();
+    const existing = await this.prisma.customer.findFirst({
+      where: { OR: [
+        { name: { equals: name, mode: 'insensitive' } },
+        ...(phone ? [{ phone }, { phones: { some: { phone } } }] : []),
+      ] }, select: { id: true },
     });
+    if (existing) throw new ConflictException('Hay clientes coincidentes. Selecciona uno por su ID o crea explícitamente un cliente nuevo.');
+    return { customer: await this.create({ ...params, name, phone }), isNew: true };
   }
 
   async updateById(

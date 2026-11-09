@@ -163,6 +163,10 @@ export class AccessControlService implements OnModuleInit {
     if (permissionCodes) await this.assertPermissionCodes(permissionCodes);
 
     await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "AccessRole" WHERE id = ${id} FOR UPDATE`;
+      if (dto.isActive === false && await tx.user.count({ where: { accessRoleId: id } }) > 0) {
+        throw new ConflictException('Reasigna los usuarios de este rol antes de desactivarlo.');
+      }
       await tx.accessRole.update({
         where: { id },
         data: {
@@ -230,13 +234,17 @@ export class AccessControlService implements OnModuleInit {
         'El rol seleccionado no existe o está inactivo.',
       );
     }
-    const user = await this.prisma.user.update({
+    const user = await this.prisma.$transaction(async (tx) => {
+      const roles = await tx.$queryRaw<Array<{ isActive: boolean }>>`SELECT "isActive" FROM "AccessRole" WHERE id = ${accessRoleId} FOR UPDATE`;
+      if (!roles[0]?.isActive) throw new BadRequestException('El rol seleccionado está inactivo o no existe');
+      return tx.user.update({
       where: { id: userId },
       data: {
         accessRoleId: role.id,
         role: role.baseRole,
         tokenVersion: { increment: 1 },
       },
+    });
     });
     if (actor) {
       await this.audit(actor, 'USER_ACCESS_ROLE_ASSIGNED', {

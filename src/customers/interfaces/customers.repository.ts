@@ -4,6 +4,7 @@ import type { UpdateCustomerDto } from '../dto/update-customer.dto';
 export const CUSTOMERS_REPOSITORY = Symbol('CUSTOMERS_REPOSITORY');
 
 export interface ICustomersRepository {
+  getPage(page: number, limit: number, query?: string): Promise<{ items: CustomerEntity[]; total: number }>;
   getAll(): Promise<CustomerEntity[]>;
   search(query: string): Promise<CustomerEntity[]>;
   findById(id: string): Promise<CustomerEntity | null>;

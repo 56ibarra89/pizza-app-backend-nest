@@ -104,6 +104,7 @@ export class UsersService {
   getAll() {
     return this.repo.getAll();
   }
+  getAvailableDrivers(date: string) { return this.repo.getAvailableDrivers(date); }
 
   async getById(id: string) {
     const found = await this.repo.findById(id);

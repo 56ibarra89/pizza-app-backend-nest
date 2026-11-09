@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { ConflictException, HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { IUsersRepository } from '../interfaces/users.repository';
 import type { UserEntity } from '../entities/user.entity';
@@ -6,6 +6,7 @@ import type { UserRoleDto } from '../dto/user-role.dto';
 import { fromDbRole, toDbRole } from '../mappers/user-role.mapper';
 import { PinHasherService } from '../../common/security/pin-hasher.service';
 import { PinAttemptService } from '../../common/security/pin-attempt.service';
+import type { WeekDay } from '@prisma/client';
 
 @Injectable()
 export class PrismaUsersRepository implements IUsersRepository {
@@ -21,6 +22,17 @@ export class PrismaUsersRepository implements IUsersRepository {
       include: { extraDays: true, accessRole: true },
     });
     return users.map((u) => this.mapUser(u));
+  }
+
+  async getAvailableDrivers(date: string) {
+    const day = new Date(`${date}T00:00:00Z`);
+    const weekday = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][day.getUTCDay()] as WeekDay;
+    const users = await this.prisma.user.findMany({
+      where: { isActive: true, role: 'MOTORIZADO', OR: [{ workDays: { has: weekday } }, { extraDays: { some: { date: day } } }] },
+      select: { id: true, username: true, firstName: true, lastName: true, role: true, isActive: true },
+      orderBy: { username: 'asc' },
+    });
+    return users.map((user) => ({ ...user, role: fromDbRole(user.role) }));
   }
 
   async findById(id: string): Promise<UserEntity | null> {
@@ -181,7 +193,12 @@ export class PrismaUsersRepository implements IUsersRepository {
     isActive: boolean;
     workDays?: string[];
   }): Promise<UserEntity> {
-    const created = await this.prisma.user.create({
+    const created = await this.prisma.$transaction(async (tx) => {
+      if (data.accessRoleId) {
+        const roles = await tx.$queryRaw<Array<{ isActive: boolean }>>`SELECT "isActive" FROM "AccessRole" WHERE id = ${data.accessRoleId} FOR UPDATE`;
+        if (!roles[0]?.isActive) throw new ConflictException('El rol seleccionado está inactivo o no existe');
+      }
+      return tx.user.create({
       data: {
         username: data.username,
         email: data.email,
@@ -196,6 +213,7 @@ export class PrismaUsersRepository implements IUsersRepository {
         workDays: data.workDays as any,
       },
       include: { extraDays: true, accessRole: true },
+    });
     });
     return this.mapUser(created);
   }
@@ -222,7 +240,25 @@ export class PrismaUsersRepository implements IUsersRepository {
       workDays?: string[];
     },
   ): Promise<UserEntity> {
-    const updated = await this.prisma.user.update({
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (data.role !== undefined || data.accessRoleId !== undefined || data.isActive !== undefined) {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(19731021)::text`;
+        if (data.accessRoleId) {
+          const roles = await tx.$queryRaw<Array<{ isActive: boolean }>>`SELECT "isActive" FROM "AccessRole" WHERE id = ${data.accessRoleId} FOR UPDATE`;
+          if (!roles[0]?.isActive) throw new ConflictException('El rol seleccionado está inactivo o no existe');
+        }
+        const current = await tx.user.findUnique({ where: { id }, include: { accessRole: true } });
+        const nextAccessRole = data.accessRoleId ? await tx.accessRole.findUnique({ where: { id: data.accessRoleId } }) : current?.accessRole;
+        const wasAdmin = current?.isActive && (current.role === 'ADMIN' || current.accessRole?.code === 'admin');
+        const remainsAdmin = data.isActive !== false &&
+          (data.role ? toDbRole(data.role) === 'ADMIN' : current?.role === 'ADMIN') &&
+          (!data.accessRoleId || nextAccessRole?.baseRole === 'ADMIN');
+        if (wasAdmin && !remainsAdmin) {
+          const count = await tx.user.count({ where: { isActive: true, role: 'ADMIN' } });
+          if (count <= 1) throw new ConflictException('No se puede desactivar o cambiar el rol del último administrador activo.');
+        }
+      }
+      return tx.user.update({
       where: { id },
       data: {
         username: data.username,
@@ -240,10 +276,11 @@ export class PrismaUsersRepository implements IUsersRepository {
         lockedUntil: data.lockedUntil,
         lastVisit: data.lastVisit,
         themePreference: data.themePreference,
-        tokenVersion: data.tokenVersion,
+        tokenVersion: data.tokenVersion === undefined ? undefined : { increment: 1 },
         workDays: data.workDays as any,
       },
       include: { extraDays: true, accessRole: true },
+    });
     });
 
     return this.mapUser(updated);
