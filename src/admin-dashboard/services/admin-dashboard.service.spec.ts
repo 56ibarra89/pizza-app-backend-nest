@@ -128,4 +128,60 @@ describe('AdminDashboardService', () => {
     expect(kpis.pendingKitchenOrders).toBe(3);
     expect(kpis.activeDeliveryOrders).toBe(2);
   });
+
+  it('atribuye cada venta liquidada a un único mesero y excluye padres de subcuentas', async () => {
+    prisma.user.findMany.mockResolvedValue([
+      {
+        id: 'waiter-1',
+        username: 'ana',
+        firstName: 'Ana',
+        lastName: 'Uno',
+        waiterZoneAssignments: [{ floor: 1 }],
+      },
+      {
+        id: 'waiter-2',
+        username: 'bea',
+        firstName: 'Bea',
+        lastName: 'Dos',
+        waiterZoneAssignments: [{ floor: 1 }],
+      },
+    ]);
+    prisma.order.findMany.mockResolvedValue([
+      {
+        id: 'direct-order',
+        waiterId: 'waiter-1',
+        waiterSnapshotName: 'ana',
+        cashierId: null,
+        cashierSnapshotName: null,
+        invoiceNumber: '001-001-01-0001',
+        total: 100,
+        linkedTables: [{ mesa: { floor: 1 } }],
+      },
+      {
+        id: 'ambiguous-order',
+        cashierId: null,
+        cashierSnapshotName: null,
+        invoiceNumber: '001-001-01-0002',
+        total: 200,
+        linkedTables: [{ mesa: { floor: 1 } }],
+      },
+    ]);
+
+    const result = await service.getWaiterPerformance();
+
+    expect(result.find((waiter) => waiter.id === 'waiter-1')).toEqual(
+      expect.objectContaining({ ordersServed: 1, revenueTotal: 100 }),
+    );
+    expect(result.find((waiter) => waiter.id === 'waiter-2')).toEqual(
+      expect.objectContaining({ ordersServed: 0, revenueTotal: 0 }),
+    );
+    expect(prisma.order.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: 'PAID',
+          NOT: { splitOrders: { some: { status: 'PAID' } } },
+        }),
+      }),
+    );
+  });
 });

@@ -79,6 +79,8 @@ export interface IOrdersRepository {
       }>;
       cashierId?: string;
       cashierSnapshotName?: string;
+      waiterId?: string;
+      waiterSnapshotName?: string;
       isSentToKitchen?: boolean;
       linkedTables?: string[];
       driverId?: string;
@@ -127,6 +129,8 @@ export interface IOrdersRepository {
       }> | null;
       cashierId?: string | null;
       cashierSnapshotName?: string | null;
+      waiterId?: string | null;
+      waiterSnapshotName?: string | null;
       cancelReason?: string | null;
       cancellationReasonId?: string | null;
       cancellationReasonLabel?: string | null;

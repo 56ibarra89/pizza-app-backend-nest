@@ -53,7 +53,7 @@ import {
 } from '../validators/order-certificate.validator';
 import { KitchensService } from '../../kitchens/kitchens.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CertificadoStatus, Prisma } from '@prisma/client';
+import { CertificadoStatus, Prisma, UserRole } from '@prisma/client';
 import { OrderTypeDto } from '../dto/order-type.dto';
 import {
   DEFAULT_SERVICE_SLA_CONFIG,
@@ -170,6 +170,11 @@ export class OrdersService {
       dto.isSentToKitchen ?? !(dto.linkedTables && dto.linkedTables.length > 0);
 
     const cashierSnapshotName = dto.cashierSnapshotName || user?.username;
+    const waiter = await this.resolveWaiterAssignment({
+      waiterId: dto.waiterId,
+      user,
+      isTableOrder: Boolean(dto.linkedTables?.length),
+    });
     const { customerId, cashierId, shiftId } =
       await this.referenceResolver.resolve({
         ...dto,
@@ -229,6 +234,8 @@ export class OrdersService {
             (dto.customerPhone ? `Cliente ${dto.customerPhone}` : undefined),
           cashierId,
           cashierSnapshotName,
+          waiterId: waiter?.id,
+          waiterSnapshotName: waiter?.snapshotName,
           orderType: dto.orderType,
           customerAddress: dto.customerAddress,
           linkedTables: dto.linkedTables,
@@ -289,6 +296,87 @@ export class OrdersService {
 
     this.publishOrder(created, 'created');
     return created;
+  }
+
+  async assignWaiter(
+    id: string,
+    waiterId: string,
+    user: AuthenticatedUser,
+  ): Promise<OrderEntity> {
+    const existing = await this.getById(id);
+    if (
+      existing.status === OrderStatusDto.paid ||
+      existing.status === OrderStatusDto.cancelled
+    ) {
+      throw new BadRequestException(
+        'No se puede cambiar el mesero de una orden cobrada o anulada.',
+      );
+    }
+
+    const waiter = await this.resolveWaiterAssignment({
+      waiterId,
+      user,
+      isTableOrder: true,
+      isReassignment: true,
+    });
+    if (!waiter) {
+      throw new BadRequestException('Debes seleccionar un mesero activo.');
+    }
+
+    const updated = await this.repo.update(id, {
+      waiterId: waiter.id,
+      waiterSnapshotName: waiter.snapshotName,
+    });
+    this.publishOrder(updated, 'updated');
+    return updated;
+  }
+
+  private async resolveWaiterAssignment(params: {
+    waiterId?: string;
+    user?: AuthenticatedUser;
+    isTableOrder: boolean;
+    isReassignment?: boolean;
+  }): Promise<{ id: string; snapshotName: string } | undefined> {
+    const isWaiterUser = params.user?.role === UserRoleDto.mesero;
+    if (
+      isWaiterUser &&
+      params.waiterId &&
+      params.waiterId !== params.user?.id
+    ) {
+      throw new ForbiddenException(
+        'Un mesero solo puede asignarse a sí mismo en una orden de mesa.',
+      );
+    }
+
+    const requestedWaiterId = isWaiterUser && params.isTableOrder
+      ? params.user?.id
+      : params.waiterId;
+    if (!requestedWaiterId) return undefined;
+    if (!params.isTableOrder) {
+      throw new BadRequestException(
+        'Solo las órdenes de mesa pueden tener un mesero asignado.',
+      );
+    }
+
+    const waiter = await this.prisma.user.findFirst({
+      where: {
+        id: requestedWaiterId,
+        role: UserRole.MESERO,
+        isActive: true,
+      },
+      select: { id: true, username: true, firstName: true, lastName: true },
+    });
+    if (!waiter) {
+      throw new BadRequestException(
+        'El mesero seleccionado no existe, no está activo o no tiene ese rol.',
+      );
+    }
+
+    return {
+      id: waiter.id,
+      snapshotName:
+        `${waiter.firstName} ${waiter.lastName}`.trim() || waiter.username,
+    };
   }
 
   async updateStatus(
@@ -1643,8 +1731,16 @@ export class OrdersService {
             ...(dto.certificateSerials ?? []),
             ...pendingParentCertificateSerials,
           ]
-        : dto.certificateSerials,
+        : (dto.certificateSerials ?? []).filter(
+            (serial) =>
+              !pendingParentCertificateSerials.includes(
+                serial.trim().toUpperCase(),
+              ),
+          ),
     );
+    const itemsForBenefitValidation = settlesSplit
+      ? [...pricedChildItems, ...finalParentItems]
+      : pricedChildItems;
     const parentCertificateSerials = settlesSplit
       ? []
       : pendingParentCertificateSerials;
@@ -1668,6 +1764,7 @@ export class OrdersService {
           ? childCuponId
           : undefined,
       certificateSerials: childCertificateSerials,
+      items: itemsForBenefitValidation,
       excludeOrderId: existing.id,
     });
 
@@ -1690,8 +1787,10 @@ export class OrdersService {
       ? OrderStatusDto.paid
       : this.deriveGlobalStatus(finalParentItems, existing.orderType);
 
-    const { paidOrder, parentOrder } = await this.prisma.$transaction(
-      async (tx) => {
+    let paidOrder: OrderEntity;
+    let parentOrder: OrderEntity;
+    try {
+      const txResult = await this.prisma.$transaction(async (tx) => {
         await this.lockUnchangedSplitParent(tx, existing);
         await this.assertPendingBenefitsAvailable(
           {
@@ -1700,6 +1799,7 @@ export class OrdersService {
                 ? childCuponId
                 : undefined,
             certificateSerials: childCertificateSerials,
+            items: itemsForBenefitValidation,
             excludeOrderId: existing.id,
           },
           tx,
@@ -1759,6 +1859,8 @@ export class OrdersService {
             customerSnapshotName,
             cashierId: cashierId ?? user?.id,
             cashierSnapshotName,
+            waiterId: existing.waiterId,
+            waiterSnapshotName: existing.waiterSnapshotName,
             orderType: dto.orderType ?? existing.orderType,
             customerAddress: dto.customerAddress ?? existing.customerAddress,
             linkedTables: existing.linkedTables,
@@ -1809,8 +1911,13 @@ export class OrdersService {
           paidOrder: finalizedChild,
           parentOrder: updatedParent,
         };
-      },
-    );
+      });
+      paidOrder = txResult.paidOrder;
+      parentOrder = txResult.parentOrder;
+    } catch (error) {
+      await this.finalization.persistTerminalCorrelativoStatusIfNeeded?.(error);
+      throw error;
+    }
 
     this.publishOrder(parentOrder, 'updated');
     this.publishOrder(paidOrder, 'created');
@@ -1859,6 +1966,7 @@ export class OrdersService {
     await this.assertPendingBenefitsAvailable({
       cuponId: promotion.source === 'coupon' ? promotion.cuponId : undefined,
       certificateSerials,
+      items: pricedItems,
       excludeOrderId: existing.id,
     });
 
@@ -1883,55 +1991,63 @@ export class OrdersService {
     const resolvedPayments = await this.resolvePayments(reconciledPayments);
     assertPaymentsMatchTotal(totals.total, resolvedPayments ?? []);
 
-    const finalized = await this.prisma.$transaction(async (tx) => {
-      await this.lockUnchangedSplitParent(tx, existing);
-      await this.assertPendingBenefitsAvailable(
-        {
-          cuponId:
-            promotion.source === 'coupon' ? promotion.cuponId : undefined,
-          certificateSerials,
-          excludeOrderId: existing.id,
-        },
-        tx,
-      );
-      await this.repo.update(
-        existing.id,
-        {
-          items: pricedItems,
-          total: totals.total,
-          subTotal: totals.subTotal,
-          discountAmount: totals.discountAmount,
-          taxAmount: totals.taxAmount,
-          cuponId: promotion.source === 'coupon' ? promotion.cuponId : null,
-          discountId:
-            promotion.source === 'discount' ? promotion.discountId : null,
-          happyHourId:
-            promotion.source === 'happy-hour' ? promotion.happyHourId : null,
-          isSentToKitchen: pricedItems.some(
-            (item) => requiresKitchenPreparation(item) && item.isSentToKitchen,
-          ),
-          certificateSerials,
-        },
-        tx,
-      );
-      await this.finalization.issueInTransaction(tx, {
-        orderId: existing.id,
-        dto: {
-          ...dto,
-          ...(customerId ? { customerId } : {}),
-          customerSnapshotName,
-          payments: resolvedPayments,
-          certificateSerials,
-        },
-        totals,
-        promotion,
+    let finalized: OrderEntity;
+    try {
+      finalized = await this.prisma.$transaction(async (tx) => {
+        await this.lockUnchangedSplitParent(tx, existing);
+        await this.assertPendingBenefitsAvailable(
+          {
+            cuponId:
+              promotion.source === 'coupon' ? promotion.cuponId : undefined,
+            certificateSerials,
+            items: pricedItems,
+            excludeOrderId: existing.id,
+          },
+          tx,
+        );
+        await this.repo.update(
+          existing.id,
+          {
+            items: pricedItems,
+            total: totals.total,
+            subTotal: totals.subTotal,
+            discountAmount: totals.discountAmount,
+            taxAmount: totals.taxAmount,
+            cuponId: promotion.source === 'coupon' ? promotion.cuponId : null,
+            discountId:
+              promotion.source === 'discount' ? promotion.discountId : null,
+            happyHourId:
+              promotion.source === 'happy-hour' ? promotion.happyHourId : null,
+            isSentToKitchen: pricedItems.some(
+              (item) =>
+                requiresKitchenPreparation(item) && item.isSentToKitchen,
+            ),
+            certificateSerials,
+          },
+          tx,
+        );
+        await this.finalization.issueInTransaction(tx, {
+          orderId: existing.id,
+          dto: {
+            ...dto,
+            ...(customerId ? { customerId } : {}),
+            customerSnapshotName,
+            payments: resolvedPayments,
+            certificateSerials,
+          },
+          totals,
+          promotion,
+        });
+        const paidParent = await this.repo.findById(existing.id, tx);
+        if (!paidParent) {
+          throw new NotFoundException('No se pudo cargar la orden cobrada.');
+        }
+        return paidParent;
       });
-      const paidParent = await this.repo.findById(existing.id, tx);
-      if (!paidParent) {
-        throw new NotFoundException('No se pudo cargar la orden cobrada.');
-      }
-      return paidParent;
-    });
+    } catch (error) {
+      await this.finalization.persistTerminalCorrelativoStatusIfNeeded?.(error);
+      throw error;
+    }
 
     this.publishOrder(finalized, 'updated');
     return { paidOrder: finalized, parentOrder: finalized };

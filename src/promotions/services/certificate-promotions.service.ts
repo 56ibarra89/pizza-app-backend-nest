@@ -17,6 +17,7 @@ import {
   fromDbCertificadoStatus,
   generateCertificadoSerial,
 } from '../mappers/promotions.mapper';
+import { getBusinessDateParts } from '../../common/time/business-time.util';
 
 @Injectable()
 export class CertificatePromotionsService {
@@ -138,7 +139,7 @@ export class CertificatePromotionsService {
         productId: item.productId,
         quantity: item.quantity,
       })),
-      issueDate: certificate.issueDate.toISOString().substring(0, 10),
+      issueDate: getBusinessDateParts(certificate.issueDate).ymd,
       redeemedAt: certificate.redeemedAt?.toISOString(),
       description: certificate.description ?? undefined,
       status: fromDbCertificadoStatus(certificate.status),

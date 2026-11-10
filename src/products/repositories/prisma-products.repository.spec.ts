@@ -55,4 +55,19 @@ describe('PrismaProductsRepository (H22)', () => {
     expect($queryRaw).toHaveBeenCalledTimes(2);
     expect(third[0].totalRevenue).toBe(1800);
   });
+
+  it('invalida métricas cacheadas después de eliminar un producto', async () => {
+    const update = jest.fn().mockResolvedValue({});
+    const repo = new PrismaProductsRepository({
+      product: { update },
+    } as unknown as PrismaService);
+    const invalidate = jest.spyOn(repo, 'invalidateCategoryRevenueCache');
+
+    await repo.deleteProduct('product-1');
+
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'product-1' } }),
+    );
+    expect(invalidate).toHaveBeenCalledTimes(1);
+  });
 });

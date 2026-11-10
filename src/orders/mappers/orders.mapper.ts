@@ -29,6 +29,8 @@ export function toOrderResponseDto(order: OrderEntity) {
     total: order.total,
     status: order.status,
     driverId: order.driverId,
+    waiterId: order.waiterId,
+    waiterSnapshotName: order.waiterSnapshotName,
     timestamp: order.timestamp.toISOString(),
     updatedAt: order.updatedAt?.toISOString(),
     paidAt: order.paidAt?.toISOString(),

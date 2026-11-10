@@ -20,6 +20,7 @@ import {
   toDbCuponManualStatus,
   toDbDiscountType,
 } from '../mappers/promotions.mapper';
+import { getBusinessDateParts } from '../../common/time/business-time.util';
 
 @Injectable()
 export class CouponPromotionsService {
@@ -163,7 +164,7 @@ export class CouponPromotionsService {
       maxUses: coupon.maxUses,
       currentUses: coupon.currentUses,
       expiresDate: coupon.expiresDate
-        ? coupon.expiresDate.toISOString().substring(0, 10)
+        ? getBusinessDateParts(coupon.expiresDate).ymd
         : null,
       ...derived,
     };

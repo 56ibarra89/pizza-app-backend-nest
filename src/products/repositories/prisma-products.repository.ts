@@ -154,6 +154,7 @@ export class PrismaProductsRepository implements IProductsRepository {
       include: { products: true, extras: true },
     });
 
+    this.invalidateCategoryRevenueCache();
     return {
       id: created.id,
       label: created.label,
@@ -185,6 +186,7 @@ export class PrismaProductsRepository implements IProductsRepository {
       },
     });
 
+    this.invalidateCategoryRevenueCache();
     return {
       id: updated.id,
       label: updated.label,
@@ -205,6 +207,7 @@ export class PrismaProductsRepository implements IProductsRepository {
       }),
       this.prisma.category.update({ where: { id }, data: { deletedAt: now } }),
     ]);
+    this.invalidateCategoryRevenueCache();
   }
 
   async createCategoryExtra(
@@ -390,6 +393,7 @@ export class PrismaProductsRepository implements IProductsRepository {
       },
     });
 
+    this.invalidateCategoryRevenueCache();
     return this.mapProduct(created);
   }
 
@@ -463,6 +467,7 @@ export class PrismaProductsRepository implements IProductsRepository {
       });
     });
 
+    this.invalidateCategoryRevenueCache();
     return this.mapProduct(updated);
   }
 
@@ -471,6 +476,7 @@ export class PrismaProductsRepository implements IProductsRepository {
       where: { id },
       data: { deletedAt: new Date() },
     });
+    this.invalidateCategoryRevenueCache();
   }
 
   private mapExtra(extra: {

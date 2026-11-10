@@ -24,6 +24,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { Permissions } from '../../common';
 import { AvailableDriversQueryDto } from '../dto/available-drivers-query.dto';
+import { CreateUserExtraDayDto } from '../dto/create-user-extra-day.dto';
+import { UpdateWaiterZonesDto } from '../dto/update-waiter-zones.dto';
 import { getBusinessDateParts } from '../../common/time/business-time.util';
 
 const AUTHENTICATED_ROLES = [
@@ -47,6 +49,18 @@ export class UsersController {
   @Roles(...AUTHENTICATED_ROLES)
   getAvailableDrivers(@Query() query: AvailableDriversQueryDto) {
     return this.users.getAvailableDrivers(query.date);
+  }
+
+  @Get('waiters')
+  @Permissions('tables.operate')
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.despachador,
+  )
+  getActiveWaiters() {
+    return this.users.getActiveWaiters();
   }
 
   @Get('directory')
@@ -185,7 +199,7 @@ export class UsersController {
   @Permissions('users.manage')
   async addExtraDay(
     @Param('id', new ParseUUIDPipe()) id: string,
-    @Body() body: { date: string; notes?: string },
+    @Body() body: CreateUserExtraDayDto,
   ) {
     return this.users.addExtraDay(id, body.date, body.notes);
   }
@@ -218,7 +232,7 @@ export class UsersController {
   @Roles(UserRoleDto.admin)
   async updateWaiterZones(
     @Param('id', new ParseUUIDPipe()) id: string,
-    @Body() body: { zones: { day: string; floor: number }[] },
+    @Body() body: UpdateWaiterZonesDto,
   ) {
     return this.users.updateWaiterZones(id, body.zones);
   }

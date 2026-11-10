@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { CorrelativoStatus, DocumentType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { isBusinessDateExpired } from '../../common/time/business-time.util';
 import type { ICorrelativosRepository } from '../interfaces/correlativos.repository';
 import type { CorrelativoEntity } from '../entities/correlativo.entity';
 
@@ -180,7 +181,7 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
       }
 
       const now = new Date();
-      if (active.expirationDate < now) {
+      if (isBusinessDateExpired(active.expirationDate, now)) {
         await tx.correlativo.update({
           where: { id: active.id },
           data: { status: CorrelativoStatus.VENCIDO },

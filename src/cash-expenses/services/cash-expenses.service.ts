@@ -129,18 +129,16 @@ export class CashExpensesService {
     user: AuthenticatedUser,
   ): Promise<CashExpenseEntity> {
     let targetShiftId = dto.shiftId;
+    const shift = targetShiftId
+      ? await this.shiftsService.getById(targetShiftId)
+      : await this.shiftsService.getActive();
 
-    if (!targetShiftId) {
-      const activeShift = await this.shiftsService.getActive();
-      if (!activeShift) {
+    if (!shift) {
         throw new BadRequestException(
           'Debes tener un turno de caja abierto para registrar un gasto.',
         );
-      }
-      targetShiftId = activeShift.id;
     }
-
-    const shift = await this.shiftsService.getById(targetShiftId);
+    targetShiftId = shift.id;
     if (shift.status !== ShiftStatus.OPEN) {
       throw new BadRequestException(
         'Solo se pueden registrar gastos en un turno que esté actualmente abierto.',

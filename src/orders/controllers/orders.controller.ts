@@ -27,6 +27,8 @@ import type { OrderEntity } from '../entities/order.entity';
 import { requiresKitchenPreparation } from '../validators/order-item-kind';
 import { ListOrderHistoryQueryDto } from '../dto/list-order-history-query.dto';
 import { OrderStatusDto } from '../dto/order-status.dto';
+import { HideKitchenTicketsDto } from '../dto/hide-kitchen-tickets.dto';
+import { UpdateOrderWaiterDto } from '../dto/update-order-waiter.dto';
 import {
   getBusinessDateParts,
   getBusinessDayBounds,
@@ -243,10 +245,10 @@ export class OrdersController {
     UserRoleDto.despachador,
   )
   async addHiddenKitchenTickets(
-    @Body('ticketIds') ticketIds: string[],
+    @Body() body: HideKitchenTicketsDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    await this.orders.addHiddenKitchenTickets(ticketIds, user);
+    await this.orders.addHiddenKitchenTickets(body.ticketIds, user);
     return { success: true };
   }
 
@@ -332,6 +334,24 @@ export class OrdersController {
   ) {
     const created = await this.orders.create(dto, user);
     return toOrderResponseDto(created);
+  }
+
+  @Patch(':id/waiter')
+  @Permissions('tables.operate')
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.mesero,
+    UserRoleDto.despachador,
+  )
+  async assignWaiter(
+    @Param('id') id: string,
+    @Body() dto: UpdateOrderWaiterDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const updated = await this.orders.assignWaiter(id, dto.waiterId, user);
+    return toOrderResponseDto(updated);
   }
 
   @Patch(':id/status')

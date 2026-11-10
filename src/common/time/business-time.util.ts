@@ -182,3 +182,37 @@ export function getBusinessMonthEnd(
     timeZone,
   );
 }
+
+export function parseBusinessDateInput(
+  value: string,
+  bound: 'start' | 'end' = 'start',
+  timeZone: string = getBusinessTimeZone(),
+): Date {
+  const trimmed = value.trim();
+  const dateOnlyMatch =
+    /^(\d{4}-\d{2}-\d{2})(?:$|T00:00:00(?:\.000)?(?:Z|[+-]00:00)?$)/.exec(
+      trimmed,
+    );
+  if (dateOnlyMatch) {
+    const bounds = getBusinessDayBounds(dateOnlyMatch[1], timeZone);
+    return bound === 'end' ? bounds.endOfDay : bounds.startOfDay;
+  }
+  return new Date(trimmed);
+}
+
+export function isBusinessDateExpired(
+  expirationDate: Date,
+  now: Date = new Date(),
+  timeZone: string = getBusinessTimeZone(),
+): boolean {
+  if (
+    expirationDate.getUTCHours() === 0 &&
+    expirationDate.getUTCMinutes() === 0 &&
+    expirationDate.getUTCSeconds() === 0 &&
+    expirationDate.getUTCMilliseconds() === 0
+  ) {
+    const expirationYmd = `${String(expirationDate.getUTCFullYear()).padStart(4, '0')}-${String(expirationDate.getUTCMonth() + 1).padStart(2, '0')}-${String(expirationDate.getUTCDate()).padStart(2, '0')}`;
+    return expirationYmd < getBusinessDateParts(now, timeZone).ymd;
+  }
+  return expirationDate < now;
+}

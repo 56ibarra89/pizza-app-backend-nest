@@ -46,6 +46,8 @@ export interface OrderEntity {
   customerAddress?: string;
   orderType?: OrderTypeDto;
   driverId?: string;
+  waiterId?: string;
+  waiterSnapshotName?: string;
   cuponId?: number;
   discountId?: number;
   happyHourId?: number;

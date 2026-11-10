@@ -17,7 +17,13 @@ export interface OrderPromotionInput {
 
 export type ResolvedOrderPromotion =
   | { source: 'none' }
-  | { source: 'coupon'; cuponId: number; promotionCode?: string }
+  | {
+      source: 'coupon';
+      cuponId: number;
+      promotionCode?: string;
+      /** Momento comercial de referencia (timestamp de la orden) para validar vigencia. */
+      referenceTime?: Date;
+    }
   | {
       source: 'discount';
       discountId: number;

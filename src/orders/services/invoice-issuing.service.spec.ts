@@ -107,6 +107,74 @@ describe('InvoiceIssuingService', () => {
     expect(orderUpdateArg.data.paidAt).toBeInstanceOf(Date);
   });
 
+  it('consumes a certificate assigned to the parent when the last split child settles it', async () => {
+    const queryRaw = jest
+      .fn()
+      .mockResolvedValueOnce([{ id: 'split-child' }])
+      .mockResolvedValueOnce([
+        { id: 9, status: CertificadoStatus.DISPONIBLE, deletedAt: null },
+      ]);
+    const tx = {
+      $queryRaw: queryRaw,
+      order: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'split-child',
+          parentOrderId: 'split-parent',
+          status: 'PENDING',
+          cashierId: 'cashier-1',
+          cashierSnapshotName: 'Caja',
+          shiftId: 'shift-open',
+          invoiceNumber: 'FAC-2',
+          pendingCertificateSerials: ['CERT-PARENT'],
+        }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      shift: { findFirst: jest.fn().mockResolvedValue({ id: 'shift-open' }) },
+      orderItem: {
+        findMany: jest.fn(({ where }: { where: { orderId: string } }) =>
+          Promise.resolve(
+            where.orderId === 'split-parent'
+              ? [
+                  {
+                    productId: 'product-1',
+                    name: 'Producto',
+                    note: 'Vale: CERT-PARENT',
+                    giftQuantity: 1,
+                    giftReason: 'certificado',
+                    price: new Prisma.Decimal(100),
+                  },
+                ]
+              : [],
+          ),
+        ),
+      },
+      certificado: {
+        findUnique: jest.fn().mockResolvedValue({
+          amount: null,
+          items: [{ productId: 'product-1', quantity: 1 }],
+        }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    };
+
+    await new InvoiceIssuingService().issue(tx as never, {
+      orderId: 'split-child',
+      dto: {},
+      totals,
+      promotion: { source: 'none' },
+    });
+
+    expect(tx.orderItem.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { orderId: 'split-parent', giftQuantity: { gt: 0 } } }),
+    );
+    expect(tx.certificado.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 9 },
+        data: expect.objectContaining({ redeemedOrderId: 'split-child' }),
+      }),
+    );
+  });
+
   it('rejects collection when no cash-register shift is open', async () => {
     const tx = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: 'order-1' }]),

@@ -159,8 +159,8 @@ export function normalizeAndValidateOrderPayments(
     }
     const originalAmount =
       providedOriginalAmount > 0
-        ? Math.round(providedOriginalAmount * 100) / 100
-        : Math.round((amount / exchangeRate) * 100) / 100;
+        ? Math.round(providedOriginalAmount * 10000) / 10000
+        : Math.round((amount / exchangeRate) * 10000) / 10000;
 
     if (configured.currency !== 'USD') {
       if (Math.abs(originalAmount - amount) > 0.01) {
@@ -171,7 +171,7 @@ export function normalizeAndValidateOrderPayments(
     } else if (providedOriginalAmount > 0) {
       const expectedNioAmount =
         Math.round(originalAmount * exchangeRate * 100) / 100;
-      if (Math.abs(expectedNioAmount - amount) > 0.05) {
+      if (Math.abs(expectedNioAmount - amount) > 0.01) {
         throw new BadRequestException(
           'El monto en córdobas no es coherente con el monto original en dólares y el tipo de cambio aplicado.',
         );

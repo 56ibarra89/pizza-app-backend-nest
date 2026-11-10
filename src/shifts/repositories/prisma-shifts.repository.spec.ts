@@ -209,4 +209,28 @@ describe('PrismaShiftsRepository.close', () => {
       }),
     );
   });
+
+  it('no consulta órdenes pendientes al cargar ventas en vivo de un turno abierto', async () => {
+    const paymentFindMany = jest.fn().mockResolvedValue([]);
+    const orderFindMany = jest.fn().mockResolvedValue([]);
+    const transaction = jest.fn((callback) =>
+      callback({
+        payment: { findMany: paymentFindMany },
+        order: { findMany: orderFindMany },
+      }),
+    );
+    const shiftFindFirst = jest.fn().mockResolvedValue(existingShift);
+    const repository = new PrismaShiftsRepository(
+      {
+        shift: { findFirst: shiftFindFirst },
+        $transaction: transaction,
+      } as unknown as PrismaService,
+      { findByPin: jest.fn() } as any,
+    );
+
+    await repository.findActive();
+
+    expect(paymentFindMany).toHaveBeenCalledTimes(1);
+    expect(orderFindMany).not.toHaveBeenCalled();
+  });
 });

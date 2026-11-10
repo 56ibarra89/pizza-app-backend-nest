@@ -81,6 +81,8 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
         updatedAt: new Date('2026-11-04T12:00:00.000Z'),
         orderType: data.orderType ?? OrderTypeDto.local,
         driverId: data.driverId,
+        waiterId: data.waiterId,
+        waiterSnapshotName: data.waiterSnapshotName,
         payments: data.payments ?? [],
         linkedTables: data.linkedTables ?? [],
       };
@@ -122,6 +124,31 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
       });
     }),
     issueInTransaction: jest.fn(),
+  };
+  const prismaMock = {
+    $transaction: jest.fn(async (cb: (tx: any) => any) =>
+      cb({
+        order: {
+          count: jest.fn().mockResolvedValue(0),
+          findMany: jest.fn().mockResolvedValue([]),
+        },
+        certificado: { findMany: jest.fn().mockResolvedValue([]) },
+        cupon: { findUnique: jest.fn().mockResolvedValue(null) },
+      }),
+    ),
+    appConfig: {
+      findUnique: jest.fn().mockResolvedValue(null),
+    },
+    order: {
+      count: jest.fn().mockResolvedValue(0),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    certificado: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    user: {
+      findFirst: jest.fn(),
+    },
   };
 
   beforeAll(async () => {
@@ -215,28 +242,7 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
         },
         {
           provide: PrismaService,
-          useValue: {
-            $transaction: jest.fn(async (cb: (tx: any) => any) =>
-              cb({
-                order: {
-                  count: jest.fn().mockResolvedValue(0),
-                  findMany: jest.fn().mockResolvedValue([]),
-                },
-                certificado: { findMany: jest.fn().mockResolvedValue([]) },
-                cupon: { findUnique: jest.fn().mockResolvedValue(null) },
-              }),
-            ),
-            appConfig: {
-              findUnique: jest.fn().mockResolvedValue(null),
-            },
-            order: {
-              count: jest.fn().mockResolvedValue(0),
-              findMany: jest.fn().mockResolvedValue([]),
-            },
-            certificado: {
-              findMany: jest.fn().mockResolvedValue([]),
-            },
-          },
+          useValue: prismaMock,
         },
         {
           provide: EventEmitter2,
@@ -338,6 +344,68 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
       .send({ status: 'paid' });
 
     expect(response.status).toBe(403);
+  });
+
+  it('asigna al mesero autenticado al abrir una orden de mesa', async () => {
+    const waiterId = '11111111-1111-4111-8111-111111111111';
+    prismaMock.user.findFirst.mockResolvedValue({
+      id: waiterId,
+      username: 'ana',
+      firstName: 'Ana',
+      lastName: 'López',
+    });
+
+    const response = await request(app.getHttpServer())
+      .post('/orders')
+      .set('x-test-role', 'mesero')
+      .set('x-test-user-id', waiterId)
+      .set('x-test-permissions', 'orders.read,orders.manage')
+      .send({
+        items: [],
+        total: 0,
+        status: 'pending',
+        orderType: 'local',
+        linkedTables: ['table-1'],
+      })
+      .expect(201);
+
+    expect(response.body.waiterId).toBe(waiterId);
+    expect(response.body.waiterSnapshotName).toBe('Ana López');
+    expect(repoMock.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        waiterId,
+        waiterSnapshotName: 'Ana López',
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('permite reasignar una orden abierta a un mesero activo', async () => {
+    const waiterId = '22222222-2222-4222-8222-222222222222';
+    ordersStore.set('ord-waiter-1', {
+      id: 'ord-waiter-1',
+      items: [],
+      total: 0,
+      status: OrderStatusDto.pending,
+      timestamp: new Date('2026-11-04T12:00:00.000Z'),
+      orderType: OrderTypeDto.local,
+    });
+    prismaMock.user.findFirst.mockResolvedValue({
+      id: waiterId,
+      username: 'bea',
+      firstName: 'Bea',
+      lastName: 'Pérez',
+    });
+
+    const response = await request(app.getHttpServer())
+      .patch('/orders/ord-waiter-1/waiter')
+      .set('x-test-role', 'cajero')
+      .set('x-test-permissions', 'orders.read,tables.operate')
+      .send({ waiterId })
+      .expect(200);
+
+    expect(response.body.waiterId).toBe(waiterId);
+    expect(response.body.waiterSnapshotName).toBe('Bea Pérez');
   });
 
   it('bloquea con 403 a un motorizado que intenta consultar una orden ajena por ID (H08)', async () => {

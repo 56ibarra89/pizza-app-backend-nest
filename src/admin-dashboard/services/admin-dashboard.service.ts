@@ -181,7 +181,13 @@ export class AdminDashboardService {
     const todayOrders = await this.prisma.order.findMany({
       where: {
         timestamp: { gte: startOfDay, lte: endOfDay },
-        status: { not: 'CANCELLED' },
+        // El rendimiento financiero solo considera ventas liquidadas. Un
+        // padre aún pendiente no debe sumarse junto con sus subcuentas ya
+        // pagadas.
+        status: 'PAID',
+        NOT: {
+          splitOrders: { some: { status: 'PAID' } },
+        },
       },
       include: {
         linkedTables: {
@@ -190,28 +196,63 @@ export class AdminDashboardService {
       },
     });
 
-    const result: WaiterPerformanceDto[] = waiters.map((waiter, index) => {
-      const assignedFloors = new Set(
-        waiter.waiterZoneAssignments.map((a) => a.floor),
-      );
-      const waiterUsernameLower = waiter.username.toLowerCase();
+    const ordersByWaiter = new Map<string, (typeof todayOrders)[number][]>();
+    const waitersByFloor = new Map<number, Set<string>>();
+    const waiterUsernames = new Map(
+      waiters.map((waiter) => [waiter.username.toLowerCase(), waiter.id]),
+    );
 
-      const waiterOrders = todayOrders.filter((order) => {
-        if (
-          order.status === 'PAID' &&
-          order.invoiceNumber === null &&
-          (Number(order.total) || 0) === 0
-        ) {
-          return false;
+    for (const waiter of waiters) {
+      ordersByWaiter.set(waiter.id, []);
+      for (const assignment of waiter.waiterZoneAssignments) {
+        const assigned = waitersByFloor.get(assignment.floor) ?? new Set();
+        assigned.add(waiter.id);
+        waitersByFloor.set(assignment.floor, assigned);
+      }
+    }
+
+    for (const order of todayOrders) {
+      if (order.invoiceNumber === null && (Number(order.total) || 0) === 0) {
+        continue;
+      }
+
+      const directWaiterId =
+        (order.waiterId && ordersByWaiter.has(order.waiterId)
+          ? order.waiterId
+          : undefined) ??
+        (order.waiterSnapshotName
+          ? waiterUsernames.get(order.waiterSnapshotName.toLowerCase())
+          : undefined);
+      const legacyWaiterId =
+        directWaiterId ??
+        (order.cashierId && ordersByWaiter.has(order.cashierId)
+          ? order.cashierId
+          : undefined) ??
+        (order.cashierSnapshotName
+          ? waiterUsernames.get(order.cashierSnapshotName.toLowerCase())
+          : undefined);
+      if (legacyWaiterId) {
+        ordersByWaiter.get(legacyWaiterId)?.push(order);
+        continue;
+      }
+
+      const candidates = new Set<string>();
+      for (const table of order.linkedTables) {
+        for (const waiterId of waitersByFloor.get(table.mesa.floor) ?? []) {
+          candidates.add(waiterId);
         }
-        const matchedByTable = order.linkedTables.some((t) =>
-          assignedFloors.has(t.mesa.floor),
-        );
-        const matchedByUser =
-          order.cashierId === waiter.id ||
-          order.cashierSnapshotName?.toLowerCase() === waiterUsernameLower;
-        return matchedByTable || matchedByUser;
-      });
+      }
+
+      // Una zona puede compartirse. Sin un mesero responsable almacenado en
+      // la orden no se inventa una atribución ni se duplica la venta.
+      if (candidates.size === 1) {
+        const [waiterId] = candidates;
+        ordersByWaiter.get(waiterId)?.push(order);
+      }
+    }
+
+    const result: WaiterPerformanceDto[] = waiters.map((waiter, index) => {
+      const waiterOrders = ordersByWaiter.get(waiter.id) ?? [];
 
       const ordersServed = waiterOrders.length;
       const revenueTotal = waiterOrders.reduce(

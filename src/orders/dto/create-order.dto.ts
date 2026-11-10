@@ -134,6 +134,11 @@ export class CreateOrderDto {
   cashierId?: string;
 
   @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  waiterId?: string;
+
+  @IsOptional()
   @IsBoolean()
   isSentToKitchen?: boolean;
 

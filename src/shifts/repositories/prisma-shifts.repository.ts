@@ -381,28 +381,39 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     shift: ShiftWithExpenses,
     closeType: 'HANDOVER' | 'END_OF_DAY' = 'HANDOVER',
   ): Promise<ShiftClosePreview> {
+    // Una lectura operativa de turno solo necesita ventas y gastos. Las
+    // órdenes/mesas que bloquean el cierre se consultan exclusivamente para
+    // un cierre final, evitando escanear todo el salón en cada refresco.
+    const shouldCheckBlockingOperations = closeType === 'END_OF_DAY';
     const [payments, pendingOrders] = await Promise.all([
       tx.payment.findMany({
         where: { order: { shiftId: shift.id, status: OrderStatus.PAID } },
       }),
-      tx.order.findMany({
-        where: {
-          status: { notIn: FINAL_ORDER_STATUSES },
-        },
-        select: {
-          id: true,
-          invoiceNumber: true,
-          status: true,
-          linkedTables: {
+      shouldCheckBlockingOperations
+        ? tx.order.findMany({
+            where: {
+              status: { notIn: FINAL_ORDER_STATUSES },
+            },
             select: {
-              mesa: {
-                select: { id: true, floor: true, number: true, estado: true },
+              id: true,
+              invoiceNumber: true,
+              status: true,
+              linkedTables: {
+                select: {
+                  mesa: {
+                    select: {
+                      id: true,
+                      floor: true,
+                      number: true,
+                      estado: true,
+                    },
+                  },
+                },
               },
             },
-          },
-        },
-        orderBy: { timestamp: 'asc' },
-      }),
+            orderBy: { timestamp: 'asc' },
+          })
+        : Promise.resolve([]),
     ]);
 
     let cash = new Prisma.Decimal(0);

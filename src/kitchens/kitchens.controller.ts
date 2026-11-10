@@ -10,11 +10,11 @@ import {
 import { KitchensService } from './kitchens.service';
 import { CreateKitchenDto } from './dto/create-kitchen.dto';
 import { UpdateKitchenDto } from './dto/update-kitchen.dto';
+import { UpdateCookAssignmentsDto } from './dto/update-cook-assignments.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
 import { Permissions, UserRoleDto } from '../common';
-import type { WeekDay } from '@prisma/client';
 
 @Controller('kitchens')
 export class KitchensController {
@@ -39,13 +39,9 @@ export class KitchensController {
   @Roles(UserRoleDto.admin)
   updateCookAssignments(
     @Param('userId') userId: string,
-    @Body('assignments')
-    assignments: {
-      dayOfWeek: WeekDay;
-      kitchenId: string | null;
-    }[],
+    @Body() body: UpdateCookAssignmentsDto,
   ) {
-    return this.kitchensService.updateCookAssignments(userId, assignments);
+    return this.kitchensService.updateCookAssignments(userId, body.assignments);
   }
 
   @Get('me/assignments')

@@ -28,6 +28,7 @@ import { extractCertificateSerialFromNote } from '../validators/order-certificat
 import {
   getBusinessDateParts,
   getBusinessMonthEnd,
+  isBusinessDateExpired,
 } from '../../common/time/business-time.util';
 
 interface IssueInvoiceParams {
@@ -135,6 +136,7 @@ export class InvoiceIssuingService {
       where: { id: orderId },
       select: {
         id: true,
+        parentOrderId: true,
         status: true,
         cashierId: true,
         cashierSnapshotName: true,
@@ -170,7 +172,13 @@ export class InvoiceIssuingService {
       if (cuponId !== null && !skipCouponConsumption) {
         await this.consumeCoupon(tx, cuponId, now);
       }
-      await this.consumeCertificates(tx, certificateSerials, orderId, now);
+      await this.consumeCertificates(
+        tx,
+        certificateSerials,
+        orderId,
+        now,
+        order.parentOrderId ?? undefined,
+      );
 
       await tx.order.update({
         where: { id: orderId },
@@ -228,7 +236,13 @@ export class InvoiceIssuingService {
     if (cuponId !== null && !skipCouponConsumption) {
       await this.consumeCoupon(tx, cuponId, now);
     }
-    await this.consumeCertificates(tx, certificateSerials, orderId, now);
+    await this.consumeCertificates(
+      tx,
+      certificateSerials,
+      orderId,
+      now,
+      order.parentOrderId ?? undefined,
+    );
 
     const shiftId = await this.requireActiveShiftId(tx);
 
@@ -280,7 +294,7 @@ export class InvoiceIssuingService {
 
     if (
       correlativo.expirationDate instanceof Date &&
-      correlativo.expirationDate < now
+      isBusinessDateExpired(correlativo.expirationDate, now)
     ) {
       await tx.correlativo.update({
         where: { id: correlativo.id },
@@ -498,6 +512,7 @@ export class InvoiceIssuingService {
     serials: readonly string[],
     orderId: string,
     now: Date,
+    parentOrderId?: string,
   ): Promise<void> {
     const giftedItems = tx.orderItem?.findMany
       ? await tx.orderItem.findMany({
@@ -535,11 +550,14 @@ export class InvoiceIssuingService {
       ),
     ).sort();
 
+    let parentCertificateGiftedItems: typeof certificateGiftedItems | null =
+      null;
+
     for (const serial of normalizedSerials) {
       const rows = await tx.$queryRaw<LockedCertificate[]>`
         SELECT id, status, "deletedAt"
         FROM "Certificado"
-        WHERE serial = ${serial}
+        WHERE UPPER(serial) = ${serial}
         FOR UPDATE
       `;
       const certificate = rows[0];
@@ -560,9 +578,30 @@ export class InvoiceIssuingService {
           items: { select: { productId: true, quantity: true } },
         },
       });
-      const taggedItems = certificateGiftedItems.filter(
+      let taggedItems = certificateGiftedItems.filter(
         (item) => extractCertificateSerialFromNote(item.note) === serial,
       );
+      if (taggedItems.length === 0 && parentOrderId && tx.orderItem?.findMany) {
+        if (parentCertificateGiftedItems === null) {
+          const parentGiftedItems = await tx.orderItem.findMany({
+            where: { orderId: parentOrderId, giftQuantity: { gt: 0 } },
+            select: {
+              productId: true,
+              name: true,
+              note: true,
+              giftQuantity: true,
+              giftReason: true,
+              price: true,
+            },
+          });
+          parentCertificateGiftedItems = parentGiftedItems.filter(
+            (item) => item.giftReason !== 'happy-hour-2x1',
+          );
+        }
+        taggedItems = parentCertificateGiftedItems.filter(
+          (item) => extractCertificateSerialFromNote(item.note) === serial,
+        );
+      }
       if (taggedItems.length === 0) {
         throw new BadRequestException(
           `El certificado ${serial} no está asociado a productos regalados`,

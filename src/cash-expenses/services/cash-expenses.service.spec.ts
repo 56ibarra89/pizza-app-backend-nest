@@ -87,6 +87,7 @@ describe('CashExpensesService', () => {
     );
 
     expect(shiftsService.getActive).toHaveBeenCalled();
+    expect(shiftsService.getById).not.toHaveBeenCalled();
     expect(repo.create).toHaveBeenCalledWith(
       expect.objectContaining({
         shiftId: 'shift-123',

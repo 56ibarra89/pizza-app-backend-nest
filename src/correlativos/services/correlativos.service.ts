@@ -11,6 +11,7 @@ import {
 } from '../interfaces/correlativos.repository';
 import type { CreateCorrelativoDto } from '../dto/create-correlativo.dto';
 import type { UpdateCorrelativoDto } from '../dto/update-correlativo.dto';
+import { parseBusinessDateInput } from '../../common/time/business-time.util';
 
 @Injectable()
 export class CorrelativosService {
@@ -55,8 +56,8 @@ export class CorrelativosService {
       startNumber,
       endNumber,
       currentNumber,
-      issueDate: new Date(dto.issueDate),
-      expirationDate: new Date(dto.expirationDate),
+      issueDate: parseBusinessDateInput(dto.issueDate, 'start'),
+      expirationDate: parseBusinessDateInput(dto.expirationDate, 'end'),
       status: dto.status,
     });
   }
@@ -96,9 +97,11 @@ export class CorrelativosService {
       startNumber: dto.startNumber,
       endNumber: dto.endNumber,
       currentNumber: dto.currentNumber,
-      issueDate: dto.issueDate ? new Date(dto.issueDate) : undefined,
+      issueDate: dto.issueDate
+        ? parseBusinessDateInput(dto.issueDate, 'start')
+        : undefined,
       expirationDate: dto.expirationDate
-        ? new Date(dto.expirationDate)
+        ? parseBusinessDateInput(dto.expirationDate, 'end')
         : undefined,
       status: dto.status,
     });

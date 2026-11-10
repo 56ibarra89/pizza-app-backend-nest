@@ -61,4 +61,46 @@ describe('PrismaOrdersRepository history pagination', () => {
     });
     expect(result).toMatchObject({ items: [], total: 42 });
   });
+
+  it('only includes combos that actually contain the selected kitchen', async () => {
+    let capturedQuery: unknown;
+    const prisma = {
+      order: {
+        findMany: jest.fn((args: unknown) => {
+          capturedQuery = args;
+          return Promise.resolve([]);
+        }),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      payment: { findMany: jest.fn().mockResolvedValue([]) },
+    } as unknown as PrismaService;
+    const repository = new PrismaOrdersRepository(prisma);
+
+    await repository.listHistory({
+      startDate: new Date('2026-11-01T06:00:00.000Z'),
+      endDate: new Date('2026-11-11T05:59:59.999Z'),
+      page: 1,
+      pageSize: 25,
+      kitchenId: 'kitchen-a',
+    });
+
+    const query = capturedQuery as {
+      where: { AND: Array<{ AND?: unknown[] }> };
+    };
+    expect(query.where.AND[0].AND).toContainEqual({
+      items: {
+        some: {
+          OR: [
+            { kitchenId: 'kitchen-a' },
+            {
+              isCombo: true,
+              comboSelections: {
+                array_contains: [{ kitchenId: 'kitchen-a' }],
+              },
+            },
+          ],
+        },
+      },
+    });
+  });
 });

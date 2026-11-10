@@ -61,9 +61,20 @@ export class PrismaCertificatePromotionsRepository implements ICertificatePromot
   }
 
   async delete(id: number): Promise<void> {
+    const existing = await this.prisma.certificado.findUnique({
+      where: { id },
+      select: { serial: true },
+    });
+    if (!existing) return;
+
+    // `serial` es único a nivel de base. Conservamos el registro borrado para
+    // auditoría, pero liberamos su serial comercial para una nueva emisión.
     await this.prisma.certificado.update({
       where: { id },
-      data: { deletedAt: new Date() },
+      data: {
+        deletedAt: new Date(),
+        serial: `${existing.serial}#deleted-${id}`,
+      },
     });
   }
 }

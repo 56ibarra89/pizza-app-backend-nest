@@ -123,7 +123,15 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       baseConditions.push({
         items: {
           some: {
-            OR: [{ kitchenId: params.kitchenId }, { isCombo: true }],
+            OR: [
+              { kitchenId: params.kitchenId },
+              {
+                isCombo: true,
+                comboSelections: {
+                  array_contains: [{ kitchenId: params.kitchenId }],
+                },
+              },
+            ],
           },
         },
       });
@@ -379,6 +387,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       }[];
       cashierId?: string;
       cashierSnapshotName?: string;
+      waiterId?: string;
+      waiterSnapshotName?: string;
       driverId?: string;
       isSentToKitchen?: boolean;
       linkedTables?: string[];
@@ -444,6 +454,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           : {}),
         cashierId: data.cashierId ?? null,
         cashierSnapshotName: data.cashierSnapshotName ?? null,
+        waiterId: data.waiterId ?? null,
+        waiterSnapshotName: data.waiterSnapshotName ?? null,
         driverId: data.driverId ?? null,
         isSentToKitchen: data.isSentToKitchen ?? false,
         ...(uniqueLinkedTables.length
@@ -537,6 +549,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         | null;
       cashierId?: string | null;
       cashierSnapshotName?: string | null;
+      waiterId?: string | null;
+      waiterSnapshotName?: string | null;
       driverId?: string | null;
       cancelReason?: string | null;
       cancellationReasonId?: string | null;
@@ -627,6 +641,16 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         data.cashierSnapshotName === undefined
           ? undefined
           : data.cashierSnapshotName,
+      waiter:
+        data.waiterId === undefined
+          ? undefined
+          : data.waiterId
+            ? { connect: { id: data.waiterId } }
+            : { disconnect: true },
+      waiterSnapshotName:
+        data.waiterSnapshotName === undefined
+          ? undefined
+          : data.waiterSnapshotName,
       cancelReason:
         data.cancelReason === undefined ? undefined : data.cancelReason,
       cancellationReasonId:
@@ -858,48 +882,46 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     kitchenId?: string;
     itemId?: number;
   }): Promise<void> {
-    const whereClause: Prisma.OrderItemWhereInput = {
-      orderId: params.orderId,
-      isSentToKitchen: true,
-      sentAt: params.sentAt,
-    };
+    await this.prisma.$transaction(async (tx) => {
+      // Serializa las estaciones que actualizan selecciones distintas del mismo
+      // combo; sin este bloqueo una escritura podía borrar la de otra cocina.
+      await tx.$queryRaw`
+        SELECT id FROM "Order" WHERE id = ${params.orderId} FOR UPDATE
+      `;
 
-    if (params.itemId !== undefined) {
-      whereClause.id = params.itemId;
-    } else if (params.kitchenId) {
-      whereClause.OR = [{ kitchenId: params.kitchenId }, { isCombo: true }];
-    }
+      const whereClause: Prisma.OrderItemWhereInput = {
+        orderId: params.orderId,
+        isSentToKitchen: true,
+        sentAt: params.sentAt,
+      };
 
-    const items = await this.prisma.orderItem.findMany({
-      where: whereClause,
-    });
+      if (params.itemId !== undefined) {
+        whereClause.id = params.itemId;
+      } else if (params.kitchenId) {
+        whereClause.OR = [{ kitchenId: params.kitchenId }, { isCombo: true }];
+      }
 
-    const regularItemIds = items
-      .filter((item) => !item.isCombo || !Array.isArray(item.comboSelections))
-      .map((item) => item.id);
-    if (regularItemIds.length > 0) {
-      await this.prisma.orderItem.updateMany({
-        where: { id: { in: regularItemIds } },
-        data: {
-          kitchenStatus: toDbKitchenStatus(params.kitchenStatus),
-        },
-      });
-    }
+      const items = await tx.orderItem.findMany({ where: whereClause });
+      const regularItemIds = items
+        .filter((item) => !item.isCombo || !Array.isArray(item.comboSelections))
+        .map((item) => item.id);
+      if (regularItemIds.length > 0) {
+        await tx.orderItem.updateMany({
+          where: { id: { in: regularItemIds } },
+          data: { kitchenStatus: toDbKitchenStatus(params.kitchenStatus) },
+        });
+      }
 
-    for (const item of items) {
-      if (item.isCombo && Array.isArray(item.comboSelections)) {
+      for (const item of items) {
+        if (!item.isCombo || !Array.isArray(item.comboSelections)) continue;
+
         const selections =
           item.comboSelections as unknown as SelectedComboOptionEntity[];
-        const updatedSelections = selections.map((sel) => {
-          if (!params.kitchenId || sel.kitchenId === params.kitchenId) {
-            return {
-              ...sel,
-              kitchenStatus: params.kitchenStatus,
-            };
-          }
-          return sel;
-        });
-
+        const updatedSelections = selections.map((sel) =>
+          !params.kitchenId || sel.kitchenId === params.kitchenId
+            ? { ...sel, kitchenStatus: params.kitchenStatus }
+            : sel,
+        );
         const allDelivered = updatedSelections.every(
           (s) => s.kitchenStatus === KitchenStatusDto.delivered,
         );
@@ -914,14 +936,15 @@ export class PrismaOrdersRepository implements IOrdersRepository {
             s.kitchenStatus === KitchenStatusDto.ready,
         );
 
-        let overallStatus: KitchenStatusDto = 'pending' as KitchenStatusDto;
-        if (allDelivered) overallStatus = 'delivered' as KitchenStatusDto;
-        else if (allReadyOrDelivered)
-          overallStatus = 'ready' as KitchenStatusDto;
-        else if (anyPreparingOrReady)
-          overallStatus = 'preparing' as KitchenStatusDto;
+        const overallStatus = allDelivered
+          ? KitchenStatusDto.delivered
+          : allReadyOrDelivered
+            ? KitchenStatusDto.ready
+            : anyPreparingOrReady
+              ? KitchenStatusDto.preparing
+              : KitchenStatusDto.pending;
 
-        await this.prisma.orderItem.update({
+        await tx.orderItem.update({
           where: { id: item.id },
           data: {
             kitchenStatus: toDbKitchenStatus(overallStatus),
@@ -930,7 +953,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           },
         });
       }
-    }
+    });
   }
 
   async updateOperationalStatus(
@@ -980,6 +1003,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     customerAddress: string | null;
     orderType: import('@prisma/client').OrderType | null;
     driverId: string | null;
+    waiterId: string | null;
+    waiterSnapshotName: string | null;
     cuponId: number | null;
     discountId: number | null;
     happyHourId: number | null;
@@ -1110,6 +1135,8 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       customerAddress: o.customerAddress ?? undefined,
       orderType: o.orderType ? fromDbOrderType(o.orderType) : undefined,
       driverId: o.driverId ?? undefined,
+      waiterId: o.waiterId ?? undefined,
+      waiterSnapshotName: o.waiterSnapshotName ?? undefined,
       cuponId: o.cuponId ?? undefined,
       discountId: o.discountId ?? undefined,
       happyHourId: o.happyHourId ?? undefined,

@@ -15,6 +15,7 @@ import { OrderPricingService } from './order-pricing.service';
 import type { OrderTotals } from '../types/order-totals';
 import type { ResolvedOrderPromotion } from '../types/order-promotion';
 import { OrderStatusDto } from '../dto/order-status.dto';
+import { getBusinessDayBounds } from '../../common/time/business-time.util';
 
 @Injectable()
 export class OrderFinalizationService {
@@ -118,11 +119,15 @@ export class OrderFinalizationService {
       return;
     }
     if (error.message === 'El correlativo está VENCIDO') {
+      // La comparación debe incluir correlativos heredados guardados a
+      // medianoche UTC: un documento vence al terminar su día comercial, no
+      // al llegar las 6 p. m. de Managua.
+      const { startOfDay } = getBusinessDayBounds(new Date());
       await this.prisma.correlativo.updateMany({
         where: {
           documentType: 'FACTURA',
           status: 'ACTIVO',
-          expirationDate: { lt: new Date() },
+          expirationDate: { lt: startOfDay },
         },
         data: { status: 'VENCIDO' },
       });

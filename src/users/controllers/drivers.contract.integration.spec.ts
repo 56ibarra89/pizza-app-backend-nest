@@ -8,19 +8,32 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 describe('Drivers HTTP contract', () => {
   let app: any;
   const list = jest.fn().mockResolvedValue([]);
+  const listWaiters = jest.fn().mockResolvedValue([]);
   beforeAll(async () => {
     const module = await Test.createTestingModule({
       controllers: [UsersController],
       providers: [
         RolesGuard,
-        { provide: UsersService, useValue: { getAvailableDrivers: list } },
+        {
+          provide: UsersService,
+          useValue: {
+            getAvailableDrivers: list,
+            getActiveWaiters: listWaiters,
+          },
+        },
       ],
     }).compile();
     app = module.createNestApplication();
     app.use((req: any, _res: any, next: () => void) => {
+      const requestedPermissions = req.headers['x-permissions'];
       req.user = {
         role: 'admin',
-        permissions: req.headers['x-permissions'] ? ['users.directory'] : [],
+        permissions:
+          requestedPermissions === 'yes'
+            ? ['users.directory']
+            : typeof requestedPermissions === 'string'
+              ? requestedPermissions.split(',')
+              : [],
       };
       next();
     });
@@ -52,5 +65,15 @@ describe('Drivers HTTP contract', () => {
     await request(app.getHttpServer())
       .get('/users/drivers?date=2026-11-08')
       .expect(403);
+  });
+
+  it('expone únicamente meseros activos para reasignación de mesas', async () => {
+    await request(app.getHttpServer())
+      .get('/users/waiters')
+      .set('x-permissions', 'tables.operate')
+      .expect(200);
+    expect(listWaiters).toHaveBeenCalledTimes(1);
+
+    await request(app.getHttpServer()).get('/users/waiters').expect(403);
   });
 });

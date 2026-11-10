@@ -108,6 +108,14 @@ export class UsersService {
     return this.repo.getAvailableDrivers(date);
   }
 
+  async getActiveWaiters() {
+    return this.prisma.user.findMany({
+      where: { role: DbUserRole.MESERO, isActive: true },
+      select: { id: true, username: true, firstName: true, lastName: true },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }, { username: 'asc' }],
+    });
+  }
+
   async getById(id: string) {
     const found = await this.repo.findById(id);
     if (!found) throw new NotFoundException('Usuario no encontrado');

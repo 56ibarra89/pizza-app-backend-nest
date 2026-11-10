@@ -197,7 +197,7 @@ export class OrderPricingService {
       if (cuponId === undefined) {
         throw new BadRequestException('Debe indicar el cupÃ³n a aplicar');
       }
-      return { source, cuponId, promotionCode };
+      return { source, cuponId, promotionCode, referenceTime: now };
     }
 
     if (source === 'discount') {
@@ -395,7 +395,9 @@ export class OrderPricingService {
         'app_factura_tax_config',
       );
       const { taxes, isExonerated } = readTaxConfig(taxConfig.data);
-      taxPercentage = isExonerated ? 0 : (taxes[0]?.percentage ?? 0);
+      taxPercentage = isExonerated
+        ? 0
+        : taxes.reduce((sum, tax) => sum + tax.percentage, 0);
     }
     const taxAmount =
       taxPercentage > 0 ? taxableTotal * (taxPercentage / 100) : 0;
@@ -488,7 +490,10 @@ export class OrderPricingService {
     if (promotion.source === 'none') return 0;
 
     if (promotion.source === 'coupon') {
-      const coupon = await this.coupons.findById(promotion.cuponId);
+      const coupon = await this.coupons.findById(
+        promotion.cuponId,
+        promotion.referenceTime ?? new Date(),
+      );
       if (!coupon) throw new BadRequestException('CupÃ³n no encontrado');
       if (
         coupon.status !== 'Activo' ||
