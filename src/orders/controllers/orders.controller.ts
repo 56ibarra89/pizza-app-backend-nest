@@ -158,7 +158,7 @@ export class OrdersController {
       const hasAssignedKitchenItem = order.items.some(
         (item) =>
           requiresKitchenPreparation(item) &&
-          (item.kitchenId === kitchenId ||
+          ((!item.isCombo && item.kitchenId === kitchenId) ||
             (item.isCombo &&
               Array.isArray(item.comboSelections) &&
               item.comboSelections.some(
@@ -173,7 +173,7 @@ export class OrdersController {
           items: order.items.filter(
             (item) =>
               !requiresKitchenPreparation(item) ||
-              item.kitchenId === kitchenId ||
+              (!item.isCombo && item.kitchenId === kitchenId) ||
               (item.isCombo &&
                 Array.isArray(item.comboSelections) &&
                 item.comboSelections.some(

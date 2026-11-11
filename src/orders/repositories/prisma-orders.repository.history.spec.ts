@@ -91,7 +91,7 @@ describe('PrismaOrdersRepository history pagination', () => {
       items: {
         some: {
           OR: [
-            { kitchenId: 'kitchen-a' },
+            { isCombo: false, kitchenId: 'kitchen-a' },
             {
               isCombo: true,
               comboSelections: {

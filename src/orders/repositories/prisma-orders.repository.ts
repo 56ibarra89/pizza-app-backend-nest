@@ -64,7 +64,15 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       conditions.push({
         items: {
           some: {
-            OR: [{ kitchenId: filters.kitchenId }, { isCombo: true }],
+            OR: [
+              { isCombo: false, kitchenId: filters.kitchenId },
+              {
+                isCombo: true,
+                comboSelections: {
+                  array_contains: [{ kitchenId: filters.kitchenId }],
+                },
+              },
+            ],
           },
         },
       });
@@ -124,7 +132,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         items: {
           some: {
             OR: [
-              { kitchenId: params.kitchenId },
+              { isCombo: false, kitchenId: params.kitchenId },
               {
                 isCombo: true,
                 comboSelections: {

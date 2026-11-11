@@ -121,6 +121,30 @@ describe('PrismaShiftsRepository.close', () => {
     },
   };
 
+  it('lee ventas de un turno abierto sin consultar órdenes ni mesas para cierre', async () => {
+    const orderFindMany = jest.fn();
+    const paymentFindMany = jest.fn().mockResolvedValue([]);
+    const tx = {
+      payment: { findMany: paymentFindMany },
+      order: { findMany: orderFindMany },
+    };
+    const repository = new PrismaShiftsRepository(
+      {
+        shift: { findFirst: jest.fn().mockResolvedValue(existingShift) },
+        $transaction: jest.fn(
+          (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+        ),
+      } as unknown as PrismaService,
+      {} as any,
+    );
+
+    const active = await repository.findActive();
+
+    expect(active?.totalSales).toBe(0);
+    expect(paymentFindMany).toHaveBeenCalledTimes(1);
+    expect(orderFindMany).not.toHaveBeenCalled();
+  });
+
   it('cierra directamente cuando el conteo es exacto', async () => {
     const { repository, systemLogCreate } = createHarness();
 

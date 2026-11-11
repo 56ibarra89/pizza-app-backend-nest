@@ -265,6 +265,12 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
     };
 
     function createOrdersServiceForOrder(order: OrderEntity) {
+      const tx = { $queryRaw: jest.fn().mockResolvedValue([{ id: order.id }]) };
+      const prisma = {
+        $transaction: jest.fn(
+          (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+        ),
+      };
       const repo = {
         findById: jest.fn().mockResolvedValue(order),
         update: jest
@@ -283,9 +289,9 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
         {} as never,
         {} as never,
         {} as never,
-        {} as never,
+        prisma as never,
       );
-      return { service, repo };
+      return { service, repo, prisma, tx };
     }
 
     it('rejects emptying items on a paid order (items: [])', async () => {
@@ -346,7 +352,8 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
     });
 
     it('allows operational kitchen state updates on a paid order while preserving commercial fields', async () => {
-      const { service, repo } = createOrdersServiceForOrder(paidOrder);
+      const { service, repo, prisma, tx } =
+        createOrdersServiceForOrder(paidOrder);
 
       const result = await service.updateItems(paidOrder.id, {
         isSentToKitchen: true,
@@ -361,6 +368,14 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
       });
 
       expect(repo.update).toHaveBeenCalledTimes(1);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(repo.findById).toHaveBeenCalledWith(paidOrder.id, tx);
+      expect(repo.update).toHaveBeenCalledWith(
+        paidOrder.id,
+        expect.any(Object),
+        tx,
+      );
       expect(result.items).toHaveLength(1);
       expect(result.items[0]).toMatchObject({
         id: 10,
@@ -371,6 +386,24 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
         isSentToKitchen: true,
         sentAt: 1700000000000,
       });
+    });
+
+    it('rejects a stale paid-order update after acquiring the row lock', async () => {
+      const initial = {
+        ...paidOrder,
+        updatedAt: new Date('2026-11-11T12:00:00Z'),
+      };
+      const { service, repo, tx } = createOrdersServiceForOrder(initial);
+      repo.findById.mockResolvedValueOnce(initial).mockResolvedValueOnce({
+        ...initial,
+        updatedAt: new Date('2026-11-11T12:00:01Z'),
+      });
+
+      await expect(
+        service.updateItems(initial.id, { items: initial.items }),
+      ).rejects.toThrow(ConflictException);
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(repo.update).not.toHaveBeenCalled();
     });
 
     it('prevents deleteMany and create in PrismaOrdersRepository.update when status is paid', async () => {

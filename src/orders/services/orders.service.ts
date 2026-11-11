@@ -348,9 +348,8 @@ export class OrdersService {
       );
     }
 
-    const requestedWaiterId = isWaiterUser && params.isTableOrder
-      ? params.user?.id
-      : params.waiterId;
+    const requestedWaiterId =
+      isWaiterUser && params.isTableOrder ? params.user?.id : params.waiterId;
     if (!requestedWaiterId) return undefined;
     if (!params.isTableOrder) {
       throw new BadRequestException(
@@ -1203,26 +1202,55 @@ export class OrdersService {
     this.assertSplitBillCreditsUnchanged(existing.items, rawItems);
 
     if (isFinal) {
-      const lockedItems = this.mergePaidOrderOperationalItems(
-        existing.items,
-        rawItems,
+      const { updated, lockedItems, wasReady } = await this.prisma.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${id} FOR UPDATE`;
+          const current = await this.repo.findById(id, tx);
+          if (!current || current.status !== OrderStatusDto.paid) {
+            throw new ConflictException(
+              'La orden cambió mientras se actualizaba la cocina.',
+            );
+          }
+          if (
+            existing.updatedAt &&
+            current.updatedAt?.getTime() !== existing.updatedAt.getTime()
+          ) {
+            throw new ConflictException(
+              'La orden fue actualizada por otra estación. Recarga e intenta de nuevo.',
+            );
+          }
+          this.assertSplitBillCreditsUnchanged(current.items, rawItems);
+          const lockedItems = this.mergePaidOrderOperationalItems(
+            current.items,
+            rawItems,
+          );
+          const updated = await this.repo.update(
+            id,
+            {
+              items: lockedItems,
+              total: current.total,
+              subTotal: current.subTotal ?? null,
+              discountAmount: current.discountAmount ?? null,
+              taxAmount: current.taxAmount ?? null,
+              cuponId: current.cuponId ?? null,
+              discountId: current.discountId ?? null,
+              happyHourId: current.happyHourId ?? null,
+              status: current.status,
+              isSentToKitchen: dto.isSentToKitchen ?? current.isSentToKitchen,
+              certificateSerials: null,
+            },
+            tx,
+          );
+          return {
+            updated,
+            lockedItems,
+            wasReady: this.isReadyForPickup(current.items),
+          };
+        },
       );
-      const updated = await this.repo.update(id, {
-        items: lockedItems,
-        total: existing.total,
-        subTotal: existing.subTotal ?? null,
-        discountAmount: existing.discountAmount ?? null,
-        taxAmount: existing.taxAmount ?? null,
-        cuponId: existing.cuponId ?? null,
-        discountId: existing.discountId ?? null,
-        happyHourId: existing.happyHourId ?? null,
-        status: existing.status,
-        isSentToKitchen: dto.isSentToKitchen ?? existing.isSentToKitchen,
-        certificateSerials: null,
-      });
       if (
         existing.status === OrderStatusDto.paid &&
-        !wasReadyForPickup &&
+        !wasReady &&
         this.isReadyForPickup(lockedItems)
       ) {
         this.emitOrderReady(updated);

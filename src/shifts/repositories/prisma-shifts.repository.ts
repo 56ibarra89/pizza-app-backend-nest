@@ -10,6 +10,7 @@ import {
   LogLevel,
   MesaEstado,
   OrderStatus,
+  type Payment,
   PaymentMethod,
   Prisma,
   ShiftCloseType,
@@ -381,14 +382,11 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     shift: ShiftWithExpenses,
     closeType: 'HANDOVER' | 'END_OF_DAY' = 'HANDOVER',
   ): Promise<ShiftClosePreview> {
-    // Una lectura operativa de turno solo necesita ventas y gastos. Las
-    // órdenes/mesas que bloquean el cierre se consultan exclusivamente para
-    // un cierre final, evitando escanear todo el salón en cada refresco.
+    // Las órdenes y mesas que bloquean el cierre solo se consultan para
+    // un cierre final; la lectura habitual del turno usa getLiveSales.
     const shouldCheckBlockingOperations = closeType === 'END_OF_DAY';
-    const [payments, pendingOrders] = await Promise.all([
-      tx.payment.findMany({
-        where: { order: { shiftId: shift.id, status: OrderStatus.PAID } },
-      }),
+    const [sales, pendingOrders] = await Promise.all([
+      this.getLiveSales(tx, shift.id),
       shouldCheckBlockingOperations
         ? tx.order.findMany({
             where: {
@@ -416,6 +414,78 @@ export class PrismaShiftsRepository implements IShiftsRepository {
         : Promise.resolve([]),
     ]);
 
+    const totalExpenses = shift.expenses.reduce(
+      (sum, expense) => sum.add(expense.amount),
+      new Prisma.Decimal(0),
+    );
+    const expectedCash = shift.openingAmount.add(sales.cash).sub(totalExpenses);
+    const occupiedTables = new Map<
+      string,
+      { id: string; label: string; orderIds: Set<string> }
+    >();
+    const blockingOrders = pendingOrders.map((order) => {
+      const tables = order.linkedTables.map(({ mesa }) => {
+        const label = `Planta ${mesa.floor} - Mesa ${mesa.number}`;
+        if (mesa.estado === MesaEstado.OCUPADO) {
+          const current = occupiedTables.get(mesa.id) ?? {
+            id: mesa.id,
+            label,
+            orderIds: new Set<string>(),
+          };
+          current.orderIds.add(order.id);
+          occupiedTables.set(mesa.id, current);
+        }
+        return label;
+      });
+      return {
+        id: order.id,
+        invoiceNumber: order.invoiceNumber ?? undefined,
+        status: order.status,
+        tables,
+      };
+    });
+    const expenses = shift.expenses.map((expense) => this.mapExpense(expense));
+    const blockingTables = Array.from(occupiedTables.values()).map((table) => ({
+      id: table.id,
+      label: table.label,
+      orderIds: Array.from(table.orderIds),
+    }));
+
+    const canClose =
+      closeType === 'HANDOVER'
+        ? true
+        : blockingOrders.length === 0 && blockingTables.length === 0;
+
+    return {
+      shiftId: shift.id,
+      openingAmount: shift.openingAmount.toNumber(),
+      sales: {
+        cash: sales.cash.toNumber(),
+        card: sales.card.toNumber(),
+        app: sales.app.toNumber(),
+        total: sales.total.toNumber(),
+        breakdown: sales.breakdown,
+        totalCommission: sales.totalCommission.toNumber(),
+        net: sales.net.toNumber(),
+      },
+      expenses,
+      totalExpenses: totalExpenses.toNumber(),
+      expectedCash: expectedCash.toNumber(),
+      discrepancyThreshold: DEFAULT_DISCREPANCY_THRESHOLD,
+      blockingOrders,
+      blockingTables,
+      canClose,
+    };
+  }
+
+  private async getLiveSales(tx: Prisma.TransactionClient, shiftId: string) {
+    const payments = await tx.payment.findMany({
+      where: { order: { shiftId, status: OrderStatus.PAID } },
+    });
+    return this.summarizePayments(payments);
+  }
+
+  private summarizePayments(payments: Payment[]) {
     let cash = new Prisma.Decimal(0);
     let card = new Prisma.Decimal(0);
     let app = new Prisma.Decimal(0);
@@ -462,72 +532,19 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       paymentGroups.set(methodId, group);
     }
 
-    const totalExpenses = shift.expenses.reduce(
-      (sum, expense) => sum.add(expense.amount),
-      new Prisma.Decimal(0),
-    );
-    const expectedCash = shift.openingAmount.add(cash).sub(totalExpenses);
-    const occupiedTables = new Map<
-      string,
-      { id: string; label: string; orderIds: Set<string> }
-    >();
-    const blockingOrders = pendingOrders.map((order) => {
-      const tables = order.linkedTables.map(({ mesa }) => {
-        const label = `Planta ${mesa.floor} - Mesa ${mesa.number}`;
-        if (mesa.estado === MesaEstado.OCUPADO) {
-          const current = occupiedTables.get(mesa.id) ?? {
-            id: mesa.id,
-            label,
-            orderIds: new Set<string>(),
-          };
-          current.orderIds.add(order.id);
-          occupiedTables.set(mesa.id, current);
-        }
-        return label;
-      });
-      return {
-        id: order.id,
-        invoiceNumber: order.invoiceNumber ?? undefined,
-        status: order.status,
-        tables,
-      };
-    });
-    const expenses = shift.expenses.map((expense) => this.mapExpense(expense));
-    const blockingTables = Array.from(occupiedTables.values()).map((table) => ({
-      id: table.id,
-      label: table.label,
-      orderIds: Array.from(table.orderIds),
-    }));
-
-    const canClose =
-      closeType === 'HANDOVER'
-        ? true
-        : blockingOrders.length === 0 && blockingTables.length === 0;
-
     return {
-      shiftId: shift.id,
-      openingAmount: shift.openingAmount.toNumber(),
-      sales: {
-        cash: cash.toNumber(),
-        card: card.toNumber(),
-        app: app.toNumber(),
-        total: total.toNumber(),
-        breakdown: [...paymentGroups.values()].map((group) => ({
-          ...group,
-          grossAmount: Math.round(group.grossAmount * 100) / 100,
-          commissionAmount: Math.round(group.commissionAmount * 100) / 100,
-          netAmount: Math.round(group.netAmount * 100) / 100,
-        })),
-        totalCommission: totalCommission.toNumber(),
-        net: total.sub(totalCommission).toNumber(),
-      },
-      expenses,
-      totalExpenses: totalExpenses.toNumber(),
-      expectedCash: expectedCash.toNumber(),
-      discrepancyThreshold: DEFAULT_DISCREPANCY_THRESHOLD,
-      blockingOrders,
-      blockingTables,
-      canClose,
+      cash,
+      card,
+      app,
+      total,
+      breakdown: [...paymentGroups.values()].map((group) => ({
+        ...group,
+        grossAmount: Math.round(group.grossAmount * 100) / 100,
+        commissionAmount: Math.round(group.commissionAmount * 100) / 100,
+        netAmount: Math.round(group.netAmount * 100) / 100,
+      })),
+      totalCommission,
+      net: total.sub(totalCommission),
     };
   }
 
@@ -567,20 +584,27 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     const mapped = this.map(row);
     if (row.status !== ShiftStatus.OPEN) return mapped;
 
-    const preview = await this.prisma.$transaction((tx) =>
-      this.buildClosePreview(tx, row, 'HANDOVER'),
+    const sales = await this.prisma.$transaction((tx) =>
+      this.getLiveSales(tx, row.id),
+    );
+    const totalExpenses = row.expenses.reduce(
+      (sum, expense) => sum.add(expense.amount),
+      new Prisma.Decimal(0),
     );
     return {
       ...mapped,
-      cashSales: preview.sales.cash,
-      cardSales: preview.sales.card,
-      appSales: preview.sales.app,
-      totalSales: preview.sales.total,
-      totalExpenses: preview.totalExpenses,
-      expectedCash: preview.expectedCash,
-      paymentBreakdown: preview.sales.breakdown,
-      totalPaymentCommission: preview.sales.totalCommission,
-      netSales: preview.sales.net,
+      cashSales: sales.cash.toNumber(),
+      cardSales: sales.card.toNumber(),
+      appSales: sales.app.toNumber(),
+      totalSales: sales.total.toNumber(),
+      totalExpenses: totalExpenses.toNumber(),
+      expectedCash: row.openingAmount
+        .add(sales.cash)
+        .sub(totalExpenses)
+        .toNumber(),
+      paymentBreakdown: sales.breakdown,
+      totalPaymentCommission: sales.totalCommission.toNumber(),
+      netSales: sales.net.toNumber(),
     };
   }
 

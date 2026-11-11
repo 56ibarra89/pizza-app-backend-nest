@@ -128,6 +128,7 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
   const prismaMock = {
     $transaction: jest.fn(async (cb: (tx: any) => any) =>
       cb({
+        $queryRaw: jest.fn().mockResolvedValue([{ id: 'ord-paid-1' }]),
         order: {
           count: jest.fn().mockResolvedValue(0),
           findMany: jest.fn().mockResolvedValue([]),
