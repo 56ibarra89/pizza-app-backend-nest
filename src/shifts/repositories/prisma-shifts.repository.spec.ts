@@ -78,17 +78,19 @@ describe('PrismaShiftsRepository.close', () => {
         update: shiftUpdate,
       },
       payment: {
-        findMany: jest.fn(() =>
+        groupBy: jest.fn(() =>
           Promise.resolve([
             {
-              id: 1,
-              orderId: 'order-paid',
               method: PaymentMethod.EFECTIVO,
-              amount: new Prisma.Decimal(100),
-              reference: null,
-              cashierId: 'cashier-1',
-              cashierSnapshotName: 'cajero',
-              createdAt: new Date('2026-08-22T12:00:00.000Z'),
+              methodConfigId: null,
+              methodSnapshotName: null,
+              methodType: null,
+              currency: 'NIO',
+              _sum: {
+                amount: new Prisma.Decimal(100),
+                commissionAmount: null,
+              },
+              _count: { _all: 1 },
             },
           ]),
         ),
@@ -123,9 +125,9 @@ describe('PrismaShiftsRepository.close', () => {
 
   it('lee ventas de un turno abierto sin consultar órdenes ni mesas para cierre', async () => {
     const orderFindMany = jest.fn();
-    const paymentFindMany = jest.fn().mockResolvedValue([]);
+    const paymentGroupBy = jest.fn().mockResolvedValue([]);
     const tx = {
-      payment: { findMany: paymentFindMany },
+      payment: { groupBy: paymentGroupBy },
       order: { findMany: orderFindMany },
     };
     const repository = new PrismaShiftsRepository(
@@ -141,8 +143,76 @@ describe('PrismaShiftsRepository.close', () => {
     const active = await repository.findActive();
 
     expect(active?.totalSales).toBe(0);
-    expect(paymentFindMany).toHaveBeenCalledTimes(1);
+    expect(paymentGroupBy).toHaveBeenCalledTimes(1);
     expect(orderFindMany).not.toHaveBeenCalled();
+  });
+
+  it('agrega pagos y comisiones en la base de datos al leer el turno', async () => {
+    const paymentGroupBy = jest.fn().mockResolvedValue([
+      {
+        method: PaymentMethod.EFECTIVO,
+        methodConfigId: null,
+        methodSnapshotName: null,
+        methodType: null,
+        currency: 'NIO',
+        _sum: { amount: new Prisma.Decimal(250), commissionAmount: null },
+        _count: { _all: 2 },
+      },
+      {
+        method: PaymentMethod.TARJETA,
+        methodConfigId: 'card-1',
+        methodSnapshotName: 'Tarjeta',
+        methodType: 'TARJETA',
+        currency: 'NIO',
+        _sum: {
+          amount: new Prisma.Decimal(100),
+          commissionAmount: new Prisma.Decimal(3),
+        },
+        _count: { _all: 1 },
+      },
+    ]);
+    const tx = { payment: { groupBy: paymentGroupBy } };
+    const repository = new PrismaShiftsRepository(
+      {
+        shift: { findFirst: jest.fn().mockResolvedValue(existingShift) },
+        $transaction: jest.fn(
+          (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+        ),
+      } as unknown as PrismaService,
+      {} as any,
+    );
+
+    const active = await repository.findActive();
+
+    expect(active).toMatchObject({
+      cashSales: 250,
+      cardSales: 100,
+      totalSales: 350,
+      totalPaymentCommission: 3,
+      netSales: 347,
+      expectedCash: 1250,
+    });
+    expect(active?.paymentBreakdown).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          methodId: 'legacy-EFECTIVO',
+          transactionCount: 2,
+          grossAmount: 250,
+        }),
+        expect.objectContaining({
+          methodId: 'card-1',
+          transactionCount: 1,
+          grossAmount: 100,
+          commissionAmount: 3,
+        }),
+      ]),
+    );
+    expect(paymentGroupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { order: { shiftId: existingShift.id, status: 'PAID' } },
+        _sum: { amount: true, commissionAmount: true },
+      }),
+    );
   });
 
   it('cierra directamente cuando el conteo es exacto', async () => {
@@ -235,11 +305,11 @@ describe('PrismaShiftsRepository.close', () => {
   });
 
   it('no consulta órdenes pendientes al cargar ventas en vivo de un turno abierto', async () => {
-    const paymentFindMany = jest.fn().mockResolvedValue([]);
+    const paymentGroupBy = jest.fn().mockResolvedValue([]);
     const orderFindMany = jest.fn().mockResolvedValue([]);
     const transaction = jest.fn((callback) =>
       callback({
-        payment: { findMany: paymentFindMany },
+        payment: { groupBy: paymentGroupBy },
         order: { findMany: orderFindMany },
       }),
     );
@@ -254,7 +324,7 @@ describe('PrismaShiftsRepository.close', () => {
 
     await repository.findActive();
 
-    expect(paymentFindMany).toHaveBeenCalledTimes(1);
+    expect(paymentGroupBy).toHaveBeenCalledTimes(1);
     expect(orderFindMany).not.toHaveBeenCalled();
   });
 });

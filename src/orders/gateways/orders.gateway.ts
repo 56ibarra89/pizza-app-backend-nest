@@ -11,7 +11,10 @@ import {
   ORDER_SYNCHRONIZED_EVENT,
   type OrderSynchronizedEvent,
 } from '../events/order-synchronized.event';
-import { toOrderResponseDto } from '../mappers/orders.mapper';
+import {
+  toKitchenOrderResponseDto,
+  toOrderResponseDto,
+} from '../mappers/orders.mapper';
 import {
   USERS_REPOSITORY,
   type IUsersRepository,
@@ -46,7 +49,9 @@ interface OrderSocketJwtPayload {
 interface OrdersServerToClientEvents {
   'orders:changed': (event: {
     mutation: OrderSynchronizedEvent['mutation'];
-    order: ReturnType<typeof toOrderResponseDto>;
+    order:
+      | ReturnType<typeof toOrderResponseDto>
+      | NonNullable<ReturnType<typeof toKitchenOrderResponseDto>>;
     occurredAt: string;
   }) => void;
 }
@@ -137,20 +142,11 @@ export class OrdersGateway implements OnGatewayInit {
     );
 
     kitchenIds.forEach((kitchenId) => {
-      const scopedOrder = {
-        ...event.order,
-        items: event.order.items.filter(
-          (item) =>
-            !requiresKitchenPreparation(item) ||
-            item.kitchenId === kitchenId ||
-            (item.isCombo &&
-              Array.isArray(item.comboSelections) &&
-              item.comboSelections.some((sel) => sel.kitchenId === kitchenId)),
-        ),
-      };
+      const scopedOrder = toKitchenOrderResponseDto(event.order, kitchenId);
+      if (!scopedOrder) return;
       this.server.to(kitchenRoom(kitchenId)).emit('orders:changed', {
         mutation: event.mutation,
-        order: toOrderResponseDto(scopedOrder),
+        order: scopedOrder,
         occurredAt,
       });
     });

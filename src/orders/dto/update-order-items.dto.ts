@@ -5,6 +5,7 @@ import {
   IsBoolean,
   IsEnum,
   IsInt,
+  IsISO8601,
   IsNumber,
   IsOptional,
   IsString,
@@ -15,6 +16,10 @@ import { CartItemDto } from './cart-item.dto';
 import { OrderPromotionSourceDto } from './order-promotion-source.dto';
 
 export class UpdateOrderItemsDto {
+  @IsOptional()
+  @IsISO8601()
+  expectedUpdatedAt?: string;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CartItemDto)

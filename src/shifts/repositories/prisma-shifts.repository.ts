@@ -10,7 +10,6 @@ import {
   LogLevel,
   MesaEstado,
   OrderStatus,
-  type Payment,
   PaymentMethod,
   Prisma,
   ShiftCloseType,
@@ -479,13 +478,18 @@ export class PrismaShiftsRepository implements IShiftsRepository {
   }
 
   private async getLiveSales(tx: Prisma.TransactionClient, shiftId: string) {
-    const payments = await tx.payment.findMany({
+    const groups = await tx.payment.groupBy({
+      by: [
+        'method',
+        'methodConfigId',
+        'methodSnapshotName',
+        'methodType',
+        'currency',
+      ],
       where: { order: { shiftId, status: OrderStatus.PAID } },
+      _sum: { amount: true, commissionAmount: true },
+      _count: { _all: true },
     });
-    return this.summarizePayments(payments);
-  }
-
-  private summarizePayments(payments: Payment[]) {
     let cash = new Prisma.Decimal(0);
     let card = new Prisma.Decimal(0);
     let app = new Prisma.Decimal(0);
@@ -498,22 +502,20 @@ export class PrismaShiftsRepository implements IShiftsRepository {
         type: string;
         currency: string;
         transactionCount: number;
-        grossAmount: number;
-        commissionAmount: number;
-        netAmount: number;
+        grossAmount: Prisma.Decimal;
+        commissionAmount: Prisma.Decimal;
+        netAmount: Prisma.Decimal;
       }
     >();
     let totalCommission = new Prisma.Decimal(0);
-    for (const payment of payments) {
-      total = total.add(payment.amount);
-      if (payment.method === PaymentMethod.EFECTIVO)
-        cash = cash.add(payment.amount);
-      if (payment.method === PaymentMethod.TARJETA)
-        card = card.add(payment.amount);
-      if (payment.method === PaymentMethod.APP) app = app.add(payment.amount);
+    for (const payment of groups) {
+      const gross = payment._sum.amount ?? new Prisma.Decimal(0);
+      const commission = payment._sum.commissionAmount ?? new Prisma.Decimal(0);
+      total = total.add(gross);
+      if (payment.method === PaymentMethod.EFECTIVO) cash = cash.add(gross);
+      if (payment.method === PaymentMethod.TARJETA) card = card.add(gross);
+      if (payment.method === PaymentMethod.APP) app = app.add(gross);
       const methodId = payment.methodConfigId ?? `legacy-${payment.method}`;
-      const gross = payment.amount.toNumber();
-      const commission = payment.commissionAmount?.toNumber() ?? 0;
       totalCommission = totalCommission.add(commission);
       const group = paymentGroups.get(methodId) ?? {
         methodId,
@@ -521,14 +523,14 @@ export class PrismaShiftsRepository implements IShiftsRepository {
         type: payment.methodType ?? payment.method,
         currency: payment.currency ?? 'NIO',
         transactionCount: 0,
-        grossAmount: 0,
-        commissionAmount: 0,
-        netAmount: 0,
+        grossAmount: new Prisma.Decimal(0),
+        commissionAmount: new Prisma.Decimal(0),
+        netAmount: new Prisma.Decimal(0),
       };
-      group.transactionCount += 1;
-      group.grossAmount += gross;
-      group.commissionAmount += commission;
-      group.netAmount += gross - commission;
+      group.transactionCount += payment._count._all;
+      group.grossAmount = group.grossAmount.add(gross);
+      group.commissionAmount = group.commissionAmount.add(commission);
+      group.netAmount = group.netAmount.add(gross.sub(commission));
       paymentGroups.set(methodId, group);
     }
 
@@ -539,9 +541,9 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       total,
       breakdown: [...paymentGroups.values()].map((group) => ({
         ...group,
-        grossAmount: Math.round(group.grossAmount * 100) / 100,
-        commissionAmount: Math.round(group.commissionAmount * 100) / 100,
-        netAmount: Math.round(group.netAmount * 100) / 100,
+        grossAmount: group.grossAmount.toNumber(),
+        commissionAmount: group.commissionAmount.toNumber(),
+        netAmount: group.netAmount.toNumber(),
       })),
       totalCommission,
       net: total.sub(totalCommission),

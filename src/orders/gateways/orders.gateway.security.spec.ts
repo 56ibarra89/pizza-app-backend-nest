@@ -150,4 +150,71 @@ describe('OrdersGateway authorization', () => {
     );
     expect(socket.disconnect).toHaveBeenCalledWith(true);
   });
+
+  it('emite a cada cocina únicamente sus componentes sin pagos ni datos privados', async () => {
+    const kitchenEmit = jest.fn();
+    const gateway = new OrdersGateway(
+      jwtService,
+      kitchens,
+      accessControl,
+      usersRepository,
+    );
+    gateway.afterInit({
+      use: jest.fn(),
+      to: jest.fn((room: string) => ({
+        emit:
+          room === 'authenticated-kitchen:kitchen-1' ? kitchenEmit : jest.fn(),
+      })),
+    } as never);
+
+    await gateway.handleOrderSynchronized({
+      mutation: 'updated',
+      order: {
+        id: 'order-1',
+        status: 'pending' as never,
+        total: 200,
+        timestamp: new Date('2026-11-04T12:00:00.000Z'),
+        customerPhone: '88888888',
+        payments: [{ method: 'EFECTIVO', amount: 200 } as never],
+        items: [
+          {
+            id: 1,
+            name: 'Combo',
+            size: 'único',
+            price: 200,
+            quantity: 1,
+            giftQuantity: 0,
+            extras: [],
+            isCombo: true,
+            comboSelections: [
+              {
+                groupId: 'g',
+                groupName: 'Grupo',
+                productId: 'p1',
+                productName: 'Propio',
+                quantity: 1,
+                extraPrice: 0,
+                kitchenId: 'kitchen-1',
+              },
+              {
+                groupId: 'g',
+                groupName: 'Grupo',
+                productId: 'p2',
+                productName: 'Ajeno',
+                quantity: 1,
+                extraPrice: 0,
+                kitchenId: 'kitchen-2',
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const scopedOrder = kitchenEmit.mock.calls[0][1].order;
+    expect(scopedOrder.items[0].comboSelections).toHaveLength(1);
+    expect(scopedOrder).not.toHaveProperty('payments');
+    expect(scopedOrder).not.toHaveProperty('customerPhone');
+    expect(scopedOrder).not.toHaveProperty('total');
+  });
 });

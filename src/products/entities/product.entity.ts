@@ -31,6 +31,7 @@ export interface ComboGroupEntity {
 export interface ProductEntity {
   id: string;
   categoryId: string;
+  kitchenId?: string;
   name: string;
   description?: string;
   isActive: boolean;

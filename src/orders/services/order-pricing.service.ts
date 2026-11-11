@@ -122,12 +122,20 @@ export class OrderPricingService {
         if (!item.productId) return item;
         const product = await this.getProduct(item.productId, productCache);
         if (!product.isCombo) {
-          if (!item.isCombo) return item;
+          if (!item.isCombo) {
+            return {
+              ...item,
+              categoryId: product.categoryId,
+              kitchenId: product.kitchenId,
+            };
+          }
           throw new BadRequestException('El producto indicado no es un combo');
         }
         return {
           ...item,
           isCombo: true,
+          categoryId: product.categoryId,
+          kitchenId: product.kitchenId,
           comboSelections: await this.normalizeComboSelections(
             product,
             item.comboSelections ?? [],
@@ -794,6 +802,7 @@ export class OrderPricingService {
           size: selection.size ?? option.size,
           extraPrice: option.extraPrice,
           categoryId: component.categoryId,
+          kitchenId: component.kitchenId,
           extras,
         });
       }

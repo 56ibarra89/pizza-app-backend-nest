@@ -517,6 +517,7 @@ export class PrismaProductsRepository implements IProductsRepository {
       comboPrice?: unknown;
       prices: { size: string; price: unknown }[];
       category?: {
+        kitchenId?: string | null;
         extras: Array<{
           id: string;
           name: string;
@@ -585,6 +586,7 @@ export class PrismaProductsRepository implements IProductsRepository {
     return {
       id: p.id,
       categoryId: p.categoryId,
+      kitchenId: p.category?.kitchenId ?? undefined,
       name: p.name,
       description: p.description ?? undefined,
       isActive: p.isActive,

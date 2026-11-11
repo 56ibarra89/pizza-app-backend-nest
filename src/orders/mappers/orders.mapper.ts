@@ -1,4 +1,8 @@
 import type { OrderEntity } from '../entities/order.entity';
+import {
+  isPackagingOrderItem,
+  requiresKitchenPreparation,
+} from '../validators/order-item-kind';
 
 export function toOrderResponseDto(order: OrderEntity) {
   return {
@@ -82,6 +86,72 @@ export function toOrderResponseDto(order: OrderEntity) {
           invoiceNumber: order.invoice.invoiceNumber,
           issuedAt: order.invoice.issuedAt.toISOString(),
         }
+      : undefined,
+  };
+}
+
+export function toKitchenOrderResponseDto(
+  order: OrderEntity,
+  kitchenId: string,
+) {
+  const items = order.items
+    .filter(
+      (item) =>
+        requiresKitchenPreparation(item) &&
+        (item.isCombo
+          ? item.comboSelections?.some(
+              (selection) => selection.kitchenId === kitchenId,
+            )
+          : item.kitchenId === kitchenId),
+    )
+    .map((item) => ({
+      id: item.id,
+      productId: item.productId,
+      categoryId: item.categoryId,
+      name: item.name,
+      size: item.size,
+      quantity: item.quantity,
+      extras: item.extras.map((extra) => ({ name: extra.name })),
+      note: item.note,
+      kitchenModifiers: item.kitchenModifiers,
+      giftQuantity: item.giftQuantity,
+      giftReason: item.giftReason,
+      isSentToKitchen: item.isSentToKitchen,
+      sentAt: item.sentAt,
+      kitchenStatus: item.kitchenStatus,
+      kitchenId: item.isCombo ? undefined : item.kitchenId,
+      isCombo: Boolean(item.isCombo),
+      comboSelections: item.comboSelections
+        ?.filter((selection) => selection.kitchenId === kitchenId)
+        .map((selection) => ({
+          groupId: selection.groupId,
+          groupName: selection.groupName,
+          productId: selection.productId,
+          productName: selection.productName,
+          size: selection.size,
+          quantity: selection.quantity,
+          extras: selection.extras?.map((extra) => ({ name: extra.name })),
+          kitchenId: selection.kitchenId,
+          categoryId: selection.categoryId,
+          categoryName: selection.categoryName,
+          kitchenStatus: selection.kitchenStatus,
+        })),
+    }));
+
+  if (items.length === 0) return null;
+  return {
+    id: order.id,
+    items,
+    status: order.status,
+    timestamp: order.timestamp.toISOString(),
+    updatedAt: order.updatedAt?.toISOString(),
+    orderType: order.orderType,
+    customerSnapshotName: order.customerSnapshotName,
+    linkedTables: order.linkedTables,
+    isSentToKitchen: order.isSentToKitchen,
+    packagingRequested: order.items.some(isPackagingOrderItem),
+    invoice: order.invoice
+      ? { invoiceNumber: order.invoice.invoiceNumber }
       : undefined,
   };
 }

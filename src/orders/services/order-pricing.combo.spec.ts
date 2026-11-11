@@ -7,6 +7,7 @@ describe('OrderPricingService combo extras', () => {
   const pizza: ProductEntity = {
     id: 'pizza-1',
     categoryId: 'pizzas',
+    kitchenId: 'kitchen-pizza',
     name: 'Pizza hawaiana',
     isActive: true,
     hasMultipleSizes: false,
@@ -100,6 +101,32 @@ describe('OrderPricingService combo extras', () => {
 
     expect(totals.subTotal).toBe(530);
     expect(totals.total).toBe(530);
+  });
+
+  it('derives the kitchen of combo selections from the catalog product', async () => {
+    const item = createItem();
+    item.comboSelections![0].kitchenId = 'wrong-kitchen';
+    const service = createService();
+    const normalized = await service.normalizeComboItems([item]);
+
+    expect(normalized[0].comboSelections?.[0].kitchenId).toBe('kitchen-pizza');
+  });
+
+  it('derives the kitchen of a regular item instead of trusting the client', async () => {
+    const normalized = await createService().normalizeComboItems([
+      {
+        productId: pizza.id,
+        name: pizza.name,
+        price: 200,
+        size: 'único',
+        quantity: 1,
+        giftQuantity: 0,
+        extras: [],
+        kitchenId: 'wrong-kitchen',
+      },
+    ]);
+
+    expect(normalized[0].kitchenId).toBe('kitchen-pizza');
   });
 
   it('returns the authoritative unit price to persist with the order item', async () => {

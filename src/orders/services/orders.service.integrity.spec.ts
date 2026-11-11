@@ -248,6 +248,7 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
       discountAmount: 0,
       taxAmount: 15,
       timestamp: new Date('2026-10-24T12:00:00.000Z'),
+      updatedAt: new Date('2026-10-24T12:00:00.000Z'),
       payments: [],
       items: [
         {
@@ -298,7 +299,10 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
       const { service, repo } = createOrdersServiceForOrder(paidOrder);
 
       await expect(
-        service.updateItems(paidOrder.id, { items: [] }),
+        service.updateItems(paidOrder.id, {
+          items: [],
+          expectedUpdatedAt: paidOrder.updatedAt!.toISOString(),
+        }),
       ).rejects.toThrow(
         'No se puede modificar el contenido comercial de una orden facturada.',
       );
@@ -310,6 +314,7 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
 
       await expect(
         service.updateItems(paidOrder.id, {
+          expectedUpdatedAt: paidOrder.updatedAt!.toISOString(),
           items: [
             {
               ...paidOrder.items[0],
@@ -321,6 +326,7 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
 
       await expect(
         service.updateItems(paidOrder.id, {
+          expectedUpdatedAt: paidOrder.updatedAt!.toISOString(),
           items: [
             paidOrder.items[0],
             {
@@ -356,6 +362,7 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
         createOrdersServiceForOrder(paidOrder);
 
       const result = await service.updateItems(paidOrder.id, {
+        expectedUpdatedAt: paidOrder.updatedAt!.toISOString(),
         isSentToKitchen: true,
         items: [
           {
@@ -400,9 +407,39 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
       });
 
       await expect(
-        service.updateItems(initial.id, { items: initial.items }),
+        service.updateItems(initial.id, {
+          items: initial.items,
+          expectedUpdatedAt: initial.updatedAt.toISOString(),
+        }),
       ).rejects.toThrow(ConflictException);
       expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a paid-order update based on an older client snapshot', async () => {
+      const current = {
+        ...paidOrder,
+        updatedAt: new Date('2026-11-11T12:00:01Z'),
+        items: [{ ...paidOrder.items[0], kitchenStatus: 'ready' as const }],
+      };
+      const { service, repo, tx } = createOrdersServiceForOrder(current);
+
+      await expect(
+        service.updateItems(current.id, {
+          items: [{ ...paidOrder.items[0], kitchenStatus: 'pending' }],
+          expectedUpdatedAt: '2026-11-11T12:00:00.000Z',
+        }),
+      ).rejects.toThrow(ConflictException);
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('requires a client version before changing a paid order', async () => {
+      const { service, repo } = createOrdersServiceForOrder(paidOrder);
+
+      await expect(
+        service.updateItems(paidOrder.id, { items: paidOrder.items }),
+      ).rejects.toThrow(ConflictException);
       expect(repo.update).not.toHaveBeenCalled();
     });
 

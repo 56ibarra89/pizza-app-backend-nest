@@ -11,6 +11,34 @@ describe('PrismaProductsRepository (H22)', () => {
     products: [],
   };
 
+  it('obtiene la cocina del producto desde su categoría persistida', async () => {
+    const findFirst = jest.fn().mockResolvedValue({
+      id: 'product-1',
+      categoryId: 'cat-1',
+      name: 'Pizza',
+      description: null,
+      isActive: true,
+      hasMultipleSizes: false,
+      isCombo: false,
+      comboPrice: null,
+      prices: [{ size: 'único', price: 100 }],
+      category: { kitchenId: 'kitchen-1', extras: [] },
+      comboGroups: [],
+    });
+    const repo = new PrismaProductsRepository({
+      product: { findFirst },
+    } as unknown as PrismaService);
+
+    const product = await repo.getProductById('product-1');
+
+    expect(product?.kitchenId).toBe('kitchen-1');
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: 'product-1' }),
+      }),
+    );
+  });
+
   it('omite la agregación SQL de ingresos cuando includeMetrics es false', async () => {
     const findMany = jest.fn().mockResolvedValue([sampleCategoryRow]);
     const $queryRaw = jest.fn();

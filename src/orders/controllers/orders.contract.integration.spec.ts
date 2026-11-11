@@ -274,6 +274,110 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
     jest.clearAllMocks();
   });
 
+  it('limita la respuesta del cocinero a su cocina y omite datos financieros y personales', async () => {
+    ordersStore.set('order-kitchens', {
+      id: 'order-kitchens',
+      status: OrderStatusDto.pending,
+      total: 400,
+      timestamp: new Date('2026-11-04T12:00:00.000Z'),
+      orderType: OrderTypeDto.local,
+      customerSnapshotName: 'Cliente',
+      customerPhone: '88888888',
+      customerAddress: 'Dirección privada',
+      payments: [{ method: 'EFECTIVO', amount: 400 } as never],
+      items: [
+        {
+          id: 1,
+          name: 'Pizza',
+          size: 'único',
+          price: 200,
+          quantity: 1,
+          giftQuantity: 0,
+          extras: [],
+          kitchenId: 'kitchen-2',
+        },
+        {
+          id: 2,
+          name: 'Combo',
+          size: 'único',
+          price: 200,
+          quantity: 1,
+          giftQuantity: 0,
+          extras: [],
+          isCombo: true,
+          comboSelections: [
+            {
+              groupId: 'g',
+              groupName: 'Plato',
+              productId: 'p1',
+              productName: 'Componente propio',
+              quantity: 1,
+              extraPrice: 50,
+              kitchenId: 'kitchen-1',
+            },
+            {
+              groupId: 'g',
+              groupName: 'Plato',
+              productId: 'p2',
+              productName: 'Componente ajeno',
+              quantity: 1,
+              extraPrice: 60,
+              kitchenId: 'kitchen-2',
+            },
+          ],
+        },
+      ],
+    });
+
+    const response = await request(app.getHttpServer())
+      .get('/orders')
+      .set('x-test-role', 'cocinero')
+      .set('x-test-permissions', 'orders.read');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toHaveLength(1);
+    const visible = response.body[0];
+    expect(visible.items).toHaveLength(1);
+    expect(visible.items[0].comboSelections).toHaveLength(1);
+    expect(visible.items[0].comboSelections[0].productName).toBe(
+      'Componente propio',
+    );
+    expect(visible).not.toHaveProperty('total');
+    expect(visible).not.toHaveProperty('payments');
+    expect(visible).not.toHaveProperty('customerPhone');
+    expect(visible).not.toHaveProperty('customerAddress');
+
+    repoMock.listHistory.mockResolvedValueOnce({
+      items: Array.from(ordersStore.values()),
+      total: 1,
+      paymentMethodOptions: [{ id: 'card-1', name: 'Tarjeta' }],
+    });
+    const history = await request(app.getHttpServer())
+      .get(
+        '/orders/history?startDate=2026-11-04&endDate=2026-11-04&paymentMethodId=card-1',
+      )
+      .set('x-test-role', 'cocinero')
+      .set('x-test-permissions', 'orders.read');
+
+    expect(history.status).toBe(200);
+    expect(history.body.paymentMethodOptions).toEqual([]);
+    expect(history.body.items[0]).not.toHaveProperty('payments');
+    expect(repoMock.listHistory).toHaveBeenCalledWith(
+      expect.objectContaining({ paymentMethodId: undefined }),
+    );
+  });
+
+  it('rechaza una versión de orden inválida en el contrato HTTP', async () => {
+    const response = await request(app.getHttpServer())
+      .patch('/orders/order-1/items')
+      .set('x-test-role', 'admin')
+      .set('x-test-permissions', 'orders.read,orders.manage')
+      .send({ expectedUpdatedAt: 'ayer', items: [], total: 0 });
+
+    expect(response.status).toBe(400);
+    expect(repoMock.update).not.toHaveBeenCalled();
+  });
+
   it.each([{}, { tableIds: 'mesa' }, { tableIds: [42] }, { tableIds: [''] }])(
     'rechaza un contrato de mesas inválido: %j',
     async (body) => {
@@ -450,6 +554,7 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
       total: 575,
       status: OrderStatusDto.paid,
       timestamp: new Date('2026-11-04T12:00:00.000Z'),
+      updatedAt: new Date('2026-11-04T12:00:00.000Z'),
       orderType: OrderTypeDto.local,
     });
 
@@ -458,6 +563,7 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
       .set('x-test-role', 'admin')
       .set('x-test-permissions', 'orders.read,orders.manage')
       .send({
+        expectedUpdatedAt: '2026-11-04T12:00:00.000Z',
         items: [
           {
             id: 10,

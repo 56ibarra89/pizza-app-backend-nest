@@ -1202,6 +1202,12 @@ export class OrdersService {
     this.assertSplitBillCreditsUnchanged(existing.items, rawItems);
 
     if (isFinal) {
+      if (!dto.expectedUpdatedAt) {
+        throw new ConflictException(
+          'Recarga la orden antes de actualizar su estado de cocina.',
+        );
+      }
+      const expectedUpdatedAt = new Date(dto.expectedUpdatedAt);
       const { updated, lockedItems, wasReady } = await this.prisma.$transaction(
         async (tx) => {
           await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${id} FOR UPDATE`;
@@ -1211,10 +1217,7 @@ export class OrdersService {
               'La orden cambió mientras se actualizaba la cocina.',
             );
           }
-          if (
-            existing.updatedAt &&
-            current.updatedAt?.getTime() !== existing.updatedAt.getTime()
-          ) {
+          if (current.updatedAt?.getTime() !== expectedUpdatedAt.getTime()) {
             throw new ConflictException(
               'La orden fue actualizada por otra estación. Recarga e intenta de nuevo.',
             );

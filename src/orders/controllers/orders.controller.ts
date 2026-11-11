@@ -17,14 +17,16 @@ import { UpdateOrderItemsDto } from '../dto/update-order-items.dto';
 import { UpdateOrderTablesDto } from '../dto/update-order-tables.dto';
 import { FinalizeOrderDto } from '../dto/finalize-order.dto';
 import { SplitOrderCheckoutDto } from '../dto/split-order-checkout.dto';
-import { toOrderResponseDto } from '../mappers/orders.mapper';
+import {
+  toKitchenOrderResponseDto,
+  toOrderResponseDto,
+} from '../mappers/orders.mapper';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Permissions, UserRoleDto } from '../../common';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { KitchensService } from '../../kitchens/kitchens.service';
 import type { OrderEntity } from '../entities/order.entity';
-import { requiresKitchenPreparation } from '../validators/order-item-kind';
 import { ListOrderHistoryQueryDto } from '../dto/list-order-history-query.dto';
 import { OrderStatusDto } from '../dto/order-status.dto';
 import { HideKitchenTicketsDto } from '../dto/hide-kitchen-tickets.dto';
@@ -115,7 +117,8 @@ export class OrdersController {
       page: query.page,
       pageSize: query.pageSize,
       search: query.search,
-      paymentMethodId: query.paymentMethodId,
+      paymentMethodId:
+        user?.role === UserRoleDto.cocinero ? undefined : query.paymentMethodId,
       view: query.view,
       statuses: query.statuses as OrderStatusDto[] | undefined,
       driverId,
@@ -132,7 +135,8 @@ export class OrdersController {
       page: query.page,
       pageSize: query.pageSize,
       totalPages: Math.ceil(result.total / query.pageSize),
-      paymentMethodOptions: result.paymentMethodOptions,
+      paymentMethodOptions:
+        user?.role === UserRoleDto.cocinero ? [] : result.paymentMethodOptions,
     };
   }
 
@@ -141,47 +145,26 @@ export class OrdersController {
     user?: AuthenticatedUser,
     resolvedKitchenId?: string,
   ) {
-    const responses = orders.map(toOrderResponseDto);
     if (user?.role === UserRoleDto.motorizado) {
-      return responses.filter(
-        (order) => order.orderType === 'delivery' && order.driverId === user.id,
-      );
+      return orders
+        .filter(
+          (order) =>
+            order.orderType === 'delivery' && order.driverId === user.id,
+        )
+        .map(toOrderResponseDto);
     }
-    if (user?.role !== UserRoleDto.cocinero) return responses;
+    if (user?.role !== UserRoleDto.cocinero) {
+      return orders.map(toOrderResponseDto);
+    }
 
     const kitchenId =
       resolvedKitchenId ??
       (await this.kitchens.getAssignedKitchenIdForDate(user.id));
     if (!kitchenId) return [];
 
-    return responses.flatMap((order) => {
-      const hasAssignedKitchenItem = order.items.some(
-        (item) =>
-          requiresKitchenPreparation(item) &&
-          ((!item.isCombo && item.kitchenId === kitchenId) ||
-            (item.isCombo &&
-              Array.isArray(item.comboSelections) &&
-              item.comboSelections.some(
-                (sel: any) => sel.kitchenId === kitchenId,
-              ))),
-      );
-      if (!hasAssignedKitchenItem) return [];
-
-      return [
-        {
-          ...order,
-          items: order.items.filter(
-            (item) =>
-              !requiresKitchenPreparation(item) ||
-              (!item.isCombo && item.kitchenId === kitchenId) ||
-              (item.isCombo &&
-                Array.isArray(item.comboSelections) &&
-                item.comboSelections.some(
-                  (sel: any) => sel.kitchenId === kitchenId,
-                )),
-          ),
-        },
-      ];
+    return orders.flatMap((order) => {
+      const response = toKitchenOrderResponseDto(order, kitchenId);
+      return response ? [response] : [];
     });
   }
 
