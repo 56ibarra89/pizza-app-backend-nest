@@ -13,8 +13,16 @@ describe('PrismaOrdersRepository kitchen status', () => {
             id: 45,
             isCombo: true,
             comboSelections: [
-              { productId: 'a', kitchenId: 'kitchen-a', kitchenStatus: 'pending' },
-              { productId: 'b', kitchenId: 'kitchen-b', kitchenStatus: 'ready' },
+              {
+                productId: 'a',
+                kitchenId: 'kitchen-a',
+                kitchenStatus: 'pending',
+              },
+              {
+                productId: 'b',
+                kitchenId: 'kitchen-b',
+                kitchenStatus: 'ready',
+              },
             ],
           },
         ]),
@@ -26,7 +34,9 @@ describe('PrismaOrdersRepository kitchen status', () => {
       },
     };
     const prisma = {
-      $transaction: jest.fn((fn: (client: typeof tx) => Promise<void>) => fn(tx)),
+      $transaction: jest.fn((fn: (client: typeof tx) => Promise<void>) =>
+        fn(tx),
+      ),
     } as unknown as PrismaService;
     const repository = new PrismaOrdersRepository(prisma);
 
@@ -45,7 +55,11 @@ describe('PrismaOrdersRepository kitchen status', () => {
       data: {
         kitchenStatus: 'PREPARING',
         comboSelections: [
-          { productId: 'a', kitchenId: 'kitchen-a', kitchenStatus: 'preparing' },
+          {
+            productId: 'a',
+            kitchenId: 'kitchen-a',
+            kitchenStatus: 'preparing',
+          },
           { productId: 'b', kitchenId: 'kitchen-b', kitchenStatus: 'ready' },
         ],
       },

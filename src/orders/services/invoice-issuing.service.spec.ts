@@ -165,7 +165,9 @@ describe('InvoiceIssuingService', () => {
     });
 
     expect(tx.orderItem.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { orderId: 'split-parent', giftQuantity: { gt: 0 } } }),
+      expect.objectContaining({
+        where: { orderId: 'split-parent', giftQuantity: { gt: 0 } },
+      }),
     );
     expect(tx.certificado.update).toHaveBeenCalledWith(
       expect.objectContaining({

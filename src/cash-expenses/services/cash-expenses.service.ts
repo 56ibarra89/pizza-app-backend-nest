@@ -134,9 +134,9 @@ export class CashExpensesService {
       : await this.shiftsService.getActive();
 
     if (!shift) {
-        throw new BadRequestException(
-          'Debes tener un turno de caja abierto para registrar un gasto.',
-        );
+      throw new BadRequestException(
+        'Debes tener un turno de caja abierto para registrar un gasto.',
+      );
     }
     targetShiftId = shift.id;
     if (shift.status !== ShiftStatus.OPEN) {
