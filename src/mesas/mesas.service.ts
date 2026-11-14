@@ -81,6 +81,8 @@ export class MesasService implements OnModuleInit {
 
     const runAtomicUpdate = async (tx: Prisma.TransactionClient) => {
       const tableIdsToDelete: string[] = [];
+      const tableIdsToDeactivate: string[] = [];
+      const tableIdsToReactivate: string[] = [];
       const tablesToCreate: Prisma.MesaCreateManyInput[] = [];
 
       // Fase 1: Validar todas las plantas eliminadas antes de escribir cambios
@@ -99,9 +101,10 @@ export class MesasService implements OnModuleInit {
             where: { tableId: t.id },
           });
           if (linkedOrders > 0) {
-            throw new BadRequestException(
-              `No se puede eliminar la planta "${removedFloor.name}" porque la mesa ${t.number} tiene historial de pedidos. En su lugar, ajusta el número de mesas a 0 para ocultarla.`,
-            );
+            if (t.isActive !== false) {
+              tableIdsToDeactivate.push(t.id);
+            }
+            continue;
           }
           tableIdsToDelete.push(t.id);
         }
@@ -114,22 +117,27 @@ export class MesasService implements OnModuleInit {
           orderBy: { number: 'asc' },
         });
 
-        const existingByNumber = new Set(existingMesas.map((m) => m.number));
+        const existingByNumber = new Map(
+          existingMesas.map((m) => [m.number, m]),
+        );
         for (let i = 1; i <= floor.tableCount; i++) {
-          if (!existingByNumber.has(i)) {
+          const existing = existingByNumber.get(i);
+          if (!existing) {
             tablesToCreate.push({
               id: `F${floor.id}-M${i}`,
               floor: floor.id,
               number: i,
               estado: 'DISPONIBLE' as const,
             });
+          } else if (existing.isActive === false) {
+            tableIdsToReactivate.push(existing.id);
           }
         }
 
-        const tablesToDelete = existingMesas.filter(
+        const tablesToRemove = existingMesas.filter(
           (m) => m.number > floor.tableCount,
         );
-        for (const t of tablesToDelete) {
+        for (const t of tablesToRemove) {
           if (t.estado !== 'DISPONIBLE') {
             throw new BadRequestException(
               `No se puede eliminar la mesa ${t.number} de la planta "${floor.name}" porque no está disponible.`,
@@ -139,9 +147,10 @@ export class MesasService implements OnModuleInit {
             where: { tableId: t.id },
           });
           if (linkedOrders > 0) {
-            throw new BadRequestException(
-              `No se puede eliminar la mesa ${t.number} de la planta "${floor.name}" porque tiene historial de pedidos. En su lugar, ajusta el número de mesas a 0 o déjala intacta para no romper reportes antiguos.`,
-            );
+            if (t.isActive !== false) {
+              tableIdsToDeactivate.push(t.id);
+            }
+            continue;
           }
           tableIdsToDelete.push(t.id);
         }
@@ -151,6 +160,28 @@ export class MesasService implements OnModuleInit {
       if (tableIdsToDelete.length > 0) {
         await tx.mesa.deleteMany({
           where: { id: { in: tableIdsToDelete } },
+        });
+      }
+
+      if (tableIdsToDeactivate.length > 0) {
+        await tx.mesa.updateMany({
+          where: { id: { in: tableIdsToDeactivate } },
+          data: {
+            isActive: false,
+            estado: 'DISPONIBLE',
+            ...MesasService.EMPTY_RESERVATION_DATA,
+          },
+        });
+      }
+
+      if (tableIdsToReactivate.length > 0) {
+        await tx.mesa.updateMany({
+          where: { id: { in: tableIdsToReactivate } },
+          data: {
+            isActive: true,
+            estado: 'DISPONIBLE',
+            ...MesasService.EMPTY_RESERVATION_DATA,
+          },
         });
       }
 
@@ -185,31 +216,36 @@ export class MesasService implements OnModuleInit {
 
   async getMesas() {
     return this.prisma.mesa.findMany({
+      where: { isActive: true },
       orderBy: [{ floor: 'asc' }, { number: 'asc' }],
     });
   }
 
+  private static readonly EMPTY_RESERVATION_DATA = {
+    reservationName: null,
+    reservationAmount: null,
+    reservationTime: null,
+    expirationTime: null,
+  } as const;
+
   async updateStatus(id: string, estado: MesaEstado) {
     const mesa = await this.prisma.mesa.findUnique({ where: { id } });
-    if (!mesa) throw new BadRequestException(`La mesa ${id} no existe.`);
-
-    return this.prisma.mesa.update({
-      where: { id },
-      data: { estado },
-    });
-  }
-
-  async reserveMesa(id: string, dto: ReserveMesaDto) {
-    const mesa = await this.prisma.mesa.findUnique({ where: { id } });
-    if (!mesa) throw new BadRequestException(`La mesa ${id} no existe.`);
-    if (mesa.estado !== 'DISPONIBLE') {
-      throw new BadRequestException(
-        `La mesa ${id} no está disponible para reservar.`,
-      );
+    if (!mesa || mesa.isActive === false) {
+      throw new BadRequestException(`La mesa ${id} no existe.`);
     }
 
     return this.prisma.mesa.update({
       where: { id },
+      data:
+        estado === 'DISPONIBLE'
+          ? { estado, ...MesasService.EMPTY_RESERVATION_DATA }
+          : { estado },
+    });
+  }
+
+  async reserveMesa(id: string, dto: ReserveMesaDto) {
+    const reserved = await this.prisma.mesa.updateMany({
+      where: { id, estado: 'DISPONIBLE', isActive: true },
       data: {
         estado: 'RESERVADO',
         reservationName: dto.reservationName,
@@ -222,20 +258,35 @@ export class MesasService implements OnModuleInit {
           : null,
       },
     });
+
+    if (reserved.count === 0) {
+      const mesa = await this.prisma.mesa.findUnique({ where: { id } });
+      if (!mesa || mesa.isActive === false) {
+        throw new BadRequestException(`La mesa ${id} no existe.`);
+      }
+      throw new BadRequestException(
+        `La mesa ${id} no está disponible para reservar.`,
+      );
+    }
+
+    const updated = await this.prisma.mesa.findUnique({ where: { id } });
+    if (!updated || updated.isActive === false) {
+      throw new BadRequestException(`La mesa ${id} no existe.`);
+    }
+    return updated;
   }
 
   async releaseMesa(id: string) {
     const mesa = await this.prisma.mesa.findUnique({ where: { id } });
-    if (!mesa) throw new BadRequestException(`La mesa ${id} no existe.`);
+    if (!mesa || mesa.isActive === false) {
+      throw new BadRequestException(`La mesa ${id} no existe.`);
+    }
 
     return this.prisma.mesa.update({
       where: { id },
       data: {
         estado: 'DISPONIBLE',
-        reservationName: null,
-        reservationAmount: null,
-        reservationTime: null,
-        expirationTime: null,
+        ...MesasService.EMPTY_RESERVATION_DATA,
       },
     });
   }

@@ -7,13 +7,20 @@ import type {
 
 export const SHIFTS_REPOSITORY = Symbol('SHIFTS_REPOSITORY');
 
+export interface ShiftStatusSummary {
+  id: string;
+  status: ShiftStatus;
+}
+
 export interface IShiftsRepository {
   findActive(): Promise<ShiftEntity | null>;
+  findActiveSummary(): Promise<ShiftStatusSummary | null>;
   findActiveForCashier(params: {
     cashierId: string;
     cashierSnapshotName: string;
   }): Promise<ShiftEntity | null>;
   findById(id: string): Promise<ShiftEntity | null>;
+  findSummaryById(id: string): Promise<ShiftStatusSummary | null>;
   getClosePreview(params: {
     id: string;
     closeType?: 'HANDOVER' | 'END_OF_DAY';

@@ -17,6 +17,8 @@ describe('CashExpensesService', () => {
   const shiftsService = {
     getActive: jest.fn(),
     getById: jest.fn(),
+    getActiveSummary: jest.fn(),
+    getSummaryById: jest.fn(),
   };
 
   const configService = {
@@ -57,11 +59,11 @@ describe('CashExpensesService', () => {
   });
 
   it('registra un gasto exitosamente en el turno activo', async () => {
-    shiftsService.getActive.mockResolvedValue({
+    shiftsService.getActiveSummary.mockResolvedValue({
       id: 'shift-123',
       status: ShiftStatus.OPEN,
     });
-    shiftsService.getById.mockResolvedValue({
+    shiftsService.getSummaryById.mockResolvedValue({
       id: 'shift-123',
       status: ShiftStatus.OPEN,
     });
@@ -86,7 +88,9 @@ describe('CashExpensesService', () => {
       user,
     );
 
-    expect(shiftsService.getActive).toHaveBeenCalled();
+    expect(shiftsService.getActiveSummary).toHaveBeenCalled();
+    expect(shiftsService.getSummaryById).not.toHaveBeenCalled();
+    expect(shiftsService.getActive).not.toHaveBeenCalled();
     expect(shiftsService.getById).not.toHaveBeenCalled();
     expect(repo.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -102,7 +106,7 @@ describe('CashExpensesService', () => {
   });
 
   it('rechaza el gasto si no hay un turno abierto', async () => {
-    shiftsService.getActive.mockResolvedValue(null);
+    shiftsService.getActiveSummary.mockResolvedValue(null);
 
     await expect(
       service.create(
@@ -117,11 +121,11 @@ describe('CashExpensesService', () => {
   });
 
   it('exige y valida el PIN de administrador cuando la política lo requiere', async () => {
-    shiftsService.getActive.mockResolvedValue({
+    shiftsService.getActiveSummary.mockResolvedValue({
       id: 'shift-123',
       status: ShiftStatus.OPEN,
     });
-    shiftsService.getById.mockResolvedValue({
+    shiftsService.getSummaryById.mockResolvedValue({
       id: 'shift-123',
       status: ShiftStatus.OPEN,
     });
@@ -168,5 +172,33 @@ describe('CashExpensesService', () => {
       requiredPermissions: ['cash.expenses.authorize'],
       attemptScope: 'cash-expense-authorization',
     });
+  });
+
+  it('filtra gastos usando límites de día America/Managua y reenvía limit', async () => {
+    repo.list.mockResolvedValue([]);
+
+    await service.list({
+      startDate: '2026-11-10',
+      endDate: '2026-11-10',
+      limit: 50,
+    });
+
+    expect(repo.list).toHaveBeenCalledWith({
+      shiftId: undefined,
+      cashierId: undefined,
+      category: undefined,
+      from: new Date('2026-11-10T06:00:00.000Z'),
+      to: new Date('2026-11-11T05:59:59.999Z'),
+      limit: 50,
+    });
+  });
+
+  it('rechaza fechas inválidas al listar gastos', async () => {
+    await expect(service.list({ startDate: 'fecha-invalida' })).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(service.list({ startDate: '2026-11-31' })).rejects.toThrow(
+      BadRequestException,
+    );
   });
 });

@@ -97,6 +97,26 @@ export class BackupsController {
     );
 
     const fileStream = fs.createReadStream(filePath);
+    const destroyStream = () => {
+      if (!fileStream.destroyed) {
+        fileStream.destroy();
+      }
+    };
+
+    res.once('close', destroyStream);
+    fileStream.once('error', () => {
+      res.off('close', destroyStream);
+      if (!res.headersSent) {
+        res.status(500).json({
+          message: 'Error al leer el archivo de respaldo solicitado',
+        });
+        return;
+      }
+      if (!res.destroyed) {
+        res.destroy();
+      }
+    });
+
     fileStream.pipe(res);
   }
 

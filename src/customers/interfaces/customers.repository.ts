@@ -17,6 +17,8 @@ export interface ICustomersRepository {
     name: string;
     phone?: string;
     address?: string;
+    phones?: Array<{ phone: string; isDefault?: boolean }>;
+    addresses?: Array<{ address: string; isDefault?: boolean }>;
   }): Promise<CustomerEntity>;
   upsertByName(params: {
     name: string;

@@ -11,6 +11,12 @@ import {
 } from '../../common/service-sla.config';
 import { SystemLogsService } from '../../system-logs/services/system-logs.service';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
+import {
+  SECURITY_SOCKETS_REVALIDATE_EVENT,
+  type SecuritySocketsRevalidateEvent,
+} from '../../common';
+
+const STREAM_SUBSCRIBER_CACHE_TTL_MS = 30_000;
 
 export interface NotificationEvent {
   id: string;
@@ -27,6 +33,14 @@ export interface NotificationEvent {
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
   private checkingDeliverySlas = false;
+  private readonly subscriberCache = new Map<
+    string,
+    {
+      cachedAt: number;
+      tokenVersion?: number;
+      subscriber: { role: UserRole; username: string };
+    }
+  >();
 
   public readonly notificationStream = new Subject<NotificationEvent>();
 
@@ -166,6 +180,8 @@ export class NotificationsService {
     customerName?: string;
     orderType?: string;
     targetUsername?: string;
+    waiterId?: string;
+    waiterUsername?: string;
     driverId?: string;
   }) {
     this.logger.log(`Received order.ready event for order: ${payload.orderId}`);
@@ -213,6 +229,17 @@ export class NotificationsService {
       ? `La orden de ${targetName} está lista para ser entregada.`
       : `El producto "${payload.itemName}" de ${targetName} está listo.`;
 
+    let resolvedWaiterUsername = payload.waiterUsername?.trim() || undefined;
+    if (!resolvedWaiterUsername && payload.waiterId) {
+      const waiter = await this.prisma.user.findUnique({
+        where: { id: payload.waiterId },
+        select: { username: true, role: true, isActive: true },
+      });
+      if (waiter?.isActive && waiter.role === UserRole.MESERO) {
+        resolvedWaiterUsername = waiter.username;
+      }
+    }
+
     const baseNotifications = [
       // Guardamos notificación para CAJERO (dirigida al cajero que generó la orden)
       this.createNotification(
@@ -238,12 +265,12 @@ export class NotificationsService {
         undefined,
         payload.orderId,
       ),
-      // Guardamos notificación para MESERO (dirigida al usuario específico si existe)
+      // Guardamos notificación para MESERO (dirigida al mesero asignado/relevado vigente si existe)
       this.createNotification(
         title,
         message,
         UserRole.MESERO,
-        payload.targetUsername,
+        resolvedWaiterUsername ?? payload.targetUsername,
         payload.orderId,
       ),
     ];
@@ -405,6 +432,17 @@ export class NotificationsService {
     }
   }
 
+  @OnEvent(SECURITY_SOCKETS_REVALIDATE_EVENT)
+  handleSecuritySocketsRevalidate(
+    payload?: SecuritySocketsRevalidateEvent,
+  ): void {
+    if (payload?.userId) {
+      this.subscriberCache.delete(payload.userId);
+      return;
+    }
+    this.subscriberCache.clear();
+  }
+
   async validateStreamSubscriber(
     user: AuthenticatedUser,
   ): Promise<{ role: UserRole; username: string } | null> {
@@ -412,6 +450,7 @@ export class NotificationsService {
       typeof user.tokenExpiresAtMs === 'number' &&
       Date.now() >= user.tokenExpiresAtMs
     ) {
+      this.subscriberCache.delete(user.id);
       return null;
     }
 
@@ -420,6 +459,17 @@ export class NotificationsService {
         role: user.role.toUpperCase() as UserRole,
         username: user.username,
       };
+    }
+
+    const now = Date.now();
+    const cached = this.subscriberCache.get(user.id);
+    if (
+      cached &&
+      now - cached.cachedAt < STREAM_SUBSCRIBER_CACHE_TTL_MS &&
+      (typeof user.tokenVersion !== 'number' ||
+        cached.tokenVersion === user.tokenVersion)
+    ) {
+      return cached.subscriber;
     }
 
     const dbUser = await this.prisma.user.findUnique({
@@ -432,18 +482,26 @@ export class NotificationsService {
       },
     });
     if (!dbUser || !dbUser.isActive) {
+      this.subscriberCache.delete(user.id);
       return null;
     }
     if (
       typeof user.tokenVersion === 'number' &&
       dbUser.tokenVersion !== user.tokenVersion
     ) {
+      this.subscriberCache.delete(user.id);
       return null;
     }
 
-    return {
+    const subscriber = {
       role: dbUser.role,
       username: dbUser.username,
     };
+    this.subscriberCache.set(user.id, {
+      cachedAt: now,
+      tokenVersion: dbUser.tokenVersion,
+      subscriber,
+    });
+    return subscriber;
   }
 }

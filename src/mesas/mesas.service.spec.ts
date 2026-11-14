@@ -16,6 +16,7 @@ describe('MesasService', () => {
       createMany: jest.Mock;
       deleteMany: jest.Mock;
       update: jest.Mock;
+      updateMany: jest.Mock;
     };
     orderTable: {
       count: jest.Mock;
@@ -44,6 +45,7 @@ describe('MesasService', () => {
         createMany: jest.fn().mockResolvedValue({ count: 0 }),
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         update: jest.fn(),
+        updateMany: jest.fn(),
       },
       orderTable: {
         count: jest.fn().mockResolvedValue(0),
@@ -157,5 +159,129 @@ describe('MesasService', () => {
       create: { id: 'floors_config', data: updatedFloors },
       update: { data: updatedFloors },
     });
+  });
+
+  it('rechaza reserva concurrente en reserveMesa cuando la mesa deja de estar DISPONIBLE (B34)', async () => {
+    prismaMock.mesa.updateMany.mockResolvedValue({ count: 0 });
+    prismaMock.mesa.findUnique.mockResolvedValue({
+      id: 'F1-M1',
+      estado: 'RESERVADO',
+    });
+
+    await expect(
+      service.reserveMesa('F1-M1', {
+        reservationName: 'Carlos',
+        reservationAmount: 500,
+        reservationTime: '2026-11-13T18:00:00.000Z',
+        expirationTime: '2026-11-13T18:30:00.000Z',
+      }),
+    ).rejects.toThrow('La mesa F1-M1 no está disponible para reservar.');
+
+    expect(prismaMock.mesa.updateMany).toHaveBeenCalledWith({
+      where: { id: 'F1-M1', estado: 'DISPONIBLE', isActive: true },
+      data: expect.objectContaining({
+        estado: 'RESERVADO',
+        reservationName: 'Carlos',
+      }),
+    });
+    expect(prismaMock.mesa.update).not.toHaveBeenCalled();
+  });
+
+  it('limpia los metadatos de reserva en updateStatus cuando pasa a DISPONIBLE (B34)', async () => {
+    prismaMock.mesa.findUnique.mockResolvedValue({
+      id: 'F1-M1',
+      estado: 'RESERVADO',
+    });
+    prismaMock.mesa.update.mockResolvedValue({
+      id: 'F1-M1',
+      estado: 'DISPONIBLE',
+      reservationName: null,
+      reservationAmount: null,
+      reservationTime: null,
+      expirationTime: null,
+    });
+
+    await service.updateStatus('F1-M1', 'DISPONIBLE');
+
+    expect(prismaMock.mesa.update).toHaveBeenCalledWith({
+      where: { id: 'F1-M1' },
+      data: {
+        estado: 'DISPONIBLE',
+        reservationName: null,
+        reservationAmount: null,
+        reservationTime: null,
+        expirationTime: null,
+      },
+    });
+  });
+
+  it('desactiva mesas con historial al reducir plantas y las reactiva si vuelven a crearse (B42)', async () => {
+    let f1m2Active = true;
+    prismaMock.mesa.findMany.mockImplementation(
+      async ({ where }: { where: { floor?: number; isActive?: boolean } }) => {
+        if (where?.floor === 1) {
+          return [
+            {
+              id: 'F1-M1',
+              floor: 1,
+              number: 1,
+              estado: 'DISPONIBLE',
+              isActive: true,
+            },
+            {
+              id: 'F1-M2',
+              floor: 1,
+              number: 2,
+              estado: 'DISPONIBLE',
+              isActive: f1m2Active,
+            },
+          ];
+        }
+        return [];
+      },
+    );
+    prismaMock.orderTable.count.mockResolvedValueOnce(4);
+
+    await service.updateFloorsConfig([
+      { id: 1, name: 'Primera Planta', tableCount: 1 },
+    ]);
+
+    expect(prismaMock.mesa.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['F1-M2'] } },
+      data: expect.objectContaining({
+        isActive: false,
+        estado: 'DISPONIBLE',
+      }),
+    });
+    expect(prismaMock.mesa.deleteMany).not.toHaveBeenCalled();
+
+    f1m2Active = false;
+
+    await service.updateFloorsConfig([
+      { id: 1, name: 'Primera Planta', tableCount: 2 },
+    ]);
+
+    expect(prismaMock.mesa.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['F1-M2'] } },
+      data: expect.objectContaining({
+        isActive: true,
+        estado: 'DISPONIBLE',
+      }),
+    });
+
+    await service.getMesas();
+    expect(prismaMock.mesa.findMany).toHaveBeenLastCalledWith({
+      where: { isActive: true },
+      orderBy: [{ floor: 'asc' }, { number: 'asc' }],
+    });
+
+    prismaMock.mesa.findUnique.mockResolvedValueOnce({
+      id: 'F1-M2',
+      isActive: false,
+      estado: 'DISPONIBLE',
+    });
+    await expect(
+      service.updateStatus('F1-M2', 'OCUPADO'),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

@@ -118,15 +118,20 @@ export class PrismaCashExpensesRepository implements ICashExpensesRepository {
         },
       },
       orderBy: { createdAt: 'desc' },
+      take: Math.min(Math.max(1, params.limit ?? 200), 500),
     });
 
     return rows.map((r) => this.map(r));
   }
 
-  async listByShiftId(shiftId: string): Promise<CashExpenseEntity[]> {
+  async listByShiftId(
+    shiftId: string,
+    limit = 200,
+  ): Promise<CashExpenseEntity[]> {
     const rows = await this.prisma.cashExpense.findMany({
       where: { shiftId },
       orderBy: { createdAt: 'desc' },
+      take: Math.min(Math.max(1, limit), 500),
     });
 
     return rows.map((r) => this.map(r));

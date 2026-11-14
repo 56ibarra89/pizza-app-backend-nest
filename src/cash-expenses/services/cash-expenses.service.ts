@@ -15,6 +15,7 @@ import { ShiftsService } from '../../shifts/services/shifts.service';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { CashExpenseEntity } from '../entities/cash-expense.entity';
 import { AppConfigService } from '../../app-config/services/app-config.service';
+import { parseBusinessDateInput } from '../../common/time/business-time.util';
 import {
   USERS_REPOSITORY,
   type IUsersRepository,
@@ -130,8 +131,8 @@ export class CashExpensesService {
   ): Promise<CashExpenseEntity> {
     let targetShiftId = dto.shiftId;
     const shift = targetShiftId
-      ? await this.shiftsService.getById(targetShiftId)
-      : await this.shiftsService.getActive();
+      ? await this.shiftsService.getSummaryById(targetShiftId)
+      : await this.shiftsService.getActiveSummary();
 
     if (!shift) {
       throw new BadRequestException(
@@ -215,8 +216,8 @@ export class CashExpensesService {
   }
 
   async list(query: ListCashExpensesQueryDto): Promise<CashExpenseEntity[]> {
-    const from = query.startDate ? new Date(query.startDate) : undefined;
-    const to = query.endDate ? new Date(query.endDate) : undefined;
+    const from = this.parseDateBound(query.startDate, 'start', 'Fecha inicial');
+    const to = this.parseDateBound(query.endDate, 'end', 'Fecha final');
 
     return this.repo.list({
       shiftId: query.shiftId,
@@ -224,7 +225,31 @@ export class CashExpensesService {
       category: query.category,
       from,
       to,
+      limit: query.limit,
     });
+  }
+
+  private parseDateBound(
+    rawDate: string | undefined,
+    bound: 'start' | 'end',
+    label: string,
+  ): Date | undefined {
+    if (!rawDate) {
+      return undefined;
+    }
+
+    try {
+      const parsed = parseBusinessDateInput(rawDate, bound);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new BadRequestException(`${label} inválida`);
+      }
+      return parsed;
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException(`${label} inválida`);
+    }
   }
 
   async listByShiftId(shiftId: string): Promise<CashExpenseEntity[]> {

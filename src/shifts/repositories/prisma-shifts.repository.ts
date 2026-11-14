@@ -23,7 +23,10 @@ import type {
   ShiftClosePreview,
   ShiftEntity,
 } from '../entities/shift.entity';
-import type { IShiftsRepository } from '../interfaces/shifts.repository';
+import type {
+  IShiftsRepository,
+  ShiftStatusSummary,
+} from '../interfaces/shifts.repository';
 import {
   USERS_REPOSITORY,
   type IUsersRepository,
@@ -52,6 +55,14 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       orderBy: { startTime: 'desc' },
     });
     return row ? this.mapWithLiveSales(row) : null;
+  }
+
+  async findActiveSummary(): Promise<ShiftStatusSummary | null> {
+    return this.prisma.shift.findFirst({
+      where: { status: ShiftStatus.OPEN },
+      orderBy: { startTime: 'desc' },
+      select: { id: true, status: true },
+    });
   }
 
   async findActiveForCashier(params: {
@@ -84,6 +95,13 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     return this.mapWithLiveSales(row);
   }
 
+  async findSummaryById(id: string): Promise<ShiftStatusSummary | null> {
+    return this.prisma.shift.findUnique({
+      where: { id },
+      select: { id: true, status: true },
+    });
+  }
+
   async getClosePreview(params: {
     id: string;
     closeType?: 'HANDOVER' | 'END_OF_DAY';
@@ -114,7 +132,21 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       },
     });
 
-    return rows.map((row) => this.map(row));
+    const openShiftIds = rows
+      .filter((row) => row.status === ShiftStatus.OPEN)
+      .map((row) => row.id);
+    const liveSalesByShiftId =
+      openShiftIds.length > 0
+        ? await this.getLiveSalesByShiftIds(openShiftIds)
+        : new Map<
+            string,
+            ReturnType<PrismaShiftsRepository['summarizeSales']>
+          >();
+
+    return rows.map((row) => {
+      const liveSales = liveSalesByShiftId.get(row.id);
+      return liveSales ? this.applyLiveSales(row, liveSales) : this.map(row);
+    });
   }
 
   async open(params: {
@@ -477,6 +509,84 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     };
   }
 
+  private async getLiveSalesByShiftIds(shiftIds: string[]) {
+    const result = new Map<
+      string,
+      ReturnType<PrismaShiftsRepository['summarizeSales']>
+    >();
+    if (shiftIds.length === 0) return result;
+
+    if (typeof this.prisma.order?.findMany === 'function') {
+      const orders = await this.prisma.order.findMany({
+        where: {
+          shiftId: { in: shiftIds },
+          status: OrderStatus.PAID,
+        },
+        select: {
+          shiftId: true,
+          payments: {
+            select: {
+              method: true,
+              methodConfigId: true,
+              methodSnapshotName: true,
+              methodType: true,
+              currency: true,
+              amount: true,
+              commissionAmount: true,
+            },
+          },
+        },
+      });
+      const buckets = new Map<
+        string,
+        Array<{
+          method: PaymentMethod;
+          methodConfigId: string | null;
+          methodSnapshotName: string | null;
+          methodType: string | null;
+          currency: string | null;
+          gross: Prisma.Decimal;
+          commission: Prisma.Decimal;
+          count: number;
+        }>
+      >();
+      for (const shiftId of shiftIds) {
+        buckets.set(shiftId, []);
+      }
+      for (const order of orders) {
+        if (!order.shiftId) continue;
+        const entries = buckets.get(order.shiftId);
+        if (!entries) continue;
+        for (const payment of order.payments) {
+          entries.push({
+            method: payment.method,
+            methodConfigId: payment.methodConfigId,
+            methodSnapshotName: payment.methodSnapshotName,
+            methodType: payment.methodType,
+            currency: payment.currency,
+            gross: payment.amount,
+            commission: payment.commissionAmount ?? new Prisma.Decimal(0),
+            count: 1,
+          });
+        }
+      }
+      for (const [shiftId, entries] of buckets.entries()) {
+        result.set(shiftId, this.summarizeSales(entries));
+      }
+      return result;
+    }
+
+    await Promise.all(
+      shiftIds.map(async (shiftId) => {
+        const sales = await this.prisma.$transaction((tx) =>
+          this.getLiveSales(tx, shiftId),
+        );
+        result.set(shiftId, sales);
+      }),
+    );
+    return result;
+  }
+
   private async getLiveSales(tx: Prisma.TransactionClient, shiftId: string) {
     const groups = await tx.payment.groupBy({
       by: [
@@ -490,6 +600,32 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       _sum: { amount: true, commissionAmount: true },
       _count: { _all: true },
     });
+    return this.summarizeSales(
+      groups.map((payment) => ({
+        method: payment.method,
+        methodConfigId: payment.methodConfigId,
+        methodSnapshotName: payment.methodSnapshotName,
+        methodType: payment.methodType,
+        currency: payment.currency,
+        gross: payment._sum.amount ?? new Prisma.Decimal(0),
+        commission: payment._sum.commissionAmount ?? new Prisma.Decimal(0),
+        count: payment._count._all,
+      })),
+    );
+  }
+
+  private summarizeSales(
+    entries: Array<{
+      method: PaymentMethod;
+      methodConfigId: string | null;
+      methodSnapshotName: string | null;
+      methodType: string | null;
+      currency: string | null;
+      gross: Prisma.Decimal;
+      commission: Prisma.Decimal;
+      count: number;
+    }>,
+  ) {
     let cash = new Prisma.Decimal(0);
     let card = new Prisma.Decimal(0);
     let app = new Prisma.Decimal(0);
@@ -508,15 +644,19 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       }
     >();
     let totalCommission = new Prisma.Decimal(0);
-    for (const payment of groups) {
-      const gross = payment._sum.amount ?? new Prisma.Decimal(0);
-      const commission = payment._sum.commissionAmount ?? new Prisma.Decimal(0);
-      total = total.add(gross);
-      if (payment.method === PaymentMethod.EFECTIVO) cash = cash.add(gross);
-      if (payment.method === PaymentMethod.TARJETA) card = card.add(gross);
-      if (payment.method === PaymentMethod.APP) app = app.add(gross);
+    for (const payment of entries) {
+      total = total.add(payment.gross);
+      if (payment.method === PaymentMethod.EFECTIVO) {
+        cash = cash.add(payment.gross);
+      }
+      if (payment.method === PaymentMethod.TARJETA) {
+        card = card.add(payment.gross);
+      }
+      if (payment.method === PaymentMethod.APP) {
+        app = app.add(payment.gross);
+      }
       const methodId = payment.methodConfigId ?? `legacy-${payment.method}`;
-      totalCommission = totalCommission.add(commission);
+      totalCommission = totalCommission.add(payment.commission);
       const group = paymentGroups.get(methodId) ?? {
         methodId,
         name: payment.methodSnapshotName ?? payment.method,
@@ -527,10 +667,12 @@ export class PrismaShiftsRepository implements IShiftsRepository {
         commissionAmount: new Prisma.Decimal(0),
         netAmount: new Prisma.Decimal(0),
       };
-      group.transactionCount += payment._count._all;
-      group.grossAmount = group.grossAmount.add(gross);
-      group.commissionAmount = group.commissionAmount.add(commission);
-      group.netAmount = group.netAmount.add(gross.sub(commission));
+      group.transactionCount += payment.count;
+      group.grossAmount = group.grossAmount.add(payment.gross);
+      group.commissionAmount = group.commissionAmount.add(payment.commission);
+      group.netAmount = group.netAmount.add(
+        payment.gross.sub(payment.commission),
+      );
       paymentGroups.set(methodId, group);
     }
 
@@ -583,12 +725,21 @@ export class PrismaShiftsRepository implements IShiftsRepository {
   }
 
   private async mapWithLiveSales(row: ShiftWithExpenses): Promise<ShiftEntity> {
-    const mapped = this.map(row);
-    if (row.status !== ShiftStatus.OPEN) return mapped;
+    if (row.status !== ShiftStatus.OPEN) return this.map(row);
 
     const sales = await this.prisma.$transaction((tx) =>
       this.getLiveSales(tx, row.id),
     );
+    return this.applyLiveSales(row, sales);
+  }
+
+  private applyLiveSales(
+    row: ShiftWithExpenses,
+    sales: ReturnType<PrismaShiftsRepository['summarizeSales']>,
+  ): ShiftEntity {
+    const mapped = this.map(row);
+    if (row.status !== ShiftStatus.OPEN) return mapped;
+
     const totalExpenses = row.expenses.reduce(
       (sum, expense) => sum.add(expense.amount),
       new Prisma.Decimal(0),

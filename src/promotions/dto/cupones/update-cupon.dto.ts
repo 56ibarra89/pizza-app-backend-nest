@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Min,
   ValidateBy,
 } from 'class-validator';
 import type {
@@ -41,10 +42,12 @@ export class UpdateCuponDto {
 
   @IsOptional()
   @IsInt()
+  @Min(0)
   maxUses?: number;
 
   @IsOptional()
   @IsInt()
+  @Min(0)
   currentUses?: number;
 
   @IsOptional()

@@ -63,12 +63,4 @@ export class OrderPaymentDto {
   @IsNumber()
   @Min(0)
   commissionAmount?: number;
-
-  @IsOptional()
-  @IsString()
-  cashierId?: string;
-
-  @IsOptional()
-  @IsString()
-  cashierSnapshotName?: string;
 }

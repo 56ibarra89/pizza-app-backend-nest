@@ -90,6 +90,20 @@ export function toOrderResponseDto(order: OrderEntity) {
   };
 }
 
+export function collectOrderKitchenIds(order: OrderEntity): string[] {
+  const kitchenIds = new Set<string>();
+  for (const item of order.items) {
+    if (!requiresKitchenPreparation(item)) continue;
+    if (item.kitchenId) kitchenIds.add(item.kitchenId);
+    if (item.isCombo && Array.isArray(item.comboSelections)) {
+      for (const selection of item.comboSelections) {
+        if (selection.kitchenId) kitchenIds.add(selection.kitchenId);
+      }
+    }
+  }
+  return [...kitchenIds];
+}
+
 export function toKitchenOrderResponseDto(
   order: OrderEntity,
   kitchenId: string,
@@ -153,5 +167,35 @@ export function toKitchenOrderResponseDto(
     invoice: order.invoice
       ? { invoiceNumber: order.invoice.invoiceNumber }
       : undefined,
+  };
+}
+
+export function toKitchenClearedOrderResponseDto(order: OrderEntity) {
+  return {
+    id: order.id,
+    items: [],
+    status: order.status,
+    timestamp: order.timestamp.toISOString(),
+    updatedAt: order.updatedAt?.toISOString(),
+    orderType: order.orderType,
+    customerSnapshotName: order.customerSnapshotName,
+    linkedTables: order.linkedTables,
+    isSentToKitchen: order.isSentToKitchen,
+    packagingRequested: false,
+    invoice: order.invoice
+      ? { invoiceNumber: order.invoice.invoiceNumber }
+      : undefined,
+  };
+}
+
+export function toDriverClearedOrderResponseDto(order: OrderEntity) {
+  return {
+    id: order.id,
+    status: order.status,
+    orderType: order.orderType,
+    timestamp: order.timestamp.toISOString(),
+    updatedAt: order.updatedAt?.toISOString(),
+    driverId: undefined,
+    items: [],
   };
 }

@@ -165,6 +165,26 @@ describe('AdminDashboardService', () => {
         total: 200,
         linkedTables: [{ mesa: { floor: 1 } }],
       },
+      {
+        id: 'parent-zero-aggregate',
+        waiterId: 'waiter-2',
+        waiterSnapshotName: 'bea',
+        cashierId: null,
+        cashierSnapshotName: null,
+        invoiceNumber: null,
+        total: 0,
+        linkedTables: [{ mesa: { floor: 1 } }],
+      },
+      {
+        id: 'parent-remaining-balance',
+        waiterId: 'waiter-2',
+        waiterSnapshotName: 'bea',
+        cashierId: null,
+        cashierSnapshotName: null,
+        invoiceNumber: '001-001-01-0003',
+        total: 150,
+        linkedTables: [{ mesa: { floor: 1 } }],
+      },
     ]);
 
     const result = await service.getWaiterPerformance();
@@ -173,13 +193,19 @@ describe('AdminDashboardService', () => {
       expect.objectContaining({ ordersServed: 1, revenueTotal: 100 }),
     );
     expect(result.find((waiter) => waiter.id === 'waiter-2')).toEqual(
-      expect.objectContaining({ ordersServed: 0, revenueTotal: 0 }),
+      expect.objectContaining({ ordersServed: 1, revenueTotal: 150 }),
     );
     expect(prisma.order.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           status: 'PAID',
-          NOT: { splitOrders: { some: { status: 'PAID' } } },
+          OR: expect.arrayContaining([
+            expect.objectContaining({ paidAt: expect.any(Object) }),
+            expect.objectContaining({
+              paidAt: null,
+              timestamp: expect.any(Object),
+            }),
+          ]),
         }),
       }),
     );

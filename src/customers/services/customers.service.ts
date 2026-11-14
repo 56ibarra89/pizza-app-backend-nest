@@ -35,6 +35,8 @@ export class CustomersService {
       name: dto.name,
       phone: dto.phone,
       address: dto.address,
+      phones: dto.phones,
+      addresses: dto.addresses,
     });
   }
 

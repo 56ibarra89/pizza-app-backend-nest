@@ -4,9 +4,11 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
   UnauthorizedException,
   HttpException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MailerService } from '@nestjs-modules/mailer';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma, UserRole as DbUserRole, WeekDay } from '@prisma/client';
@@ -27,6 +29,10 @@ import { PinAttemptService } from '../../common/security/pin-attempt.service';
 import { createHash } from 'node:crypto';
 import { AccessControlService } from '../../access-control/access-control.service';
 import { fromDbRole } from '../mappers/user-role.mapper';
+import {
+  SECURITY_SOCKETS_REVALIDATE_EVENT,
+  type SecuritySocketsRevalidateEvent,
+} from '../../common';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { getBusinessDayBounds } from '../../common/time/business-time.util';
 
@@ -99,7 +105,14 @@ export class UsersService {
     private readonly pinHasher: PinHasherService,
     private readonly authAttempts: PinAttemptService,
     private readonly accessControl: AccessControlService,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
+
+  private emitSocketRevalidation(
+    payload: SecuritySocketsRevalidateEvent,
+  ): void {
+    this.eventEmitter?.emit(SECURITY_SOCKETS_REVALIDATE_EVENT, payload);
+  }
 
   getAll() {
     return this.repo.getAll();
@@ -256,6 +269,13 @@ export class UsersService {
         accessRoleId: updated.accessRoleId,
         active: updated.isActive,
       });
+      if (
+        revokesSessions ||
+        dto.isActive === false ||
+        updated.accessRoleId !== current.accessRoleId
+      ) {
+        this.emitSocketRevalidation({ userId: id });
+      }
       return updated;
     } catch (e) {
       if (
@@ -297,7 +317,7 @@ export class UsersService {
     ]);
 
     try {
-      return await this.repo.update(id, {
+      const updated = await this.repo.update(id, {
         username: dto.username?.toLowerCase(),
         email:
           dto.email === undefined
@@ -313,6 +333,10 @@ export class UsersService {
         pinLookup: dto.pin ? this.pinHasher.lookup(dto.pin) : undefined,
         tokenVersion: changesCredential ? current.tokenVersion + 1 : undefined,
       });
+      if (changesCredential) {
+        this.emitSocketRevalidation({ userId: id });
+      }
+      return updated;
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -327,9 +351,17 @@ export class UsersService {
   async delete(id: string, actor?: AuthenticatedUser) {
     const user = await this.repo.findById(id);
     if (!user) throw new NotFoundException('Usuario no encontrado');
-    if (user.role === UserRoleDto.admin) {
+    const systemAdminRole = await this.prisma.accessRole.findUnique({
+      where: { code: 'admin' },
+      select: { id: true },
+    });
+    if (
+      user.isActive &&
+      systemAdminRole &&
+      user.accessRoleId === systemAdminRole.id
+    ) {
       const activeAdmins = await this.prisma.user.count({
-        where: { role: DbUserRole.ADMIN, isActive: true },
+        where: { accessRoleId: systemAdminRole.id, isActive: true },
       });
       if (activeAdmins <= 1) {
         throw new ConflictException(
@@ -345,6 +377,7 @@ export class UsersService {
       userId: id,
       username: user.username,
     });
+    this.emitSocketRevalidation({ userId: id });
     return updated;
   }
 
@@ -492,14 +525,6 @@ export class UsersService {
       themePreference: user.themePreference,
       ...authorization,
     };
-  }
-
-  async requireValidPin(
-    pin: string,
-  ): Promise<{ username: string; role: UserRoleDto }> {
-    const result = await this.loginWithPin(pin);
-    if (!result) throw new UnauthorizedException('PIN inválido');
-    return result;
   }
 
   async refreshToken(userId: string): Promise<{ access_token: string }> {
@@ -689,6 +714,7 @@ export class UsersService {
         );
       }
 
+      this.emitSocketRevalidation({ userId });
       return { success: true, message: 'Contraseña actualizada exitosamente' };
     } catch (error: unknown) {
       if (error instanceof HttpException) throw error;
@@ -702,7 +728,9 @@ export class UsersService {
     const user = await this.repo.findById(userId);
     if (!user) throw new NotFoundException('Usuario no encontrado');
 
-    return await this.repo.incrementTokenVersion(userId);
+    const updated = await this.repo.incrementTokenVersion(userId);
+    this.emitSocketRevalidation({ userId });
+    return updated;
   }
 
   async addExtraDay(userId: string, date: string, notes?: string) {
@@ -733,7 +761,18 @@ export class UsersService {
   }
 
   async removeExtraDay(userId: string, date: string) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new BadRequestException(
+        'La fecha debe usar el formato YYYY-MM-DD.',
+      );
+    }
     const parsedDate = new Date(`${date}T00:00:00.000Z`);
+    if (
+      Number.isNaN(parsedDate.getTime()) ||
+      parsedDate.toISOString().slice(0, 10) !== date
+    ) {
+      throw new BadRequestException('La fecha indicada no existe.');
+    }
 
     try {
       await this.prisma.userExtraDay.delete({
@@ -744,8 +783,15 @@ export class UsersService {
           },
         },
       });
-    } catch {
-      // Ignorar si no existe
+    } catch (error) {
+      if (
+        !(
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2025'
+        )
+      ) {
+        throw error;
+      }
     }
 
     return { success: true };

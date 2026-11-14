@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsBoolean,
+  IsNotEmpty,
   IsOptional,
   IsString,
   ValidateNested,
@@ -46,6 +47,7 @@ export class UpdateCustomerAddressItemDto {
 export class UpdateCustomerDto {
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   name?: string;
 

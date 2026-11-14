@@ -37,7 +37,7 @@ describe('BackupsService restore safeguards (H03)', () => {
     }
   });
 
-  function createService() {
+  function createService(stubHelpers = true) {
     const configService = {
       get: jest
         .fn()
@@ -63,19 +63,21 @@ describe('BackupsService restore safeguards (H03)', () => {
       systemLogs as never,
     );
 
-    jest.spyOn(service, 'generateBackup').mockResolvedValue({
-      filename: 'safety-snapshot_2026-11-04_09-00-00.sql',
-      sizeBytes: 1024,
-      sizeMb: 0.01,
-      createdAt: new Date('2026-11-04T15:00:00.000Z'),
-      type: 'SAFETY_SNAPSHOT',
-      location: 'LOCAL',
-    });
-    jest
-      .spyOn(service, 'getBackupFilePath')
-      .mockImplementation((name) =>
-        name === 'empty.sql' ? emptySqlFile : validSqlFile,
-      );
+    if (stubHelpers) {
+      jest.spyOn(service, 'generateBackup').mockResolvedValue({
+        filename: 'safety-snapshot_2026-11-04_09-00-00.sql',
+        sizeBytes: 1024,
+        sizeMb: 0.01,
+        createdAt: new Date('2026-11-04T15:00:00.000Z'),
+        type: 'SAFETY_SNAPSHOT',
+        location: 'LOCAL',
+      });
+      jest
+        .spyOn(service, 'getBackupFilePath')
+        .mockImplementation((name) =>
+          name === 'empty.sql' ? emptySqlFile : validSqlFile,
+        );
+    }
 
     return service;
   }
@@ -212,5 +214,88 @@ describe('BackupsService restore safeguards (H03)', () => {
 
     releaseRestore();
     await expect(firstRestore).resolves.toMatchObject({ success: true });
+  });
+
+  it('rechaza path traversal o extensiones inválidas en getBackupFilePath', () => {
+    const service = createService(false);
+
+    expect(() => service.getBackupFilePath('../escape.sql')).toThrow(
+      BadRequestException,
+    );
+    expect(() => service.getBackupFilePath('nested/file.sql')).toThrow(
+      BadRequestException,
+    );
+    expect(() => service.getBackupFilePath('notes.txt')).toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('serializa llamadas concurrentes a generateBackup para evitar colisiones', async () => {
+    const service = createService(false);
+    Object.assign(service as unknown as { storageDir: string }, {
+      storageDir: tempDir,
+    });
+    jest.spyOn(service, 'resolveBinaryPath').mockReturnValue('pg_dump');
+    jest.spyOn(service, 'cleanExpiredBackups').mockResolvedValue(0);
+    let activeCount = 0;
+    let maxConcurrent = 0;
+
+    execFileMock.mockImplementation(
+      (
+        _file: string,
+        args: string[],
+        _options: unknown,
+        callback: (
+          err: Error | null,
+          result?: { stdout: string; stderr: string },
+        ) => void,
+      ) => {
+        activeCount += 1;
+        maxConcurrent = Math.max(maxConcurrent, activeCount);
+        const destPath = args[args.length - 1];
+        fs.writeFileSync(destPath, '-- sql dump');
+        setTimeout(() => {
+          activeCount -= 1;
+          callback(null, { stdout: '', stderr: '' });
+        }, 15);
+      },
+    );
+
+    const [first, second] = await Promise.all([
+      service.generateBackup('MANUAL'),
+      service.generateBackup('MANUAL'),
+    ]);
+
+    expect(maxConcurrent).toBe(1);
+    expect(first.filename).not.toBe(second.filename);
+  });
+
+  it('pasa -q y maxBuffer ampliado a psql en restoreBackup', async () => {
+    const service = createService();
+    let restoreOptions: Record<string, unknown> | undefined;
+    let restoreArgs: string[] = [];
+
+    execFileMock.mockImplementation(
+      (
+        _file: string,
+        args: string[],
+        options: Record<string, unknown>,
+        callback: (
+          err: Error | null,
+          result?: { stdout: string; stderr: string },
+        ) => void,
+      ) => {
+        if (args.includes('-f')) {
+          restoreArgs = args;
+          restoreOptions = options;
+        }
+        callback(null, { stdout: '9\n', stderr: '' });
+      },
+    );
+
+    await service.restoreBackup({ filename: 'restore-source.sql' });
+
+    expect(restoreArgs).toContain('-q');
+    expect(restoreOptions?.maxBuffer).toBe(64 * 1024 * 1024);
   });
 });

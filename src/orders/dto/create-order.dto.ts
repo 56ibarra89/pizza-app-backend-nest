@@ -2,7 +2,6 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
-  IsDate,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -23,11 +22,6 @@ export class CreateOrderDto {
   @IsString()
   @IsNotEmpty()
   id?: string;
-
-  @IsOptional()
-  @IsString()
-  @IsNotEmpty()
-  shiftId?: string;
 
   @IsOptional()
   @IsString()
@@ -71,11 +65,6 @@ export class CreateOrderDto {
   @IsOptional()
   @IsEnum(OrderStatusDto)
   status?: OrderStatusDto;
-
-  @IsOptional()
-  @Type(() => Date)
-  @IsDate()
-  timestamp?: Date;
 
   @IsOptional()
   @IsString()
@@ -123,15 +112,6 @@ export class CreateOrderDto {
   @ValidateNested({ each: true })
   @Type(() => OrderPaymentDto)
   payments?: OrderPaymentDto[];
-
-  @IsOptional()
-  @IsString()
-  cashierSnapshotName?: string;
-
-  @IsOptional()
-  @IsString()
-  @IsNotEmpty()
-  cashierId?: string;
 
   @IsOptional()
   @IsString()

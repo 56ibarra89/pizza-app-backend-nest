@@ -119,7 +119,7 @@ describe('OrdersGateway authorization', () => {
     expect(next).toHaveBeenCalledWith();
   });
 
-  it('desconecta y retira del canal un socket cuya sesión fue revocada antes de emitir cambios (H10)', async () => {
+  it('desconecta y retira del canal un socket cuando llega evento de revalidación de seguridad (H10)', async () => {
     authorizationForUser.mockResolvedValue({
       accessRoleId: 'role-1',
       accessRoleName: 'Caja',
@@ -133,22 +133,145 @@ describe('OrdersGateway authorization', () => {
       tokenVersion: activeUser.tokenVersion + 1,
     });
 
-    await gateway.handleOrderSynchronized({
-      mutation: 'updated',
-      order: {
-        id: 'order-1',
-        status: 'pending' as never,
-        total: 100,
-        timestamp: new Date('2026-10-24T12:00:00.000Z'),
-        items: [],
-        payments: [],
-      },
-    });
+    await gateway.handleSecurityRevalidation({ userId: activeUser.id });
 
     expect(socket.leave).toHaveBeenCalledWith(
       'authenticated-full-orders-clients',
     );
     expect(socket.disconnect).toHaveBeenCalledWith(true);
+  });
+
+  it('evita revalidar en BD dentro de la ventana TTL y revalida al expirar el TTL (B32)', async () => {
+    authorizationForUser.mockResolvedValue({
+      accessRoleId: 'role-1',
+      accessRoleName: 'Caja',
+      permissions: ['home.access', 'orders.read'],
+    });
+
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    try {
+      const { gateway, socket } = await connect();
+      expect(findById).toHaveBeenCalledTimes(1);
+
+      await gateway.handleOrderSynchronized({
+        mutation: 'updated',
+        order: {
+          id: 'order-ttl-1',
+          status: 'pending' as never,
+          total: 100,
+          timestamp: new Date('2026-10-24T12:00:00.000Z'),
+          items: [],
+          payments: [],
+        },
+      });
+      expect(findById).toHaveBeenCalledTimes(1);
+      expect(socket.disconnect).not.toHaveBeenCalled();
+
+      nowSpy.mockReturnValue(1_031_000);
+      findById.mockResolvedValueOnce({
+        ...activeUser,
+        tokenVersion: activeUser.tokenVersion + 1,
+      });
+
+      await gateway.handleOrderSynchronized({
+        mutation: 'updated',
+        order: {
+          id: 'order-ttl-2',
+          status: 'pending' as never,
+          total: 100,
+          timestamp: new Date('2026-10-24T12:00:00.000Z'),
+          items: [],
+          payments: [],
+        },
+      });
+
+      expect(findById).toHaveBeenCalledTimes(2);
+      expect(socket.disconnect).toHaveBeenCalledWith(true);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('asigna al motorizado su sala privada de repartidor y emite solo sus entregas (B32)', async () => {
+    const driverUser: UserEntity = {
+      ...activeUser,
+      id: 'driver-7',
+      username: 'moto7',
+      role: UserRoleDto.motorizado,
+    };
+    findById.mockResolvedValue(driverUser);
+    authorizationForUser.mockResolvedValue({
+      accessRoleId: 'role-driver',
+      accessRoleName: 'Motorizado',
+      permissions: ['orders.read', 'delivery.read'],
+    });
+
+    const { gateway, socket, emit } = await connect();
+
+    expect(socket.join).toHaveBeenCalledWith('authenticated-driver:driver-7');
+    expect(socket.join).not.toHaveBeenCalledWith(
+      'authenticated-full-orders-clients',
+    );
+
+    await gateway.handleOrderSynchronized({
+      mutation: 'updated',
+      order: {
+        id: 'ord-delivery-7',
+        status: 'pending' as never,
+        orderType: 'delivery' as never,
+        driverId: 'driver-7',
+        total: 250,
+        timestamp: new Date('2026-11-04T12:00:00.000Z'),
+        items: [],
+        payments: [],
+      },
+    });
+
+    expect(emit).toHaveBeenCalled();
+  });
+
+  it('rota el token del socket conectado mediante auth:refresh y respeta ConfigService en CORS (B32)', async () => {
+    authorizationForUser.mockResolvedValue({
+      accessRoleId: 'role-1',
+      accessRoleName: 'Caja',
+      permissions: ['home.access', 'orders.read'],
+    });
+
+    const { socket } = await connect();
+    const refreshCall = socket.on.mock.calls.find(
+      ([event]: [string]) => event === 'auth:refresh',
+    ) as [string, (payload?: { token?: string }) => void] | undefined;
+    expect(refreshCall).toBeDefined();
+
+    refreshCall?.[1]({ token: 'rotated-access-token' });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(verifyAsync).toHaveBeenLastCalledWith('rotated-access-token');
+    expect((socket.data as { token?: string }).token).toBe(
+      'rotated-access-token',
+    );
+    expect(socket.disconnect).not.toHaveBeenCalled();
+
+    const customGateway = new OrdersGateway(
+      jwtService,
+      kitchens,
+      accessControl,
+      usersRepository,
+      {
+        get: (key: string) =>
+          key === 'CORS_ORIGINS'
+            ? 'https://pos.pizzatogo.local'
+            : key === 'API_HOST'
+              ? '0.0.0.0'
+              : undefined,
+      } as never,
+    );
+    expect(customGateway.isOriginAllowed('https://pos.pizzatogo.local')).toBe(
+      true,
+    );
+    expect(customGateway.isOriginAllowed('https://evil.example.com')).toBe(
+      false,
+    );
   });
 
   it('emite a cada cocina únicamente sus componentes sin pagos ni datos privados', async () => {
@@ -216,5 +339,102 @@ describe('OrdersGateway authorization', () => {
     expect(scopedOrder).not.toHaveProperty('payments');
     expect(scopedOrder).not.toHaveProperty('customerPhone');
     expect(scopedOrder).not.toHaveProperty('total');
+  });
+
+  it('permite conectar al motorizado con delivery.read sin orders.read y notifica al repartidor y cocina previos al reasignar (B39, B40)', async () => {
+    const driverUser: UserEntity = {
+      ...activeUser,
+      id: 'driver-9',
+      username: 'moto9',
+      role: UserRoleDto.motorizado,
+    };
+    findById.mockResolvedValue(driverUser);
+    authorizationForUser.mockResolvedValue({
+      accessRoleId: 'role-driver',
+      accessRoleName: 'Motorizado',
+      permissions: ['delivery.read', 'delivery.own'],
+    });
+
+    const { socket } = await connect();
+    expect(socket.join).toHaveBeenCalledWith('authenticated-driver:driver-9');
+
+    const prevDriverEmit = jest.fn();
+    const nextDriverEmit = jest.fn();
+    const prevKitchenEmit = jest.fn();
+    const gateway = new OrdersGateway(
+      jwtService,
+      kitchens,
+      accessControl,
+      usersRepository,
+    );
+    gateway.afterInit({
+      use: jest.fn(),
+      to: jest.fn((room: string) => ({
+        emit:
+          room === 'authenticated-driver:driver-old'
+            ? prevDriverEmit
+            : room === 'authenticated-driver:driver-new'
+              ? nextDriverEmit
+              : room === 'authenticated-kitchen:kitchen-old'
+                ? prevKitchenEmit
+                : jest.fn(),
+      })),
+    } as never);
+
+    await gateway.handleOrderSynchronized({
+      mutation: 'updated',
+      previousDriverId: 'driver-old',
+      previousKitchenIds: ['kitchen-old'],
+      order: {
+        id: 'order-reassigned',
+        status: 'pending' as never,
+        orderType: 'delivery' as never,
+        driverId: 'driver-new',
+        total: 180,
+        timestamp: new Date('2026-11-04T12:00:00.000Z'),
+        items: [
+          {
+            id: 1,
+            name: 'Pizza',
+            size: 'Grande',
+            price: 180,
+            quantity: 1,
+            giftQuantity: 0,
+            extras: [],
+            kitchenId: 'kitchen-new',
+            isSentToKitchen: true,
+          },
+        ],
+        payments: [],
+      },
+    });
+
+    expect(prevDriverEmit).toHaveBeenCalledWith(
+      'orders:changed',
+      expect.objectContaining({
+        order: expect.objectContaining({
+          id: 'order-reassigned',
+          driverId: undefined,
+          items: [],
+        }),
+      }),
+    );
+    const previousDriverEvent = prevDriverEmit.mock.calls[0]?.[1] as {
+      order: Record<string, unknown>;
+    };
+    expect(previousDriverEvent.order).not.toHaveProperty('payments');
+    expect(previousDriverEvent.order).not.toHaveProperty(
+      'customerSnapshotName',
+    );
+    expect(nextDriverEmit).toHaveBeenCalledTimes(1);
+    expect(prevKitchenEmit).toHaveBeenCalledWith(
+      'orders:changed',
+      expect.objectContaining({
+        order: expect.objectContaining({
+          id: 'order-reassigned',
+          items: [],
+        }),
+      }),
+    );
   });
 });

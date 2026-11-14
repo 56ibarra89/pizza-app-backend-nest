@@ -1,30 +1,52 @@
 import type { Prisma } from '@prisma/client';
 
-const SENSITIVE_KEYS = new Set([
+const SENSITIVE_TOKEN_KEYS = new Set([
   'authorization',
   'cookie',
+  'cookies',
+  'passcode',
+  'passphrase',
   'password',
-  'passwordhash',
+  'passwords',
   'pin',
+  'pins',
+  'secret',
+  'secrets',
+  'token',
+  'tokens',
+  'cvv',
+  'cvc',
+]);
+
+const SENSITIVE_COMPOUND_KEYS = new Set([
+  'passwordhash',
   'pinhash',
   'pinlookup',
-  'secret',
-  'token',
-  'access_token',
+  'accesstoken',
   'refreshtoken',
   'creditcard',
   'cardnumber',
-  'cvv',
+  'apikey',
 ]);
+
 const MAX_DEPTH = 6;
 const MAX_ARRAY_ITEMS = 100;
 const MAX_JSON_LENGTH = 30_000;
 
 function isSensitiveKey(key: string): boolean {
   const normalized = key.replace(/[-_]/g, '').toLowerCase();
-  return [...SENSITIVE_KEYS].some(
-    (sensitive) => normalized === sensitive.replace(/[-_]/g, ''),
-  );
+  if (SENSITIVE_COMPOUND_KEYS.has(normalized)) {
+    return true;
+  }
+
+  const tokens = key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+
+  return tokens.some((token) => SENSITIVE_TOKEN_KEYS.has(token));
 }
 
 function sanitize(value: unknown, depth: number): unknown {

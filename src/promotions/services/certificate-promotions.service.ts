@@ -46,6 +46,14 @@ export class CertificatePromotionsService {
   }
 
   async create(dto: CreateCertificadoDto) {
+    if (
+      !dto.items?.length &&
+      !(typeof dto.amount === 'number' && dto.amount > 0)
+    ) {
+      throw new BadRequestException(
+        'El certificado debe incluir productos o un monto positivo.',
+      );
+    }
     const serial = dto.serial
       ? this.normalizeSerial(dto.serial)
       : generateCertificadoSerial('VC');
@@ -63,13 +71,17 @@ export class CertificatePromotionsService {
   }
 
   async markDelivered(id: number) {
-    const certificate = await this.requireById(id);
-    this.assertAvailable(certificate);
-
-    const updated = await this.repository.update(id, {
-      status: CertificadoStatus.ENTREGADO,
-      redeemedAt: new Date(),
-    });
+    const updated = await this.repository.markDeliveredIfAvailable(
+      id,
+      new Date(),
+    );
+    if (!updated) {
+      const certificate = await this.requireById(id);
+      this.assertAvailable(certificate);
+      throw new BadRequestException(
+        'No se pudo marcar como entregado el certificado.',
+      );
+    }
 
     return this.mapResponse(updated);
   }

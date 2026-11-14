@@ -19,6 +19,7 @@ import type { CartItemEntity } from '../entities/order-item.entity';
 import type { ProductEntity } from '../../products/entities/product.entity';
 import {
   isDeliveryChargeOrderItem,
+  isPackagingOrderItem,
   isSplitBillOrderItem,
 } from '../validators/order-item-kind';
 import {
@@ -239,7 +240,7 @@ export class OrderPricingService {
     items: readonly CartItemEntity[],
     promotion: ResolvedOrderPromotion = { source: 'none' },
     overrideDiscountAmount?: number,
-    options?: { useSnapshotPrices?: boolean },
+    options?: { useSnapshotPrices?: boolean; allowConsumedCoupon?: boolean },
   ): Promise<OrderTotals> {
     return (
       await this.calculateWithPrices(
@@ -255,7 +256,7 @@ export class OrderPricingService {
     items: readonly CartItemEntity[],
     promotion: ResolvedOrderPromotion = { source: 'none' },
     overrideDiscountAmount?: number,
-    options?: { useSnapshotPrices?: boolean },
+    options?: { useSnapshotPrices?: boolean; allowConsumedCoupon?: boolean },
   ): Promise<{ items: CartItemEntity[]; totals: OrderTotals }> {
     const [packagingConfig, taxConfig] = await Promise.all([
       this.appConfigService.getByIdOrDefault('packaging_sizes'),
@@ -352,7 +353,11 @@ export class OrderPricingService {
 
     const calculatedDiscountAmount =
       overrideDiscountAmount === undefined
-        ? await this.calculateDiscount(promotion, eligibleSubTotal)
+        ? await this.calculateDiscount(
+            promotion,
+            eligibleSubTotal,
+            options?.allowConsumedCoupon,
+          )
         : 0;
     const discountAmount =
       overrideDiscountAmount !== undefined
@@ -372,8 +377,8 @@ export class OrderPricingService {
       totals: {
         subTotal,
         discountAmount,
-        taxAmount,
-        total: Math.max(0, taxableTotal + taxAmount),
+        taxAmount: Number(taxAmount.toFixed(2)),
+        total: Number(Math.max(0, taxableTotal + taxAmount).toFixed(2)),
       },
     };
   }
@@ -414,8 +419,8 @@ export class OrderPricingService {
       totals: {
         subTotal: calculation.totals.subTotal,
         discountAmount,
-        taxAmount,
-        total: Math.max(0, taxableTotal + taxAmount),
+        taxAmount: Number(taxAmount.toFixed(2)),
+        total: Number(Math.max(0, taxableTotal + taxAmount).toFixed(2)),
       },
     };
   }
@@ -494,6 +499,7 @@ export class OrderPricingService {
   private async calculateDiscount(
     promotion: ResolvedOrderPromotion,
     eligibleSubTotal: number,
+    allowConsumedCoupon = false,
   ): Promise<number> {
     if (promotion.source === 'none') return 0;
 
@@ -504,8 +510,10 @@ export class OrderPricingService {
       );
       if (!coupon) throw new BadRequestException('CupÃ³n no encontrado');
       if (
-        coupon.status !== 'Activo' ||
-        (coupon.maxUses > 0 && coupon.currentUses >= coupon.maxUses)
+        allowConsumedCoupon
+          ? coupon.status === 'Inactivo' || coupon.status === 'Vencido'
+          : coupon.status !== 'Activo' ||
+            (coupon.maxUses > 0 && coupon.currentUses >= coupon.maxUses)
       ) {
         throw new BadRequestException(`CupÃ³n no vÃ¡lido: ${coupon.status}`);
       }
@@ -662,15 +670,19 @@ export class OrderPricingService {
       };
     }
 
-    const normalizedName = item.name.toLowerCase();
-    if (normalizedName.startsWith('empaque')) {
+    if (isPackagingOrderItem(item)) {
       const packagingName = item.name.replace(/empaque\s+/i, '').trim();
       const packaging = packagingSizes.find(
         (candidate) =>
           candidate.name.toLowerCase() === packagingName.toLowerCase(),
       );
+      if (!packaging) {
+        throw new BadRequestException(
+          `No hay un precio configurado para el empaque ${packagingName || item.name}.`,
+        );
+      }
       return {
-        unitPrice: packaging?.price ?? item.price,
+        unitPrice: packaging.price,
         isDiscountable: false,
       };
     }

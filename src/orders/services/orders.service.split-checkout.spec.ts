@@ -61,6 +61,67 @@ describe('OrdersService split checkout safeguards', () => {
     return { service, repo, pricing };
   }
 
+  it('rechaza una división basada en una versión de mesa desactualizada', async () => {
+    const { service } = createService();
+    await expect(
+      service.splitCheckout('parent-order', {
+        mode: 'items',
+        accountName: 'Mesa',
+        items: [],
+        payments: [],
+        expectedUpdatedAt: '2026-10-24T11:00:00.000Z',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('restaura empaque y entrega cuando la subcuenta liquidó al padre', async () => {
+    const parent = { ...parentOrder, items: [], total: 0 };
+    const { service } = createService({
+      parent,
+      pricing: {
+        resolvePromotion: jest.fn().mockResolvedValue({ source: 'none' }),
+        calculateWithPrices: jest.fn(async (items) => ({
+          items,
+          totals: {
+            subTotal: 120,
+            discountAmount: 0,
+            taxAmount: 18,
+            total: 138,
+          },
+        })),
+      },
+    });
+    const child: OrderEntity = {
+      ...parentOrder,
+      id: 'child-order',
+      parentOrderId: parent.id,
+      splitMode: 'items',
+      items: [
+        parentOrder.items[0],
+        {
+          name: 'Empaque pequeño',
+          price: 10,
+          size: 'único',
+          quantity: 1,
+          extras: [],
+        },
+        { name: 'Delivery', price: 10, size: 'único', quantity: 1, extras: [] },
+      ],
+    };
+    const restore = await (
+      service as unknown as {
+        prepareSplitCancellationRestore(
+          order: OrderEntity,
+        ): Promise<{ update: { items: OrderEntity['items'] } }>;
+      }
+    ).prepareSplitCancellationRestore(child);
+    expect(restore.update.items.map((item) => item.name)).toEqual([
+      'Pizza',
+      'Empaque pequeño',
+      'Delivery',
+    ]);
+  });
+
   it('rejects a custom/equal amount that differs from the authoritative item total', async () => {
     const { service } = createService();
 
@@ -534,6 +595,190 @@ describe('OrdersService split checkout safeguards', () => {
         orderId: 'child-final',
         promotion: { source: 'coupon', cuponId: 7 },
         skipCouponConsumption: false,
+      }),
+    );
+  });
+
+  it('reuses a consumed parent coupon on subsequent split children without failing and caps discount to parent pool (B37)', async () => {
+    const parentWithConsumedCoupon: OrderEntity = {
+      ...parentOrder,
+      cuponId: 7,
+      subTotal: 200,
+      discountAmount: 15,
+      taxAmount: 27.75,
+      total: 212.75,
+      items: [
+        {
+          ...parentOrder.items[0],
+          quantity: 2,
+          price: 100,
+        },
+      ],
+    };
+    const repo = {
+      findById: jest
+        .fn()
+        .mockResolvedValueOnce(parentWithConsumedCoupon)
+        .mockResolvedValueOnce({
+          ...parentWithConsumedCoupon,
+          id: 'child-2',
+          status: OrderStatusDto.paid,
+          cuponId: 7,
+          invoice: { invoiceNumber: 'OCT26-00100' },
+        }),
+      update: jest.fn().mockImplementation((_id: string, data: unknown) =>
+        Promise.resolve({
+          ...parentWithConsumedCoupon,
+          ...(data as Record<string, unknown>),
+        }),
+      ),
+      create: jest.fn().mockResolvedValue({ id: 'child-2' }),
+    };
+    const calculateWithPrices = jest
+      .fn()
+      .mockImplementation(
+        (
+          items: OrderEntity['items'],
+          _promotion: { source: string },
+          overrideDiscount?: number,
+          options?: { allowConsumedCoupon?: boolean },
+        ) => {
+          if (
+            overrideDiscount === undefined &&
+            items.length === 1 &&
+            options?.allowConsumedCoupon !== true
+          ) {
+            return Promise.reject(
+              new BadRequestException('Cupón no válido: Agotado'),
+            );
+          }
+          const subTotal = items.reduce(
+            (sum, i) => sum + i.price * i.quantity,
+            0,
+          );
+          const discountAmount = overrideDiscount ?? 20;
+          const taxAmount = Number(
+            ((subTotal - discountAmount) * 0.15).toFixed(2),
+          );
+          return Promise.resolve({
+            items,
+            totals: {
+              subTotal,
+              discountAmount,
+              taxAmount,
+              total: Number((subTotal - discountAmount + taxAmount).toFixed(2)),
+            },
+          });
+        },
+      );
+    const applyDiscountOverride = jest.fn(
+      (
+        calc: { items: OrderEntity['items']; totals: { subTotal: number } },
+        overrideDiscount: number,
+      ) => {
+        const taxAmount = Number(
+          ((calc.totals.subTotal - overrideDiscount) * 0.15).toFixed(2),
+        );
+        return Promise.resolve({
+          items: calc.items,
+          totals: {
+            subTotal: calc.totals.subTotal,
+            discountAmount: overrideDiscount,
+            taxAmount,
+            total: Number(
+              (calc.totals.subTotal - overrideDiscount + taxAmount).toFixed(2),
+            ),
+          },
+        });
+      },
+    );
+    const pricing = {
+      calculate: jest.fn(),
+      normalizeComboItems: jest.fn((items: OrderEntity['items']) =>
+        Promise.resolve(items),
+      ),
+      resolvePromotion: jest.fn().mockResolvedValue({
+        source: 'coupon',
+        cuponId: 7,
+      }),
+      calculateWithPrices,
+      applyDiscountOverride,
+    };
+    const finalization = {
+      issueInTransaction: jest.fn().mockResolvedValue(undefined),
+    };
+    const referenceResolver = {
+      resolve: jest.fn().mockResolvedValue({
+        customerId: undefined,
+        cashierId: 'cashier-1',
+        shiftId: 'shift-1',
+      }),
+    };
+    const prisma = {
+      appConfig: { findUnique: jest.fn().mockResolvedValue(null) },
+      order: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'child-1' }),
+        count: jest.fn().mockResolvedValue(1),
+      },
+      $transaction: jest.fn(
+        <T>(callback: (tx: unknown) => Promise<T>): Promise<T> =>
+          callback({
+            $queryRaw: jest.fn().mockResolvedValue([
+              {
+                id: parentWithConsumedCoupon.id,
+                status: 'PENDING',
+                updatedAt,
+                invoiceNumber: null,
+              },
+            ]),
+            order: { count: jest.fn().mockResolvedValue(1) },
+          }),
+      ),
+    };
+    const service = new OrdersService(
+      repo as never,
+      { emit: jest.fn() } as never,
+      pricing as never,
+      finalization as never,
+      {} as never,
+      referenceResolver as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      prisma as never,
+    );
+
+    const expectedTotal = Number(((100 - 15) * 1.15).toFixed(2));
+    await service.splitCheckout('parent-order', {
+      mode: 'items',
+      accountName: 'Persona 2',
+      promotionSource: 'coupon' as never,
+      cuponId: 7,
+      items: [
+        {
+          id: 1,
+          productId: 'pizza-1',
+          name: 'Pizza',
+          price: 100,
+          size: 'mediana',
+          quantity: 1,
+          extras: [],
+        },
+      ],
+      payments: [{ method: 'EFECTIVO' as never, amount: expectedTotal }],
+    });
+
+    expect(calculateWithPrices).toHaveBeenCalledWith(
+      expect.any(Array),
+      { source: 'coupon', cuponId: 7 },
+      undefined,
+      { allowConsumedCoupon: true },
+    );
+    expect(applyDiscountOverride).toHaveBeenCalledWith(expect.any(Object), 15);
+    expect(finalization.issueInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        skipCouponConsumption: true,
       }),
     );
   });

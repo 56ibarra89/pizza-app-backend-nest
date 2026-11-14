@@ -7,4 +7,6 @@ export type OrderSynchronizationMutation = 'created' | 'updated';
 export interface OrderSynchronizedEvent {
   mutation: OrderSynchronizationMutation;
   order: OrderEntity;
+  previousDriverId?: string | null;
+  previousKitchenIds?: readonly string[];
 }

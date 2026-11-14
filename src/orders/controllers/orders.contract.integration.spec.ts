@@ -62,6 +62,7 @@ class HeaderTestAuthGuard implements CanActivate {
 describe('Orders HTTP Contract & Guard Integration (H26)', () => {
   let app: INestApplication;
   const ordersStore = new Map<string, OrderEntity>();
+  const hiddenOrdersStore = new Set<string>();
 
   const repoMock = {
     listTodayOrActive: jest.fn(async () => Array.from(ordersStore.values())),
@@ -117,8 +118,12 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
         discountAmount: dto.discountAmount ?? existing.discountAmount,
         payments: dto.payments ?? [],
         invoice: {
-          invoiceNumber: 'NOV26-00001',
           correlativoId: 'corr-1',
+          documentType: 'FACTURA',
+          resolutionNumber: 'RES-1',
+          prefix: 'NOV26-',
+          issuedNumber: 1,
+          invoiceNumber: 'NOV26-00001',
           issuedAt: new Date('2026-11-04T12:10:00.000Z'),
         },
       });
@@ -210,6 +215,12 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
           useValue: {
             listTicketIds: jest.fn().mockResolvedValue([]),
             hide: jest.fn(),
+            listHiddenOrderIds: jest.fn(async () =>
+              Array.from(hiddenOrdersStore),
+            ),
+            hideOrderIds: jest.fn(async (ids: readonly string[]) => {
+              ids.forEach((id) => hiddenOrdersStore.add(id));
+            }),
           },
         },
         {
@@ -378,6 +389,16 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
     expect(repoMock.update).not.toHaveBeenCalled();
   });
 
+  it('rechaza fechas de versión inválidas antes del cobro', async () => {
+    const response = await request(app.getHttpServer())
+      .patch('/orders/order-1/finalize')
+      .set('x-test-role', 'admin')
+      .set('x-test-permissions', 'orders.read,orders.finalize')
+      .send({ expectedUpdatedAt: 'ayer', payments: [] });
+    expect(response.status).toBe(400);
+    expect(finalizationMock.finalize).not.toHaveBeenCalled();
+  });
+
   it.each([{}, { tableIds: 'mesa' }, { tableIds: [42] }, { tableIds: [''] }])(
     'rechaza un contrato de mesas inválido: %j',
     async (body) => {
@@ -428,6 +449,8 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
           size: 'Grande',
           price: 250,
           quantity: 1,
+          extras: [],
+          giftQuantity: 0,
           isSentToKitchen: true,
           kitchenStatus: 'ready' as any,
         },
@@ -439,6 +462,7 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
       status: OrderStatusDto.ready,
       timestamp: new Date('2026-11-04T12:00:00.000Z'),
       updatedAt: new Date('2026-11-04T12:00:00.000Z'),
+      payments: [],
       orderType: OrderTypeDto.local,
     });
 
@@ -487,14 +511,30 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
 
   it('permite reasignar una orden abierta a un mesero activo', async () => {
     const waiterId = '22222222-2222-4222-8222-222222222222';
+    const updatedAt = new Date('2026-11-04T12:00:00.000Z');
     ordersStore.set('ord-waiter-1', {
       id: 'ord-waiter-1',
       items: [],
+      payments: [],
+      linkedTables: ['table-1'],
       total: 0,
       status: OrderStatusDto.pending,
       timestamp: new Date('2026-11-04T12:00:00.000Z'),
+      updatedAt,
       orderType: OrderTypeDto.local,
     });
+    prismaMock.$transaction.mockImplementationOnce(
+      async (cb: (tx: any) => any) =>
+        cb({
+          $queryRaw: jest.fn().mockResolvedValue([
+            {
+              id: 'ord-waiter-1',
+              status: 'PENDING',
+              updatedAt,
+            },
+          ]),
+        }),
+    );
     prismaMock.user.findFirst.mockResolvedValue({
       id: waiterId,
       username: 'bea',
@@ -513,10 +553,32 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
     expect(response.body.waiterSnapshotName).toBe('Bea Pérez');
   });
 
+  it('rechaza con 400 reasignar mesero a orden sin mesas o de delivery (B34)', async () => {
+    const waiterId = '22222222-2222-4222-8222-222222222222';
+    ordersStore.set('ord-no-tables', {
+      id: 'ord-no-tables',
+      items: [],
+      payments: [],
+      linkedTables: [],
+      total: 0,
+      status: OrderStatusDto.pending,
+      timestamp: new Date('2026-11-04T12:00:00.000Z'),
+      orderType: OrderTypeDto.local,
+    });
+
+    await request(app.getHttpServer())
+      .patch('/orders/ord-no-tables/waiter')
+      .set('x-test-role', 'cajero')
+      .set('x-test-permissions', 'orders.read,tables.operate')
+      .send({ waiterId })
+      .expect(400);
+  });
+
   it('bloquea con 403 a un motorizado que intenta consultar una orden ajena por ID (H08)', async () => {
     ordersStore.set('ord-delivery-other', {
       id: 'ord-delivery-other',
       items: [],
+      payments: [],
       total: 287.5,
       status: OrderStatusDto.ready,
       timestamp: new Date('2026-11-04T12:00:00.000Z'),
@@ -544,6 +606,7 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
           size: 'Grande',
           price: 250,
           quantity: 2,
+          giftQuantity: 0,
           extras: [],
           isSentToKitchen: true,
         },
@@ -555,6 +618,7 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
       status: OrderStatusDto.paid,
       timestamp: new Date('2026-11-04T12:00:00.000Z'),
       updatedAt: new Date('2026-11-04T12:00:00.000Z'),
+      payments: [],
       orderType: OrderTypeDto.local,
     });
 
@@ -652,5 +716,117 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
         invoiceNumber: 'NOV26-00001',
       },
     });
+  });
+
+  it('rechaza con 400 propiedades forjadas de turno, fecha o cajero al crear órdenes o registrar pagos (B38)', async () => {
+    const baseItem = {
+      productId: 'prod-pizza-1',
+      name: 'Pizza Margarita',
+      size: 'Grande',
+      price: 250,
+      quantity: 1,
+      extras: [],
+    };
+
+    for (const forgedBody of [
+      { items: [baseItem], total: 287.5, shiftId: 'old-shift' },
+      { items: [baseItem], total: 287.5, cashierId: 'admin-1' },
+      { items: [baseItem], total: 287.5, cashierSnapshotName: 'admin' },
+      {
+        items: [baseItem],
+        total: 287.5,
+        timestamp: '2020-01-01T00:00:00.000Z',
+      },
+      {
+        items: [baseItem],
+        total: 287.5,
+        payments: [{ method: 'EFECTIVO', amount: 287.5, cashierId: 'admin-1' }],
+      },
+    ]) {
+      const response = await request(app.getHttpServer())
+        .post('/orders')
+        .set('x-test-role', 'cajero')
+        .set('x-test-permissions', 'orders.read,orders.manage,orders.finalize')
+        .send(forgedBody);
+      expect(response.status).toBe(400);
+    }
+  });
+
+  it('permite a motorizado leer /orders/my-deliveries sin orders.read y bloquea /orders general (B39)', async () => {
+    ordersStore.set('ord-driver-1', {
+      id: 'ord-driver-1',
+      items: [],
+      total: 320,
+      status: OrderStatusDto.ready,
+      timestamp: new Date('2026-11-01T10:00:00.000Z'),
+      orderType: OrderTypeDto.delivery,
+      driverId: 'driver-42',
+      payments: [],
+    });
+    ordersStore.set('ord-other-driver', {
+      id: 'ord-other-driver',
+      items: [],
+      total: 150,
+      status: OrderStatusDto.ready,
+      timestamp: new Date('2026-11-01T10:00:00.000Z'),
+      orderType: OrderTypeDto.delivery,
+      driverId: 'driver-other',
+      payments: [],
+    });
+
+    repoMock.listTodayOrActive.mockResolvedValueOnce([
+      ordersStore.get('ord-driver-1')!,
+    ]);
+
+    const deniedList = await request(app.getHttpServer())
+      .get('/orders')
+      .set('x-test-role', 'motorizado')
+      .set('x-test-user-id', 'driver-42')
+      .set('x-test-permissions', 'delivery.read,delivery.own,orders.status');
+    expect(deniedList.status).toBe(403);
+
+    const myDeliveries = await request(app.getHttpServer())
+      .get('/orders/my-deliveries')
+      .set('x-test-role', 'motorizado')
+      .set('x-test-user-id', 'driver-42')
+      .set('x-test-permissions', 'delivery.read,delivery.own,orders.status');
+    expect(myDeliveries.status).toBe(200);
+    expect(myDeliveries.body).toHaveLength(1);
+    expect(myDeliveries.body[0].id).toBe('ord-driver-1');
+
+    const forbiddenById = await request(app.getHttpServer())
+      .get('/orders/my-deliveries/ord-other-driver')
+      .set('x-test-role', 'motorizado')
+      .set('x-test-user-id', 'driver-42')
+      .set('x-test-permissions', 'delivery.read,delivery.own');
+    expect(forbiddenById.status).toBe(403);
+  });
+
+  it('separa /orders/hidden-orders del KDS para cajeros sin permisos de cocina y devuelve 400 en fechas inválidas (F49, B41)', async () => {
+    const kdsDenied = await request(app.getHttpServer())
+      .get('/orders/kitchen/hidden-tickets')
+      .set('x-test-role', 'cajero')
+      .set('x-test-permissions', 'orders.read,orders.manage');
+    expect(kdsDenied.status).toBe(403);
+
+    const hideRes = await request(app.getHttpServer())
+      .post('/orders/hidden-orders')
+      .set('x-test-role', 'cajero')
+      .set('x-test-permissions', 'orders.read,orders.manage')
+      .send({ orderIds: ['ord-hist-1'] });
+    expect(hideRes.status).toBe(201);
+
+    const hiddenRes = await request(app.getHttpServer())
+      .get('/orders/hidden-orders')
+      .set('x-test-role', 'cajero')
+      .set('x-test-permissions', 'orders.read');
+    expect(hiddenRes.status).toBe(200);
+    expect(hiddenRes.body).toContain('ord-hist-1');
+
+    const badMetricsRes = await request(app.getHttpServer())
+      .get('/orders/cancellations/metrics?startDate=2026-11-31')
+      .set('x-test-role', 'admin')
+      .set('x-test-permissions', 'orders.read,reports.read');
+    expect(badMetricsRes.status).toBe(400);
   });
 });

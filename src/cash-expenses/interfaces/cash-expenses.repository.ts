@@ -22,6 +22,7 @@ export interface ListCashExpensesParams {
   category?: CashExpenseCategoryDto;
   from?: Date;
   to?: Date;
+  limit?: number;
 }
 
 export interface ICashExpensesRepository {

@@ -14,9 +14,13 @@ import { PrismaCashExpensesRepository } from '../../cash-expenses/repositories/p
 import { PrismaCorrelativosRepository } from '../../correlativos/repositories/prisma-correlativos.repository';
 import { UserRoleDto } from '../../common';
 import { OrderStatusDto } from '../dto/order-status.dto';
+import { KitchenStatusDto } from '../dto/kitchen-status.dto';
+import { KitchenModifierKindDto, type CartItemDto } from '../dto/cart-item.dto';
 import { OrderTypeDto } from '../dto/order-type.dto';
 import { PaymentMethodDto } from '../dto/payment-method.dto';
 import type { OrderEntity } from '../entities/order.entity';
+
+type OrderCartItemEntity = OrderEntity['items'][number];
 import { PrismaOrdersRepository } from '../repositories/prisma-orders.repository';
 import { InvoiceIssuingService } from './invoice-issuing.service';
 import { OrderPricingService } from './order-pricing.service';
@@ -52,6 +56,48 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
         {} as never,
       );
     }
+
+    it('rechaza ítems de pago parcial externos y empaque sin tarifa configurada', async () => {
+      const service = new OrdersService(
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      );
+      await expect(
+        service.create({
+          items: [
+            {
+              name: 'Pago parcial (Mesa)',
+              price: -100,
+              size: 'único',
+              quantity: 1,
+              extras: [],
+            },
+          ],
+          total: -100,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      const pricing = createPricingService();
+      await expect(
+        pricing.calculateWithPrices([
+          {
+            name: 'Empaque pequeño',
+            price: 0.01,
+            size: 'único',
+            quantity: 1,
+            extras: [],
+          },
+        ]),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
 
     it('rejects a gifted item with an empty "Vale:" note in OrderPricingService.calculateWithPrices', async () => {
       const pricing = createPricingService();
@@ -265,6 +311,16 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
       ],
     };
 
+    function toCartItemDto(item: OrderCartItemEntity): CartItemDto {
+      return {
+        ...item,
+        kitchenModifiers: item.kitchenModifiers?.map((mod) => ({
+          ...mod,
+          kind: mod.kind as KitchenModifierKindDto,
+        })),
+      };
+    }
+
     function createOrdersServiceForOrder(order: OrderEntity) {
       const tx = { $queryRaw: jest.fn().mockResolvedValue([{ id: order.id }]) };
       const prisma = {
@@ -301,6 +357,7 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
       await expect(
         service.updateItems(paidOrder.id, {
           items: [],
+          total: 0,
           expectedUpdatedAt: paidOrder.updatedAt!.toISOString(),
         }),
       ).rejects.toThrow(
@@ -317,10 +374,11 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
           expectedUpdatedAt: paidOrder.updatedAt!.toISOString(),
           items: [
             {
-              ...paidOrder.items[0],
+              ...toCartItemDto(paidOrder.items[0]),
               quantity: 2,
             },
           ],
+          total: paidOrder.total,
         }),
       ).rejects.toThrow(BadRequestException);
 
@@ -328,7 +386,7 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
         service.updateItems(paidOrder.id, {
           expectedUpdatedAt: paidOrder.updatedAt!.toISOString(),
           items: [
-            paidOrder.items[0],
+            toCartItemDto(paidOrder.items[0]),
             {
               productId: 'prod-2',
               name: 'Refresco',
@@ -338,6 +396,7 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
               extras: [],
             },
           ],
+          total: paidOrder.total,
         }),
       ).rejects.toThrow(BadRequestException);
       expect(repo.update).not.toHaveBeenCalled();
@@ -350,7 +409,10 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
       });
 
       await expect(
-        service.updateItems(paidOrder.id, { items: paidOrder.items }),
+        service.updateItems(paidOrder.id, {
+          items: paidOrder.items.map(toCartItemDto),
+          total: paidOrder.total,
+        }),
       ).rejects.toThrow(
         'No se pueden modificar los productos de una orden anulada.',
       );
@@ -366,12 +428,13 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
         isSentToKitchen: true,
         items: [
           {
-            ...paidOrder.items[0],
+            ...toCartItemDto(paidOrder.items[0]),
             price: 999, // attempted price tampering must be ignored because commercial fields come from prev
             isSentToKitchen: true,
             sentAt: 1700000000000,
           },
         ],
+        total: paidOrder.total,
       });
 
       expect(repo.update).toHaveBeenCalledTimes(1);
@@ -408,7 +471,8 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
 
       await expect(
         service.updateItems(initial.id, {
-          items: initial.items,
+          items: initial.items.map(toCartItemDto),
+          total: initial.total,
           expectedUpdatedAt: initial.updatedAt.toISOString(),
         }),
       ).rejects.toThrow(ConflictException);
@@ -420,13 +484,21 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
       const current = {
         ...paidOrder,
         updatedAt: new Date('2026-11-11T12:00:01Z'),
-        items: [{ ...paidOrder.items[0], kitchenStatus: 'ready' as const }],
+        items: [
+          { ...paidOrder.items[0], kitchenStatus: KitchenStatusDto.ready },
+        ],
       };
       const { service, repo, tx } = createOrdersServiceForOrder(current);
 
       await expect(
         service.updateItems(current.id, {
-          items: [{ ...paidOrder.items[0], kitchenStatus: 'pending' }],
+          items: [
+            {
+              ...toCartItemDto(paidOrder.items[0]),
+              kitchenStatus: KitchenStatusDto.pending,
+            },
+          ],
+          total: current.total,
           expectedUpdatedAt: '2026-11-11T12:00:00.000Z',
         }),
       ).rejects.toThrow(ConflictException);
@@ -438,7 +510,10 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
       const { service, repo } = createOrdersServiceForOrder(paidOrder);
 
       await expect(
-        service.updateItems(paidOrder.id, { items: paidOrder.items }),
+        service.updateItems(paidOrder.id, {
+          items: paidOrder.items.map(toCartItemDto),
+          total: paidOrder.total,
+        }),
       ).rejects.toThrow(ConflictException);
       expect(repo.update).not.toHaveBeenCalled();
     });
@@ -497,7 +572,14 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
       discountAmount: 0,
       taxAmount: 15,
       timestamp: new Date('2026-10-24T12:00:00.000Z'),
-      payments: [{ method: PaymentMethodDto.EFECTIVO, amount: 115 }],
+      payments: [
+        {
+          id: 1,
+          method: PaymentMethodDto.EFECTIVO,
+          amount: 115,
+          createdAt: new Date('2026-10-24T12:00:00.000Z'),
+        },
+      ],
       items: [
         {
           id: 1,
@@ -509,7 +591,7 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
           giftQuantity: 0,
           kitchenId: 'kitchen-horno',
           isSentToKitchen: true,
-          kitchenStatus: 'ready' as never,
+          kitchenStatus: KitchenStatusDto.ready,
           extras: [],
         },
       ],
@@ -536,8 +618,12 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
       await expect(
         service.create(
           {
-            items: baseDeliveryOrder.items,
+            items: baseDeliveryOrder.items.map((item) => ({
+              ...item,
+              kitchenModifiers: undefined,
+            })),
             payments: [{ method: PaymentMethodDto.EFECTIVO, amount: 115 }],
+            total: 115,
           },
           {
             id: 'user-mesero',
@@ -787,6 +873,7 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
               extras: [],
             },
           ],
+          total: 100,
         }),
       ).rejects.toThrow(ConflictException);
       expect(repo.update).not.toHaveBeenCalled();
@@ -1066,6 +1153,393 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
 
       expect(snapshotResult.items[0].price).toBe(100);
       expect(snapshotResult.totals.total).toBe(115);
+    });
+
+    it('ignores sentAt kitchen updates on CANCELLED orders and invalid PAID transitions (B31)', async () => {
+      const repo = {
+        findById: jest
+          .fn()
+          .mockResolvedValueOnce({
+            id: 'ord-cancelled',
+            status: OrderStatusDto.cancelled,
+            orderType: OrderTypeDto.local,
+            items: [],
+            payments: [],
+            total: 100,
+          })
+          .mockResolvedValueOnce({
+            id: 'ord-paid',
+            status: OrderStatusDto.paid,
+            orderType: OrderTypeDto.local,
+            items: [],
+            payments: [],
+            total: 100,
+          }),
+        updateItemsKitchenStatus: jest.fn(),
+        updateOperationalStatus: jest.fn(),
+        update: jest.fn(),
+      };
+      const service = new OrdersService(
+        repo as never,
+        { emit: jest.fn() } as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      );
+
+      const cancelledResult = await service.updateStatus('ord-cancelled', {
+        status: OrderStatusDto.ready,
+        sentAt: 1794600000000,
+      });
+      const paidInvalidResult = await service.updateStatus('ord-paid', {
+        status: OrderStatusDto.pending,
+        sentAt: 1794600000000,
+      });
+
+      expect(cancelledResult.status).toBe(OrderStatusDto.cancelled);
+      expect(paidInvalidResult.status).toBe(OrderStatusDto.paid);
+      expect(repo.updateItemsKitchenStatus).not.toHaveBeenCalled();
+      expect(repo.updateOperationalStatus).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects assigning a waiter to non-local or table-less orders (B34)', async () => {
+      const repo = {
+        findById: jest
+          .fn()
+          .mockResolvedValueOnce({
+            id: 'ord-delivery',
+            status: OrderStatusDto.pending,
+            orderType: OrderTypeDto.delivery,
+            linkedTables: [],
+            items: [],
+            payments: [],
+          })
+          .mockResolvedValueOnce({
+            id: 'ord-takeout',
+            status: OrderStatusDto.pending,
+            orderType: OrderTypeDto.local,
+            linkedTables: [],
+            items: [],
+            payments: [],
+          }),
+        update: jest.fn(),
+      };
+      const service = new OrdersService(
+        repo as never,
+        { emit: jest.fn() } as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      );
+      const cashier = {
+        id: 'user-1',
+        username: 'cajero1',
+        role: UserRoleDto.cajero,
+        permissions: ['orders.write'],
+      };
+
+      await expect(
+        service.assignWaiter('ord-delivery', 'waiter-1', cashier),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        service.assignWaiter('ord-takeout', 'waiter-1', cashier),
+      ).rejects.toThrow(BadRequestException);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('creates and finalizes immediate PAID orders in a single transaction and invokes correlativo persistence on failure (B34)', async () => {
+      const sharedTx = { id: 'tx-1' };
+      const createdOrder = {
+        id: 'ord-paid-1',
+        status: OrderStatusDto.pending,
+        orderType: OrderTypeDto.llevar,
+        items: [],
+        payments: [
+          {
+            method: PaymentMethodDto.EFECTIVO,
+            amount: 115,
+            originalAmount: 115,
+          },
+        ],
+        total: 115,
+      };
+      const repo = {
+        create: jest.fn().mockResolvedValue(createdOrder),
+        findById: jest.fn(),
+      };
+      const eventEmitter = { emit: jest.fn() };
+      const pricing = {
+        normalizeComboItems: jest.fn().mockResolvedValue([]),
+        resolvePromotion: jest.fn().mockResolvedValue({ source: 'none' }),
+        calculateWithPrices: jest.fn().mockResolvedValue({
+          items: [],
+          totals: {
+            subTotal: 100,
+            discountAmount: 0,
+            taxAmount: 15,
+            total: 115,
+          },
+        }),
+      };
+      const finalizationError = new ConflictException('Correlativo agotado');
+      const finalization = {
+        finalize: jest.fn().mockRejectedValue(finalizationError),
+        persistTerminalCorrelativoStatusIfNeeded: jest
+          .fn()
+          .mockResolvedValue(undefined),
+      };
+      const referenceResolver = {
+        resolve: jest.fn().mockResolvedValue({
+          customerId: undefined,
+          cashierId: 'cashier-1',
+          shiftId: 'shift-1',
+        }),
+      };
+      const prisma = {
+        appConfig: { findUnique: jest.fn().mockResolvedValue(null) },
+        $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+          fn(sharedTx),
+        ),
+      };
+      const service = new OrdersService(
+        repo as never,
+        eventEmitter as never,
+        pricing as never,
+        finalization as never,
+        {} as never,
+        referenceResolver as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        prisma as never,
+      );
+
+      await expect(
+        service.create(
+          {
+            orderType: OrderTypeDto.llevar,
+            status: OrderStatusDto.paid,
+            items: [],
+            payments: [
+              {
+                method: PaymentMethodDto.EFECTIVO,
+                amount: 115,
+                originalAmount: 115,
+              },
+            ],
+          } as never,
+          {
+            id: 'cashier-1',
+            username: 'cajero1',
+            role: UserRoleDto.cajero,
+            permissions: ['orders.write', 'orders.finalize'],
+          },
+        ),
+      ).rejects.toThrow(ConflictException);
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(repo.create).toHaveBeenCalledWith(expect.any(Object), sharedTx);
+      expect(finalization.finalize).toHaveBeenCalledWith(
+        createdOrder,
+        expect.objectContaining({ finalTotal: 115 }),
+        expect.objectContaining({ id: 'cashier-1' }),
+        sharedTx,
+      );
+      expect(
+        finalization.persistTerminalCorrelativoStatusIfNeeded,
+      ).toHaveBeenCalledWith(finalizationError);
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('derives authoritative timestamp, cashier, shift and payment attribution on the server (B38)', async () => {
+      const before = Date.now();
+      const repo = {
+        create: jest
+          .fn()
+          .mockImplementation((payload: Record<string, unknown>) =>
+            Promise.resolve({
+              id: 'ord-auth-1',
+              ...payload,
+              linkedTables: [],
+              payments: payload.payments ?? [],
+            }),
+          ),
+        findById: jest.fn(),
+      };
+      const referenceResolver = {
+        resolve: jest.fn().mockResolvedValue({
+          customerId: undefined,
+          cashierId: 'cashier-jwt',
+          shiftId: 'active-shift-99',
+        }),
+      };
+      const pricing = {
+        normalizeComboItems: jest.fn().mockResolvedValue([]),
+        resolvePromotion: jest.fn().mockResolvedValue({ source: 'none' }),
+        calculateWithPrices: jest.fn().mockResolvedValue({
+          items: [],
+          totals: {
+            subTotal: 100,
+            discountAmount: 0,
+            taxAmount: 15,
+            total: 115,
+          },
+        }),
+      };
+      const prisma = {
+        appConfig: {
+          findUnique: jest.fn().mockResolvedValue(null),
+        },
+        $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+          fn({}),
+        ),
+      };
+      const service = new OrdersService(
+        repo as never,
+        { emit: jest.fn() } as never,
+        pricing as never,
+        {} as never,
+        {} as never,
+        referenceResolver as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        prisma as never,
+      );
+
+      await service.create(
+        {
+          orderType: OrderTypeDto.local,
+          status: OrderStatusDto.pending,
+          timestamp: new Date('2020-01-01T00:00:00.000Z'),
+          shiftId: 'closed-shift-1',
+          cashierId: 'impersonated-admin',
+          cashierSnapshotName: 'admin',
+          items: [],
+          payments: [
+            {
+              method: PaymentMethodDto.EFECTIVO,
+              amount: 115,
+              cashierId: 'impersonated-admin',
+              cashierSnapshotName: 'admin',
+            } as never,
+          ],
+          total: 115,
+        } as never,
+        {
+          id: 'cashier-jwt',
+          username: 'cajero_real',
+          role: UserRoleDto.cajero,
+          permissions: ['orders.write'],
+        },
+      );
+
+      expect(referenceResolver.resolve).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          shiftId: 'closed-shift-1',
+        }),
+      );
+      expect(referenceResolver.resolve).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cashierId: 'cashier-jwt',
+          cashierSnapshotName: 'cajero_real',
+        }),
+      );
+      const createPayload = repo.create.mock.calls[0]?.[0] as {
+        timestamp: Date;
+        shiftId: string;
+        cashierId: string;
+        cashierSnapshotName: string;
+        payments: Array<{ cashierId?: string; cashierSnapshotName?: string }>;
+      };
+      expect(createPayload.timestamp.getTime()).toBeGreaterThanOrEqual(before);
+      expect(createPayload.shiftId).toBe('active-shift-99');
+      expect(createPayload.cashierId).toBe('cashier-jwt');
+      expect(createPayload.cashierSnapshotName).toBe('cajero_real');
+      expect(createPayload.payments[0]).toMatchObject({
+        cashierId: 'cashier-jwt',
+        cashierSnapshotName: 'cajero_real',
+      });
+    });
+
+    it('calculates discount for exhausted coupons only when allowConsumedCoupon is enabled (B37)', async () => {
+      const coupons = {
+        findById: jest.fn().mockResolvedValue({
+          id: 7,
+          status: 'Agotado',
+          discountType: 'porcentaje',
+          discountValue: 10,
+          maxUses: 1,
+          currentUses: 1,
+        }),
+      };
+      const productsService = {
+        getProductById: jest.fn().mockResolvedValue({
+          id: 'prod-1',
+          name: 'Pizza',
+          categoryId: 'cat-1',
+          isCombo: false,
+          isDiscountable: true,
+          prices: [{ size: 'mediana', price: 100 }],
+          extras: [],
+        }),
+      };
+      const appConfigService = {
+        getByIdOrDefault: jest.fn().mockImplementation((key: string) =>
+          key === 'packaging_sizes'
+            ? Promise.resolve({ data: { sizes: [] } })
+            : Promise.resolve({
+                data: { isExonerated: false, taxes: [{ percentage: 15 }] },
+              }),
+        ),
+      };
+      const pricing = new OrderPricingService(
+        productsService as never,
+        appConfigService as never,
+        coupons as never,
+        {} as never,
+        {} as never,
+      );
+      const item = {
+        productId: 'prod-1',
+        name: 'Pizza',
+        price: 100,
+        size: 'mediana',
+        quantity: 1,
+        giftQuantity: 0,
+        extras: [],
+      };
+
+      await expect(
+        pricing.calculateWithPrices([item], { source: 'coupon', cuponId: 7 }),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        pricing.calculateWithPrices(
+          [item],
+          { source: 'coupon', cuponId: 7 },
+          undefined,
+          { allowConsumedCoupon: true },
+        ),
+      ).resolves.toMatchObject({
+        totals: {
+          subTotal: 100,
+          discountAmount: 10,
+          taxAmount: 13.5,
+          total: 103.5,
+        },
+      });
     });
   });
 });

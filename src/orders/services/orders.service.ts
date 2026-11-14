@@ -51,6 +51,11 @@ import {
   extractCertificateSerialFromNote,
   hasValeNotePrefix,
 } from '../validators/order-certificate.validator';
+import {
+  getSplitFamilyState,
+  isSameStoredPromotion,
+  isSplitDiscountAdjustmentCandidate,
+} from '../validators/order-promotion.validator';
 import { KitchensService } from '../../kitchens/kitchens.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CertificadoStatus, Prisma, UserRole } from '@prisma/client';
@@ -73,6 +78,7 @@ import {
   normalizePaymentMethodsConfig,
 } from '../../common/payment-methods.config';
 import type { OrderPaymentDto } from '../dto/order-payment.dto';
+import { collectOrderKitchenIds } from '../mappers/orders.mapper';
 
 @Injectable()
 export class OrdersService {
@@ -141,6 +147,17 @@ export class OrdersService {
     return this.hiddenKitchenTickets.hide(ticketIds, user.username);
   }
 
+  async getHiddenOrderIds(): Promise<string[]> {
+    return this.hiddenKitchenTickets.listHiddenOrderIds();
+  }
+
+  async addHiddenOrderIds(
+    orderIds: string[],
+    user: AuthenticatedUser,
+  ): Promise<void> {
+    return this.hiddenKitchenTickets.hideOrderIds(orderIds, user.username);
+  }
+
   async getById(id: string) {
     const found = await this.repo.findById(id);
     if (!found) throw new NotFoundException('Orden no encontrada');
@@ -148,13 +165,29 @@ export class OrdersService {
   }
 
   async create(dto: CreateOrderDto, user?: AuthenticatedUser) {
-    if (dto.items.some((item) => isSplitBillCreditOrderItem(item))) {
+    if (dto.items.some((item) => isSplitBillOrderItem(item))) {
       throw new BadRequestException(
-        'Los abonos de subcuenta solo pueden ser generados por el flujo de división de cuenta.',
+        'Los ítems de subcuenta solo pueden ser generados por el flujo de división de cuenta.',
       );
     }
-    const resolvedPayments = await this.resolvePayments(dto.payments);
+    const resolvedPayments = await this.resolvePayments(dto.payments, user);
     const isDelivery = dto.orderType === OrderTypeDto.delivery;
+    if (dto.driverId) {
+      if (!isDelivery) {
+        throw new BadRequestException(
+          'Solo los pedidos a domicilio pueden tener motorizado.',
+        );
+      }
+      const driver = await this.prisma.user.findUnique({
+        where: { id: dto.driverId },
+        select: { role: true, isActive: true },
+      });
+      if (!driver || !driver.isActive || driver.role !== UserRole.MOTORIZADO) {
+        throw new BadRequestException(
+          'El motorizado seleccionado no existe o no está activo.',
+        );
+      }
+    }
     const status = isDelivery
       ? OrderStatusDto.pending
       : (dto.status ??
@@ -165,11 +198,11 @@ export class OrdersService {
         driverId: dto.driverId,
       });
     }
-    const timestamp = dto.timestamp ?? new Date();
+    const timestamp = new Date();
     const isSentToKitchen =
       dto.isSentToKitchen ?? !(dto.linkedTables && dto.linkedTables.length > 0);
 
-    const cashierSnapshotName = dto.cashierSnapshotName || user?.username;
+    const cashierSnapshotName = user?.username;
     const waiter = await this.resolveWaiterAssignment({
       waiterId: dto.waiterId,
       user,
@@ -177,7 +210,11 @@ export class OrdersService {
     });
     const { customerId, cashierId, shiftId } =
       await this.referenceResolver.resolve({
-        ...dto,
+        customerId: dto.customerId,
+        customerSnapshotName: dto.customerSnapshotName,
+        customerPhone: dto.customerPhone,
+        customerAddress: dto.customerAddress,
+        cashierId: user?.id,
         cashierSnapshotName,
       });
     const rawItems = dto.items.map((item) => {
@@ -206,61 +243,66 @@ export class OrdersService {
     const cuponId =
       promotion.source === 'coupon' ? promotion.cuponId : undefined;
 
-    const created = await this.runInTransactionIfAvailable(async (tx) => {
-      await this.assertPendingBenefitsAvailable(
-        {
-          cuponId,
-          certificateSerials,
-          items: pricedItems,
-        },
-        tx,
-      );
+    let savedOrder: OrderEntity;
+    try {
+      savedOrder = await this.runInTransactionIfAvailable(async (tx) => {
+        await this.assertPendingBenefitsAvailable(
+          {
+            cuponId,
+            certificateSerials,
+            items: pricedItems,
+          },
+          tx,
+        );
 
-      return this.repo.create(
-        {
-          id: dto.id,
-          shiftId,
-          customerId,
-          items: pricedItems,
-          subTotal: totals.subTotal,
-          discountAmount: totals.discountAmount,
-          taxAmount: totals.taxAmount,
-          total: totals.total,
-          timestamp,
-          status:
-            status === OrderStatusDto.paid ? OrderStatusDto.pending : status,
-          customerSnapshotName:
-            dto.customerSnapshotName ||
-            (dto.customerPhone ? `Cliente ${dto.customerPhone}` : undefined),
-          cashierId,
-          cashierSnapshotName,
-          waiterId: waiter?.id,
-          waiterSnapshotName: waiter?.snapshotName,
-          orderType: dto.orderType,
-          customerAddress: dto.customerAddress,
-          linkedTables: dto.linkedTables,
-          isSentToKitchen,
-          cuponId,
-          discountId:
-            promotion.source === 'discount' ? promotion.discountId : undefined,
-          happyHourId:
-            promotion.source === 'happy-hour'
-              ? promotion.happyHourId
-              : undefined,
-          driverId: dto.driverId,
-          payments: resolvedPayments,
-          customerTendered: dto.customerTendered,
-          deliveryChange: dto.deliveryChange,
-          certificateSerials,
-        },
-        tx,
-      );
-    });
+        const created = await this.repo.create(
+          {
+            id: dto.id,
+            shiftId,
+            customerId,
+            items: pricedItems,
+            subTotal: totals.subTotal,
+            discountAmount: totals.discountAmount,
+            taxAmount: totals.taxAmount,
+            total: totals.total,
+            timestamp,
+            status:
+              status === OrderStatusDto.paid ? OrderStatusDto.pending : status,
+            customerSnapshotName:
+              dto.customerSnapshotName ||
+              (dto.customerPhone ? `Cliente ${dto.customerPhone}` : undefined),
+            cashierId,
+            cashierSnapshotName,
+            waiterId: waiter?.id,
+            waiterSnapshotName: waiter?.snapshotName,
+            orderType: dto.orderType,
+            customerAddress: dto.customerAddress,
+            linkedTables: dto.linkedTables,
+            isSentToKitchen,
+            cuponId,
+            discountId:
+              promotion.source === 'discount'
+                ? promotion.discountId
+                : undefined,
+            happyHourId:
+              promotion.source === 'happy-hour'
+                ? promotion.happyHourId
+                : undefined,
+            driverId: dto.driverId,
+            payments: resolvedPayments,
+            customerTendered: dto.customerTendered,
+            deliveryChange: dto.deliveryChange,
+            certificateSerials,
+          },
+          tx,
+        );
 
-    if (status === OrderStatusDto.paid) {
-      try {
-        const finalized = await this.finalize(
-          created.id,
+        if (status !== OrderStatusDto.paid) {
+          return created;
+        }
+
+        await this.finalization.finalize(
+          created,
           {
             payments: resolvedPayments,
             customerSnapshotName: dto.customerSnapshotName,
@@ -284,18 +326,21 @@ export class OrdersService {
             certificateSerials,
           },
           user ?? 'system',
-          false,
+          tx,
         );
-        this.publishOrder(finalized, 'created');
-        return finalized;
-      } catch (error) {
-        await this.repo.delete(created.id);
-        throw error;
+        return (await this.repo.findById(created.id, tx)) ?? created;
+      });
+    } catch (error) {
+      if (status === OrderStatusDto.paid) {
+        await this.finalization.persistTerminalCorrelativoStatusIfNeeded?.(
+          error,
+        );
       }
+      throw error;
     }
 
-    this.publishOrder(created, 'created');
-    return created;
+    this.publishOrder(savedOrder, 'created');
+    return savedOrder;
   }
 
   async assignWaiter(
@@ -312,6 +357,15 @@ export class OrdersService {
         'No se puede cambiar el mesero de una orden cobrada o anulada.',
       );
     }
+    if (
+      existing.orderType !== OrderTypeDto.local ||
+      !Array.isArray(existing.linkedTables) ||
+      existing.linkedTables.length === 0
+    ) {
+      throw new BadRequestException(
+        'Solo las órdenes locales con mesas asignadas pueden tener un mesero.',
+      );
+    }
 
     const waiter = await this.resolveWaiterAssignment({
       waiterId,
@@ -323,9 +377,27 @@ export class OrdersService {
       throw new BadRequestException('Debes seleccionar un mesero activo.');
     }
 
-    const updated = await this.repo.update(id, {
-      waiterId: waiter.id,
-      waiterSnapshotName: waiter.snapshotName,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await this.lockUnchangedSplitParent(tx, existing);
+      const current = await this.repo.findById(id, tx);
+      if (
+        !current ||
+        current.status !== existing.status ||
+        current.orderType !== OrderTypeDto.local ||
+        !current.linkedTables?.length
+      ) {
+        throw new ConflictException(
+          'La orden cambió mientras se asignaba el mesero.',
+        );
+      }
+      return this.repo.update(
+        id,
+        {
+          waiterId: waiter.id,
+          waiterSnapshotName: waiter.snapshotName,
+        },
+        tx,
+      );
     });
     this.publishOrder(updated, 'updated');
     return updated;
@@ -453,6 +525,28 @@ export class OrdersService {
       }
     }
 
+    if (isFinal) {
+      this.logger.debug('La orden ya se encuentra en estado final');
+      // Permitir que las órdenes ya pagadas puedan ser anuladas o actualizadas por la cocina
+      if (
+        existing.status === OrderStatusDto.paid &&
+        (dto.status === OrderStatusDto.cancelled ||
+          dto.status === OrderStatusDto.preparing ||
+          dto.status === OrderStatusDto.ready ||
+          dto.status === OrderStatusDto.delivered)
+      ) {
+        this.logger.debug(
+          'Actualización de cocina permitida para una orden pagada',
+        );
+        // Continuar
+      } else {
+        this.logger.debug(
+          'Actualización ignorada porque la orden ya está finalizada',
+        );
+        return existing;
+      }
+    }
+
     let cancellationPolicy:
       | {
           config: VoidWastePolicyConfig;
@@ -476,17 +570,6 @@ export class OrdersService {
             'No se puede anular una factura perteneciente a un turno cerrado.',
           );
         }
-      }
-      const paidSplitOrders = await this.prisma.order.count({
-        where: {
-          parentOrderId: existing.id,
-          status: 'PAID',
-        },
-      });
-      if (paidSplitOrders > 0) {
-        throw new BadRequestException(
-          'Debe anular primero las facturas de las subcuentas antes de anular la cuenta principal.',
-        );
       }
       cancellationPolicy = await this.resolveCancellationPolicy(existing, dto);
       if (cancellationPolicy.requiresSupervisor) {
@@ -545,30 +628,11 @@ export class OrdersService {
       if (!wasReadyForPickup && this.isReadyForPickup(reloaded.items)) {
         this.emitOrderReady(updated);
       }
-      this.publishOrder(updated, 'updated');
+      this.publishOrder(updated, 'updated', {
+        previousDriverId: existing.driverId,
+        previousKitchenIds: collectOrderKitchenIds(existing),
+      });
       return updated;
-    }
-
-    if (isFinal) {
-      this.logger.debug('La orden ya se encuentra en estado final');
-      // Permitir que las órdenes ya pagadas puedan ser anuladas o actualizadas por la cocina
-      if (
-        existing.status === OrderStatusDto.paid &&
-        (dto.status === OrderStatusDto.cancelled ||
-          dto.status === OrderStatusDto.preparing ||
-          dto.status === OrderStatusDto.ready ||
-          dto.status === OrderStatusDto.delivered)
-      ) {
-        this.logger.debug(
-          'Actualización de cocina permitida para una orden pagada',
-        );
-        // Continuar
-      } else {
-        this.logger.debug(
-          'Actualización ignorada porque la orden ya está finalizada',
-        );
-        return existing;
-      }
     }
 
     let nextStatus = dto.status;
@@ -716,6 +780,14 @@ export class OrdersService {
               'La factura cambió mientras se procesaba su anulación.',
             );
           }
+          const paidSplitOrders = await tx.order.count({
+            where: { parentOrderId: id, status: 'PAID' },
+          });
+          if (paidSplitOrders > 0) {
+            throw new BadRequestException(
+              'Debe anular primero las facturas de las subcuentas antes de anular la cuenta principal.',
+            );
+          }
           if (shouldReversePaidBenefits && existing.shiftId) {
             const shifts = await tx.$queryRaw<Array<{ status: string }>>`
               SELECT status FROM "Shift" WHERE id = ${existing.shiftId} FOR UPDATE
@@ -782,7 +854,12 @@ export class OrdersService {
         })
       : await this.repo.update(id, updateData);
     if (restoredSplitParent) {
-      this.publishOrder(restoredSplitParent, 'updated');
+      this.publishOrder(restoredSplitParent, 'updated', {
+        previousDriverId: splitRestore?.parent.driverId,
+        previousKitchenIds: splitRestore
+          ? collectOrderKitchenIds(splitRestore.parent)
+          : undefined,
+      });
     }
     if (cancellationEvent) {
       this.eventEmitter.emit('order.cancelled', cancellationEvent);
@@ -790,7 +867,10 @@ export class OrdersService {
     if (becameReadyForPickup) {
       this.emitOrderReady(updated);
     }
-    this.publishOrder(updated, 'updated');
+    this.publishOrder(updated, 'updated', {
+      previousDriverId: existing.driverId,
+      previousKitchenIds: collectOrderKitchenIds(existing),
+    });
     return updated;
   }
 
@@ -852,70 +932,79 @@ export class OrdersService {
     const config = normalizeServiceSlaConfig(
       configRecord?.data ?? DEFAULT_SERVICE_SLA_CONFIG,
     );
-    const orders = await this.prisma.order.findMany({
-      where: {
-        timestamp: { gte: since },
-        status: { not: 'CANCELLED' },
-      },
-      select: {
-        timestamp: true,
-        kitchenReadyAt: true,
-        deliveryStartedAt: true,
-        deliveredAt: true,
-        items: {
-          where: { isSentToKitchen: true, sentAt: { not: null } },
-          select: { sentAt: true },
+    const kitchen = { completed: 0, totalMinutes: 0, onTimeCount: 0 };
+    const delivery = { completed: 0, totalMinutes: 0, onTimeCount: 0 };
+    let cursor: string | undefined;
+    while (true) {
+      const orders = await this.prisma.order.findMany({
+        where: {
+          timestamp: { gte: since },
+          status: { not: 'CANCELLED' },
         },
-      },
-    });
-
-    const kitchenMinutes = orders.flatMap((order) => {
-      if (!order.kitchenReadyAt) return [];
-      const sentTimes = order.items
-        .map((item) => item.sentAt?.getTime())
-        .filter((value): value is number => typeof value === 'number');
-      const startedAt = sentTimes.length
-        ? Math.min(...sentTimes)
-        : order.timestamp.getTime();
-      return [
-        Math.max(0, (order.kitchenReadyAt.getTime() - startedAt) / 60000),
-      ];
-    });
-    const deliveryMinutes = orders.flatMap((order) =>
-      order.deliveryStartedAt && order.deliveredAt
-        ? [
-            Math.max(
-              0,
-              (order.deliveredAt.getTime() -
-                order.deliveryStartedAt.getTime()) /
-                60000,
-            ),
-          ]
-        : [],
-    );
-    const summarize = (values: number[], limit: number) => ({
-      completed: values.length,
-      averageMinutes: values.length
-        ? Math.round(
-            (values.reduce((total, value) => total + value, 0) /
-              values.length) *
-              10,
-          ) / 10
+        orderBy: { id: 'asc' },
+        take: 250,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        select: {
+          id: true,
+          timestamp: true,
+          kitchenReadyAt: true,
+          deliveryStartedAt: true,
+          deliveredAt: true,
+          items: {
+            where: { isSentToKitchen: true, sentAt: { not: null } },
+            select: { sentAt: true },
+          },
+        },
+      });
+      for (const order of orders) {
+        if (order.kitchenReadyAt) {
+          const firstSentAt = order.items.reduce<number | undefined>(
+            (earliest, item) =>
+              item.sentAt && (!earliest || item.sentAt.getTime() < earliest)
+                ? item.sentAt.getTime()
+                : earliest,
+            undefined,
+          );
+          const minutes = Math.max(
+            0,
+            (order.kitchenReadyAt.getTime() -
+              (firstSentAt ?? order.timestamp.getTime())) /
+              60000,
+          );
+          kitchen.completed++;
+          kitchen.totalMinutes += minutes;
+          if (minutes < config.kitchenCriticalMinutes) kitchen.onTimeCount++;
+        }
+        if (order.deliveryStartedAt && order.deliveredAt) {
+          const minutes = Math.max(
+            0,
+            (order.deliveredAt.getTime() - order.deliveryStartedAt.getTime()) /
+              60000,
+          );
+          delivery.completed++;
+          delivery.totalMinutes += minutes;
+          if (minutes < config.deliveryMaxMinutes) delivery.onTimeCount++;
+        }
+      }
+      if (orders.length < 250) break;
+      cursor = orders[orders.length - 1].id;
+    }
+    const summarize = (metric: typeof kitchen) => ({
+      completed: metric.completed,
+      averageMinutes: metric.completed
+        ? Math.round((metric.totalMinutes / metric.completed) * 10) / 10
         : 0,
-      onTimeCount: values.filter((value) => value < limit).length,
-      onTimePercent: values.length
-        ? Math.round(
-            (values.filter((value) => value < limit).length / values.length) *
-              100,
-          )
+      onTimeCount: metric.onTimeCount,
+      onTimePercent: metric.completed
+        ? Math.round((metric.onTimeCount / metric.completed) * 100)
         : 0,
     });
 
     return {
       days,
       config,
-      kitchen: summarize(kitchenMinutes, config.kitchenCriticalMinutes),
-      delivery: summarize(deliveryMinutes, config.deliveryMaxMinutes),
+      kitchen: summarize(kitchen),
+      delivery: summarize(delivery),
     };
   }
 
@@ -1258,7 +1347,10 @@ export class OrdersService {
       ) {
         this.emitOrderReady(updated);
       }
-      this.publishOrder(updated, 'updated');
+      this.publishOrder(updated, 'updated', {
+        previousDriverId: existing.driverId,
+        previousKitchenIds: collectOrderKitchenIds(existing),
+      });
       return updated;
     }
 
@@ -1277,24 +1369,59 @@ export class OrdersService {
       },
       existing.timestamp,
     );
-    const unadjusted = await this.pricing.calculateWithPrices(
-      mappedItems,
-      promotion,
-    );
-    const hasSplitAdjustedDiscount =
+    const splitFamily = await getSplitFamilyState(this.prisma, {
+      orderId: id,
+      items: existing.items,
+      cuponId: promotion.source === 'coupon' ? promotion.cuponId : null,
+    });
+    const sameStoredPromotion = isSameStoredPromotion(existing, promotion);
+    const preserveSplitDiscountForConsumedCoupon =
+      splitFamily.hasSplitHistory &&
+      splitFamily.couponAlreadyConsumedBySplit &&
+      sameStoredPromotion &&
       typeof existing.discountAmount === 'number' &&
-      existing.discountAmount >= 0 &&
-      dto.discountAmount !== undefined &&
-      Math.abs(dto.discountAmount - existing.discountAmount) < 0.01 &&
-      ((promotion.source === 'none' && existing.discountAmount > 0) ||
-        (promotion.source !== 'none' &&
-          existing.discountAmount + 0.01 < unadjusted.totals.discountAmount));
-    const { items: pricedItems, totals } = hasSplitAdjustedDiscount
-      ? await this.pricing.applyDiscountOverride(
-          unadjusted,
-          existing.discountAmount ?? 0,
-        )
-      : unadjusted;
+      existing.discountAmount >= 0;
+
+    let pricedItems: CartItemEntity[];
+    let totals: {
+      subTotal: number;
+      discountAmount: number;
+      taxAmount: number;
+      total: number;
+    };
+    if (preserveSplitDiscountForConsumedCoupon) {
+      const preserved = await this.pricing.calculateWithPrices(
+        mappedItems,
+        promotion,
+        existing.discountAmount ?? 0,
+      );
+      pricedItems = preserved.items;
+      totals = preserved.totals;
+    } else {
+      const unadjusted = await this.pricing.calculateWithPrices(
+        mappedItems,
+        promotion,
+      );
+      const hasSplitAdjustedDiscount =
+        dto.discountAmount !== undefined &&
+        typeof existing.discountAmount === 'number' &&
+        Math.abs(dto.discountAmount - existing.discountAmount) < 0.01 &&
+        isSplitDiscountAdjustmentCandidate({
+          hasSplitHistory: splitFamily.hasSplitHistory,
+          sameStoredPromotion,
+          storedDiscountAmount: existing.discountAmount,
+          promotion,
+          calculatedDiscountAmount: unadjusted.totals.discountAmount,
+        });
+      const recalculated = hasSplitAdjustedDiscount
+        ? await this.pricing.applyDiscountOverride(
+            unadjusted,
+            existing.discountAmount ?? 0,
+          )
+        : unadjusted;
+      pricedItems = recalculated.items;
+      totals = recalculated.totals;
+    }
     const certificateSerials = this.extractCertificateSerials(
       pricedItems,
       dto.certificateSerials,
@@ -1333,7 +1460,9 @@ export class OrdersService {
 
       await this.assertPendingBenefitsAvailable(
         {
-          cuponId: cuponId ?? undefined,
+          cuponId: splitFamily.couponAlreadyConsumedBySplit
+            ? undefined
+            : (cuponId ?? undefined),
           certificateSerials,
           excludeOrderId: id,
           items: pricedItems,
@@ -1364,7 +1493,10 @@ export class OrdersService {
     if (becameReadyForPickup) {
       this.emitOrderReady(updated);
     }
-    this.publishOrder(updated, 'updated');
+    this.publishOrder(updated, 'updated', {
+      previousDriverId: existing.driverId,
+      previousKitchenIds: collectOrderKitchenIds(existing),
+    });
     return updated;
   }
 
@@ -1412,6 +1544,15 @@ export class OrdersService {
   ) {
     const existing = await this.getById(id);
     this.assertCanFinalizeOrder(user, existing);
+    if (
+      dto.expectedUpdatedAt &&
+      existing.updatedAt?.getTime() !==
+        new Date(dto.expectedUpdatedAt).getTime()
+    ) {
+      throw new ConflictException(
+        'La orden cambió. Actualiza el pedido antes de cobrar.',
+      );
+    }
     if (existing.status === OrderStatusDto.paid) return existing;
     if (existing.status === OrderStatusDto.cancelled) {
       throw new BadRequestException(
@@ -1428,8 +1569,15 @@ export class OrdersService {
       dto.promotionSource !== OrderPromotionSourceDto.coupon
         ? undefined
         : (dto.cuponId ?? existing.cuponId);
+    const splitFamily = await getSplitFamilyState(this.prisma, {
+      orderId: id,
+      items: existing.items,
+      cuponId: effectiveCuponId ?? null,
+    });
     await this.assertPendingBenefitsAvailable({
-      cuponId: effectiveCuponId,
+      cuponId: splitFamily.couponAlreadyConsumedBySplit
+        ? undefined
+        : effectiveCuponId,
       certificateSerials,
       excludeOrderId: id,
       items: existing.items,
@@ -1446,7 +1594,11 @@ export class OrdersService {
           })
         : { customerId: existing.customerId };
 
-    const resolvedPayments = await this.resolvePayments(dto.payments);
+    const actingUser = typeof user === 'string' ? undefined : user;
+    const resolvedPayments = await this.resolvePayments(
+      dto.payments,
+      actingUser,
+    );
     await this.finalization.finalize(
       existing,
       {
@@ -1459,7 +1611,10 @@ export class OrdersService {
     );
     const finalized = await this.getById(id);
     if (publishEvent) {
-      this.publishOrder(finalized, 'updated');
+      this.publishOrder(finalized, 'updated', {
+        previousDriverId: existing.driverId,
+        previousKitchenIds: collectOrderKitchenIds(existing),
+      });
     }
     return finalized;
   }
@@ -1480,6 +1635,15 @@ export class OrdersService {
 
     const existing = await this.getById(id);
     this.assertCanFinalizeOrder(user, existing);
+    if (
+      dto.expectedUpdatedAt &&
+      existing.updatedAt?.getTime() !==
+        new Date(dto.expectedUpdatedAt).getTime()
+    ) {
+      throw new ConflictException(
+        'La orden cambió. Actualiza la mesa antes de dividir la cuenta.',
+      );
+    }
     if (
       existing.status === OrderStatusDto.paid ||
       existing.status === OrderStatusDto.cancelled
@@ -1674,18 +1838,17 @@ export class OrdersService {
       dto.mode === 'items' &&
       (!hasExplicitChildPromotion || explicitPromotionMatchesParent);
 
-    const unadjustedChild = await this.pricing.calculateWithPrices(
-      normalizedChildItems,
-      childPromotion,
-    );
-    const useChildDiscountOverride =
+    const parentSplitFamily = await getSplitFamilyState(this.prisma, {
+      orderId: existing.id,
+      items: existing.items,
+      cuponId: existing.cuponId,
+    });
+    const childReusesConsumedParentCoupon =
       usesParentDiscountPool &&
-      typeof dto.discountAmount === 'number' &&
-      dto.discountAmount >= 0 &&
-      ((childPromotion.source === 'none' && dto.discountAmount > 0) ||
-        (childPromotion.source !== 'none' &&
-          Math.abs(unadjustedChild.totals.discountAmount - dto.discountAmount) >
-            0.01));
+      parentSplitFamily.couponAlreadyConsumedBySplit &&
+      childPromotion.source === 'coupon' &&
+      childPromotion.cuponId === existing.cuponId;
+
     if (
       usesParentDiscountPool &&
       typeof dto.discountAmount === 'number' &&
@@ -1695,20 +1858,79 @@ export class OrdersService {
         'El descuento de la subcuenta supera el descuento pendiente de la orden.',
       );
     }
-    const { items: pricedChildItems, totals: childTotals } =
-      useChildDiscountOverride
+
+    let pricedChildItems: CartItemEntity[];
+    let childTotals: {
+      subTotal: number;
+      discountAmount: number;
+      taxAmount: number;
+      total: number;
+    };
+    if (
+      childReusesConsumedParentCoupon &&
+      (typeof dto.discountAmount === 'number' ||
+        (existing.discountAmount ?? 0) === 0)
+    ) {
+      const preservedChild = await this.pricing.calculateWithPrices(
+        normalizedChildItems,
+        childPromotion,
+        dto.discountAmount ?? 0,
+        { allowConsumedCoupon: true },
+      );
+      pricedChildItems = preservedChild.items;
+      childTotals = preservedChild.totals;
+    } else {
+      const unadjustedChild = await this.pricing.calculateWithPrices(
+        normalizedChildItems,
+        childPromotion,
+        undefined,
+        childReusesConsumedParentCoupon
+          ? { allowConsumedCoupon: true }
+          : undefined,
+      );
+      const maxParentDiscount =
+        childReusesConsumedParentCoupon &&
+        typeof existing.discountAmount === 'number'
+          ? Math.max(0, existing.discountAmount)
+          : undefined;
+      const effectiveChildDiscountOverride =
+        usesParentDiscountPool &&
+        typeof dto.discountAmount === 'number' &&
+        dto.discountAmount >= 0
+          ? dto.discountAmount
+          : maxParentDiscount !== undefined &&
+              unadjustedChild.totals.discountAmount > maxParentDiscount + 0.01
+            ? maxParentDiscount
+            : undefined;
+      const useChildDiscountOverride =
+        usesParentDiscountPool &&
+        effectiveChildDiscountOverride !== undefined &&
+        ((childPromotion.source === 'none' &&
+          effectiveChildDiscountOverride > 0) ||
+          (childPromotion.source !== 'none' &&
+            Math.abs(
+              unadjustedChild.totals.discountAmount -
+                effectiveChildDiscountOverride,
+            ) > 0.01));
+      const adjustedChild = useChildDiscountOverride
         ? await this.pricing.applyDiscountOverride(
             unadjustedChild,
-            dto.discountAmount ?? 0,
+            effectiveChildDiscountOverride,
           )
         : unadjustedChild;
+      pricedChildItems = adjustedChild.items;
+      childTotals = adjustedChild.totals;
+    }
 
     const reconciledDtoPayments = this.reconcileSplitPayments(
       dto.payments,
       childTotals.total,
       dto.finalTotal,
     );
-    const resolvedPayments = await this.resolvePayments(reconciledDtoPayments);
+    const resolvedPayments = await this.resolvePayments(
+      reconciledDtoPayments,
+      user,
+    );
     assertPaymentsMatchTotal(childTotals.total, resolvedPayments ?? []);
 
     const parentPromotion = await this.pricing.resolvePromotion(
@@ -1719,10 +1941,6 @@ export class OrdersService {
         happyHourId: existing.happyHourId,
       },
       existing.timestamp,
-    );
-    const unadjustedParent = await this.pricing.calculateWithPrices(
-      remainingParentItems,
-      parentPromotion,
     );
     const expectedRemainingDiscount =
       dto.mode === 'items' && usesParentDiscountPool
@@ -1735,20 +1953,46 @@ export class OrdersService {
             ),
           )
         : (existing.discountAmount ?? 0);
-    const useParentDiscountOverride =
-      typeof existing.discountAmount === 'number' &&
-      existing.discountAmount > 0 &&
-      ((parentPromotion.source === 'none' && expectedRemainingDiscount > 0) ||
-        (parentPromotion.source !== 'none' &&
-          expectedRemainingDiscount + 0.01 <
-            unadjustedParent.totals.discountAmount));
-    const { items: pricedParentItems, totals: parentTotals } =
-      useParentDiscountOverride
+    const preserveParentDiscountForConsumedCoupon =
+      parentSplitFamily.couponAlreadyConsumedBySplit &&
+      parentPromotion.source === 'coupon';
+
+    let pricedParentItems: CartItemEntity[];
+    let parentTotals: {
+      subTotal: number;
+      discountAmount: number;
+      taxAmount: number;
+      total: number;
+    };
+    if (preserveParentDiscountForConsumedCoupon) {
+      const preservedParent = await this.pricing.calculateWithPrices(
+        remainingParentItems,
+        parentPromotion,
+        expectedRemainingDiscount,
+      );
+      pricedParentItems = preservedParent.items;
+      parentTotals = preservedParent.totals;
+    } else {
+      const unadjustedParent = await this.pricing.calculateWithPrices(
+        remainingParentItems,
+        parentPromotion,
+      );
+      const useParentDiscountOverride =
+        typeof existing.discountAmount === 'number' &&
+        existing.discountAmount > 0 &&
+        ((parentPromotion.source === 'none' && expectedRemainingDiscount > 0) ||
+          (parentPromotion.source !== 'none' &&
+            expectedRemainingDiscount + 0.01 <
+              unadjustedParent.totals.discountAmount));
+      const adjustedParent = useParentDiscountOverride
         ? await this.pricing.applyDiscountOverride(
             unadjustedParent,
             expectedRemainingDiscount,
           )
         : unadjustedParent;
+      pricedParentItems = adjustedParent.items;
+      parentTotals = adjustedParent.totals;
+    }
     const finalParentItems = settlesSplit
       ? this.ensureKitchenItemsSentOnSettlement(pricedParentItems, nowMs)
       : pricedParentItems;
@@ -1803,7 +2047,7 @@ export class OrdersService {
       dto.customerSnapshotName ||
       existing.customerSnapshotName ||
       (dto.customerPhone ? `Cliente ${dto.customerPhone}` : undefined);
-    const cashierSnapshotName = existing.cashierSnapshotName || user?.username;
+    const cashierSnapshotName = user?.username ?? existing.cashierSnapshotName;
     const { customerId, cashierId, shiftId } =
       await this.referenceResolver.resolve({
         customerId: dto.customerId ?? existing.customerId,
@@ -1823,6 +2067,15 @@ export class OrdersService {
     try {
       const txResult = await this.prisma.$transaction(async (tx) => {
         await this.lockUnchangedSplitParent(tx, existing);
+        if (
+          dto.expectedUpdatedAt &&
+          existing.updatedAt?.getTime() !==
+            new Date(dto.expectedUpdatedAt).getTime()
+        ) {
+          throw new ConflictException(
+            'La orden cambió. Actualiza la mesa antes de dividir la cuenta.',
+          );
+        }
         await this.assertPendingBenefitsAvailable(
           {
             cuponId:
@@ -1929,6 +2182,8 @@ export class OrdersService {
           totals: childTotals,
           promotion: effectiveChildPromotion,
           skipCouponConsumption: sharesParentCoupon && recordedSiblingCount > 0,
+          cashierId: cashierId ?? user?.id,
+          cashierSnapshotName,
         });
 
         const finalizedChild = await this.repo.findById(createdChild.id, tx);
@@ -1950,138 +2205,12 @@ export class OrdersService {
       throw error;
     }
 
-    this.publishOrder(parentOrder, 'updated');
+    this.publishOrder(parentOrder, 'updated', {
+      previousDriverId: existing.driverId,
+      previousKitchenIds: collectOrderKitchenIds(existing),
+    });
     this.publishOrder(paidOrder, 'created');
     return { paidOrder, parentOrder };
-  }
-
-  private async finalizeSplitParent(
-    existing: OrderEntity,
-    dto: SplitOrderCheckoutDto,
-    user: AuthenticatedUser | undefined,
-    rawItems: CartItemEntity[],
-  ): Promise<{ paidOrder: OrderEntity; parentOrder: OrderEntity }> {
-    const normalizedItems = await this.pricing.normalizeComboItems(rawItems);
-    const hasExplicitPromotionSelection =
-      dto.promotionSource !== undefined ||
-      dto.cuponId !== undefined ||
-      dto.discountId !== undefined ||
-      dto.happyHourId !== undefined ||
-      Boolean(dto.promotionCode?.trim());
-    const promotion = await this.pricing.resolvePromotion(
-      dto,
-      {
-        cuponId: existing.cuponId,
-        discountId: existing.discountId,
-        happyHourId: existing.happyHourId,
-      },
-      existing.timestamp,
-    );
-    const { items: rawPricedItems, totals } =
-      !hasExplicitPromotionSelection &&
-      typeof existing.discountAmount === 'number'
-        ? await this.pricing.calculateWithPrices(
-            normalizedItems,
-            promotion,
-            existing.discountAmount,
-          )
-        : await this.pricing.calculateWithPrices(normalizedItems, promotion);
-    const pricedItems = this.ensureKitchenItemsSentOnSettlement(
-      rawPricedItems,
-      Date.now(),
-    );
-    const certificateSerials = this.extractCertificateSerials(
-      pricedItems,
-      dto.certificateSerials,
-    );
-    await this.assertPendingBenefitsAvailable({
-      cuponId: promotion.source === 'coupon' ? promotion.cuponId : undefined,
-      certificateSerials,
-      items: pricedItems,
-      excludeOrderId: existing.id,
-    });
-
-    const customerSnapshotName =
-      dto.customerSnapshotName ||
-      existing.customerSnapshotName ||
-      (dto.customerPhone ? `Cliente ${dto.customerPhone}` : undefined);
-    const cashierSnapshotName = existing.cashierSnapshotName || user?.username;
-    const { customerId } = await this.referenceResolver.resolve({
-      customerId: dto.customerId ?? existing.customerId,
-      customerSnapshotName,
-      customerPhone: dto.customerPhone ?? existing.customerPhone,
-      customerAddress: dto.customerAddress ?? existing.customerAddress,
-      cashierId: user?.id,
-      cashierSnapshotName,
-    });
-    const reconciledPayments = this.reconcileSplitPayments(
-      dto.payments ?? [],
-      totals.total,
-      dto.finalTotal,
-    );
-    const resolvedPayments = await this.resolvePayments(reconciledPayments);
-    assertPaymentsMatchTotal(totals.total, resolvedPayments ?? []);
-
-    let finalized: OrderEntity;
-    try {
-      finalized = await this.prisma.$transaction(async (tx) => {
-        await this.lockUnchangedSplitParent(tx, existing);
-        await this.assertPendingBenefitsAvailable(
-          {
-            cuponId:
-              promotion.source === 'coupon' ? promotion.cuponId : undefined,
-            certificateSerials,
-            items: pricedItems,
-            excludeOrderId: existing.id,
-          },
-          tx,
-        );
-        await this.repo.update(
-          existing.id,
-          {
-            items: pricedItems,
-            total: totals.total,
-            subTotal: totals.subTotal,
-            discountAmount: totals.discountAmount,
-            taxAmount: totals.taxAmount,
-            cuponId: promotion.source === 'coupon' ? promotion.cuponId : null,
-            discountId:
-              promotion.source === 'discount' ? promotion.discountId : null,
-            happyHourId:
-              promotion.source === 'happy-hour' ? promotion.happyHourId : null,
-            isSentToKitchen: pricedItems.some(
-              (item) =>
-                requiresKitchenPreparation(item) && item.isSentToKitchen,
-            ),
-            certificateSerials,
-          },
-          tx,
-        );
-        await this.finalization.issueInTransaction(tx, {
-          orderId: existing.id,
-          dto: {
-            ...dto,
-            ...(customerId ? { customerId } : {}),
-            customerSnapshotName,
-            payments: resolvedPayments,
-            certificateSerials,
-          },
-          totals,
-          promotion,
-        });
-        const paidParent = await this.repo.findById(existing.id, tx);
-        if (!paidParent) {
-          throw new NotFoundException('No se pudo cargar la orden cobrada.');
-        }
-        return paidParent;
-      });
-    } catch (error) {
-      await this.finalization.persistTerminalCorrelativoStatusIfNeeded?.(error);
-      throw error;
-    }
-
-    this.publishOrder(finalized, 'updated');
-    return { paidOrder: finalized, parentOrder: finalized };
   }
 
   private async prepareSplitCancellationRestore(child: OrderEntity): Promise<
@@ -2112,7 +2241,20 @@ export class OrdersService {
             !isSplitBillOrderItem(item),
         )
         .map((item) => ({ ...item }));
-      restoredItems = [...parent.items, ...productItems];
+      const transferredSupplementalItems =
+        parent.items.length === 0
+          ? child.items
+              .filter(
+                (item) =>
+                  isPackagingOrderItem(item) || isDeliveryChargeOrderItem(item),
+              )
+              .map((item) => ({ ...item }))
+          : [];
+      restoredItems = [
+        ...parent.items,
+        ...productItems,
+        ...transferredSupplementalItems,
+      ];
       const sharesParentPromotion =
         child.cuponId === parent.cuponId &&
         child.discountId === parent.discountId &&
@@ -2381,8 +2523,8 @@ export class OrdersService {
     existingItems: readonly CartItemEntity[],
     incomingItems: readonly CartItemEntity[],
   ): void {
-    const existingCredits = existingItems.filter(isSplitBillCreditOrderItem);
-    const incomingCredits = incomingItems.filter(isSplitBillCreditOrderItem);
+    const existingCredits = existingItems.filter(isSplitBillOrderItem);
+    const incomingCredits = incomingItems.filter(isSplitBillOrderItem);
     if (existingCredits.length !== incomingCredits.length) {
       throw new BadRequestException(
         'Los abonos de subcuenta no se pueden agregar ni eliminar al editar una orden.',
@@ -2806,7 +2948,13 @@ export class OrdersService {
 
   private async resolvePayments(
     payments?: OrderPaymentDto[],
-  ): Promise<OrderPaymentDto[] | undefined> {
+    user?: AuthenticatedUser,
+  ): Promise<
+    | Array<
+        OrderPaymentDto & { cashierId?: string; cashierSnapshotName?: string }
+      >
+    | undefined
+  > {
     if (!payments) return undefined;
     const [saved, general] = await Promise.all([
       this.prisma.appConfig.findUnique({
@@ -2832,20 +2980,35 @@ export class OrdersService {
       Number(generalData?.exchangeRate) || 36.5,
     );
 
-    return normalizeAndValidateOrderPayments(
+    const normalized = normalizeAndValidateOrderPayments(
       payments,
       config.methods,
       defaultExchangeRate,
     );
+    return normalized.map((payment) => ({
+      ...payment,
+      cashierId: user?.id,
+      cashierSnapshotName: user?.username,
+    }));
   }
 
   private publishOrder(
     order: OrderEntity,
     mutation: OrderSynchronizationMutation,
+    previous?: {
+      previousDriverId?: string | null;
+      previousKitchenIds?: readonly string[];
+    },
   ): void {
     this.eventEmitter.emit(ORDER_SYNCHRONIZED_EVENT, {
       mutation,
       order,
+      ...(previous?.previousDriverId !== undefined
+        ? { previousDriverId: previous.previousDriverId }
+        : {}),
+      ...(previous?.previousKitchenIds?.length
+        ? { previousKitchenIds: previous.previousKitchenIds }
+        : {}),
     });
   }
 
@@ -2870,6 +3033,7 @@ export class OrdersService {
       orderType: order.orderType,
       targetUsername: order.cashierSnapshotName,
       driverId: order.driverId,
+      waiterId: order.waiterId,
     });
   }
 

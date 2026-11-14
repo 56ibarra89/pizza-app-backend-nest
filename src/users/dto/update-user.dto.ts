@@ -1,9 +1,11 @@
+import { WeekDay } from '@prisma/client';
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
   IsEmail,
   IsEnum,
   IsOptional,
+  IsNotEmpty,
   IsString,
   Matches,
   IsArray,
@@ -14,6 +16,7 @@ import { UserRoleDto } from './user-role.dto';
 export class UpdateUserDto {
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   username?: string;
 
@@ -24,11 +27,13 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   firstName?: string;
 
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   lastName?: string;
 
@@ -65,8 +70,8 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
-  workDays?: string[];
+  @IsEnum(WeekDay, { each: true })
+  workDays?: WeekDay[];
 
   @IsOptional()
   @IsString()

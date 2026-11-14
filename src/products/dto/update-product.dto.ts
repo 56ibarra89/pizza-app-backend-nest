@@ -3,9 +3,12 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
+  IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { ProductPriceDto } from './product-price.dto';
@@ -18,6 +21,7 @@ export class UpdateProductDto {
 
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   name?: string;
 
   @IsOptional()
@@ -38,6 +42,8 @@ export class UpdateProductDto {
 
   @IsOptional()
   @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   comboPrice?: number;
 
   @IsOptional()

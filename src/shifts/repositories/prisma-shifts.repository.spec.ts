@@ -327,4 +327,82 @@ describe('PrismaShiftsRepository.close', () => {
     expect(paymentGroupBy).toHaveBeenCalledTimes(1);
     expect(orderFindMany).not.toHaveBeenCalled();
   });
+
+  it('hidrata ventas en vivo para turnos OPEN en list con una sola consulta agrupada (B49)', async () => {
+    const openRow = { ...existingShift, id: 'shift-open-1' };
+    const closedRow = {
+      ...existingShift,
+      id: 'shift-closed-1',
+      status: ShiftStatus.CLOSED,
+      cashSales: new Prisma.Decimal(500),
+      cardSales: new Prisma.Decimal(200),
+      appSales: new Prisma.Decimal(0),
+      totalSales: new Prisma.Decimal(700),
+    };
+    const shiftFindMany = jest.fn().mockResolvedValue([openRow, closedRow]);
+    const orderFindMany = jest.fn().mockResolvedValue([
+      {
+        shiftId: 'shift-open-1',
+        payments: [
+          {
+            method: PaymentMethod.EFECTIVO,
+            methodConfigId: 'cash-nio',
+            methodSnapshotName: 'Efectivo C$',
+            methodType: 'CASH',
+            currency: 'NIO',
+            amount: new Prisma.Decimal(250),
+            commissionAmount: new Prisma.Decimal(0),
+          },
+          {
+            method: PaymentMethod.TARJETA,
+            methodConfigId: 'card-pos',
+            methodSnapshotName: 'Tarjeta',
+            methodType: 'CARD_POS',
+            currency: 'NIO',
+            amount: new Prisma.Decimal(150),
+            commissionAmount: new Prisma.Decimal(5),
+          },
+        ],
+      },
+    ]);
+
+    const repository = new PrismaShiftsRepository(
+      {
+        shift: { findMany: shiftFindMany },
+        order: { findMany: orderFindMany },
+      } as unknown as PrismaService,
+      { findByPin: jest.fn() } as any,
+    );
+
+    const results = await repository.list({ limit: 10 });
+
+    expect(orderFindMany).toHaveBeenCalledTimes(1);
+    expect(orderFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          shiftId: { in: ['shift-open-1'] },
+          status: 'PAID',
+        },
+      }),
+    );
+    expect(results[0]).toEqual(
+      expect.objectContaining({
+        id: 'shift-open-1',
+        cashSales: 250,
+        cardSales: 150,
+        totalSales: 400,
+        expectedCash: 1250,
+        totalPaymentCommission: 5,
+        netSales: 395,
+      }),
+    );
+    expect(results[1]).toEqual(
+      expect.objectContaining({
+        id: 'shift-closed-1',
+        cashSales: 500,
+        cardSales: 200,
+        totalSales: 700,
+      }),
+    );
+  });
 });

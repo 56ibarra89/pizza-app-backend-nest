@@ -9,10 +9,18 @@ export const MAX_BACKUP_UPLOAD_BYTES = 100 * 1024 * 1024;
 export const MAX_BACKUP_UPLOAD_MB = MAX_BACKUP_UPLOAD_BYTES / (1024 * 1024);
 
 export function isSqlBackupFilename(filename: unknown): filename is string {
+  if (typeof filename !== 'string') {
+    return false;
+  }
+
+  const trimmed = filename.trim();
   return (
-    typeof filename === 'string' &&
-    filename.length > 4 &&
-    path.extname(filename).toLowerCase() === '.sql'
+    trimmed.length > 4 &&
+    trimmed !== '.' &&
+    trimmed !== '..' &&
+    !/[\\/]/.test(trimmed) &&
+    path.basename(trimmed) === trimmed &&
+    path.extname(trimmed).toLowerCase() === '.sql'
   );
 }
 

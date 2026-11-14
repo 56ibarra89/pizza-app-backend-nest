@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
@@ -42,17 +42,28 @@ import { ReportsModule } from './reports/reports.module';
         limit: 120,
       },
     ]),
-    MailerModule.forRoot({
-      transport: {
-        host: process.env.SMTP_HOST || 'smtp.ethereal.email',
-        port: parseInt(process.env.SMTP_PORT || '587', 10),
-        auth: {
-          user: process.env.SMTP_USER || 'ethereal.user@ethereal.email',
-          pass: process.env.SMTP_PASS || 'etherealpassword',
-        },
-      },
-      defaults: {
-        from: '"No Reply" <noreply@pizzatogo.com>',
+    MailerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        const parsedPort = Number.parseInt(
+          config.get<string>('SMTP_PORT') || '587',
+          10,
+        );
+        return {
+          transport: {
+            host: config.get<string>('SMTP_HOST') || 'smtp.ethereal.email',
+            port: Number.isFinite(parsedPort) ? parsedPort : 587,
+            auth: {
+              user:
+                config.get<string>('SMTP_USER') ||
+                'ethereal.user@ethereal.email',
+              pass: config.get<string>('SMTP_PASS') || 'etherealpassword',
+            },
+          },
+          defaults: {
+            from: '"No Reply" <noreply@pizzatogo.com>',
+          },
+        };
       },
     }),
     PrismaModule,

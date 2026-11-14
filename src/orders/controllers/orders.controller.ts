@@ -30,10 +30,12 @@ import type { OrderEntity } from '../entities/order.entity';
 import { ListOrderHistoryQueryDto } from '../dto/list-order-history-query.dto';
 import { OrderStatusDto } from '../dto/order-status.dto';
 import { HideKitchenTicketsDto } from '../dto/hide-kitchen-tickets.dto';
+import { HideOrdersDto } from '../dto/hide-orders.dto';
 import { UpdateOrderWaiterDto } from '../dto/update-order-waiter.dto';
 import {
   getBusinessDateParts,
   getBusinessDayBounds,
+  parseBusinessDateInput,
 } from '../../common/time/business-time.util';
 
 @ApiTags('orders')
@@ -112,8 +114,8 @@ export class OrdersController {
       user?.role === UserRoleDto.motorizado ? user.id : undefined;
 
     const result = await this.orders.listHistory({
-      startDate: new Date(query.startDate),
-      endDate: new Date(query.endDate),
+      startDate: parseBusinessDateInput(query.startDate, 'start'),
+      endDate: parseBusinessDateInput(query.endDate, 'end'),
       page: query.page,
       pageSize: query.pageSize,
       search: query.search,
@@ -166,6 +168,32 @@ export class OrdersController {
       const response = toKitchenOrderResponseDto(order, kitchenId);
       return response ? [response] : [];
     });
+  }
+
+  @Get('my-deliveries')
+  @Permissions('delivery.read')
+  @Roles(UserRoleDto.motorizado)
+  async listMyDeliveries(@CurrentUser() user: AuthenticatedUser) {
+    const list = await this.orders.listTodayOrActive(new Date(), {
+      driverId: user.id,
+    });
+    return list.map(toOrderResponseDto);
+  }
+
+  @Get('my-deliveries/:id')
+  @Permissions('delivery.read')
+  @Roles(UserRoleDto.motorizado)
+  async getMyDeliveryById(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const order = await this.orders.getById(id);
+    if (order.orderType !== 'delivery' || order.driverId !== user.id) {
+      throw new ForbiddenException(
+        'No tienes acceso a pedidos que no están asignados a tu usuario.',
+      );
+    }
+    return toOrderResponseDto(order);
   }
 
   @Get('driver/:driverId/today')
@@ -235,6 +263,36 @@ export class OrdersController {
     return { success: true };
   }
 
+  @Get('hidden-orders')
+  @Permissions('orders.read')
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.mesero,
+    UserRoleDto.despachador,
+  )
+  async getHiddenOrders() {
+    return this.orders.getHiddenOrderIds();
+  }
+
+  @Post('hidden-orders')
+  @Permissions('orders.read', 'orders.manage')
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.mesero,
+    UserRoleDto.despachador,
+  )
+  async addHiddenOrders(
+    @Body() body: HideOrdersDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.orders.addHiddenOrderIds(body.orderIds, user);
+    return { success: true };
+  }
+
   @Get('sla/metrics')
   @Permissions('reports.read')
   @Roles(UserRoleDto.admin)
@@ -254,16 +312,8 @@ export class OrdersController {
     const defaultStart = getBusinessDayBounds(
       `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-01`,
     ).startOfDay;
-    const start = startDate
-      ? /^\d{4}-\d{2}-\d{2}$/.test(startDate.trim())
-        ? getBusinessDayBounds(startDate.trim()).startOfDay
-        : new Date(startDate)
-      : defaultStart;
-    const end = endDate
-      ? /^\d{4}-\d{2}-\d{2}$/.test(endDate.trim())
-        ? getBusinessDayBounds(endDate.trim()).endOfDay
-        : new Date(endDate)
-      : now;
+    const start = this.parseMetricsDate(startDate, 'start', defaultStart);
+    const end = this.parseMetricsDate(endDate, 'end', now);
     return this.orders.getCancellationMetrics(start, end);
   }
 
@@ -279,18 +329,9 @@ export class OrdersController {
     const defaultStart = getBusinessDayBounds(
       `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-01`,
     ).startOfDay;
-    return this.orders.getPaymentMetrics(
-      startDate
-        ? /^\d{4}-\d{2}-\d{2}$/.test(startDate.trim())
-          ? getBusinessDayBounds(startDate.trim()).startOfDay
-          : new Date(startDate)
-        : defaultStart,
-      endDate
-        ? /^\d{4}-\d{2}-\d{2}$/.test(endDate.trim())
-          ? getBusinessDayBounds(endDate.trim()).endOfDay
-          : new Date(endDate)
-        : now,
-    );
+    const start = this.parseMetricsDate(startDate, 'start', defaultStart);
+    const end = this.parseMetricsDate(endDate, 'end', now);
+    return this.orders.getPaymentMetrics(start, end);
   }
 
   @Get(':id')
@@ -449,6 +490,36 @@ export class OrdersController {
       paidOrder: toOrderResponseDto(result.paidOrder),
       parentOrder: toOrderResponseDto(result.parentOrder),
     };
+  }
+
+  private parseMetricsDate(
+    value: string | undefined,
+    bound: 'start' | 'end',
+    fallback: Date,
+  ): Date {
+    if (!value) {
+      return fallback;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return fallback;
+    }
+    try {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+        const bounds = getBusinessDayBounds(trimmed);
+        return bound === 'start' ? bounds.startOfDay : bounds.endOfDay;
+      }
+      const parsed = new Date(trimmed);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new BadRequestException(`Fecha inválida: "${value}".`);
+      }
+      return parsed;
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException(`Fecha inválida: "${value}".`);
+    }
   }
 
   private async getVisibleOrderResponse(

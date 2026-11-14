@@ -5,7 +5,9 @@ import {
   Injectable,
   NotFoundException,
   OnModuleInit,
+  Optional,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { LogLevel, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
@@ -17,11 +19,25 @@ import {
   SYSTEM_ROLE_NAMES,
 } from './permission-catalog';
 import { toDbRole } from '../users/mappers/user-role.mapper';
-import { UserRoleDto } from '../common';
+import { SECURITY_SOCKETS_REVALIDATE_EVENT, UserRoleDto } from '../common';
+
+const ACCESS_CONTROL_BASELINE_V2_KEY = 'access_control_baseline_v2';
+const BASELINE_V2_ROLE_BACKFILL: Partial<
+  Record<UserRoleDto, readonly string[]>
+> = {
+  [UserRoleDto.cajero]: ['devices.read', 'tables.operate'],
+  [UserRoleDto.cajero_principal]: ['devices.read', 'tables.operate'],
+  [UserRoleDto.mesero]: ['devices.read'],
+  [UserRoleDto.cocinero]: ['devices.read'],
+  [UserRoleDto.despachador]: ['devices.read', 'tables.operate'],
+};
 
 @Injectable()
 export class AccessControlService implements OnModuleInit {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
+  ) {}
 
   async onModuleInit() {
     await this.ensureSystemConfiguration();
@@ -46,6 +62,8 @@ export class AccessControlService implements OnModuleInit {
         permissions.map((item) => [item.code, item.id]),
       );
 
+      const roleIdByCode = new Map<UserRoleDto, string>();
+
       for (const role of Object.values(UserRoleDto)) {
         const accessRole = await tx.accessRole.upsert({
           where: { code: role },
@@ -58,6 +76,7 @@ export class AccessControlService implements OnModuleInit {
           },
           update: { isSystem: true },
         });
+        roleIdByCode.set(role, accessRole.id);
 
         const configuredCount = await tx.rolePermission.count({
           where: { roleId: accessRole.id },
@@ -76,6 +95,47 @@ export class AccessControlService implements OnModuleInit {
           where: { role: toDbRole(role), accessRoleId: null },
           data: { accessRoleId: accessRole.id },
         });
+      }
+
+      if (
+        typeof tx.appConfig?.findUnique === 'function' &&
+        typeof tx.appConfig?.upsert === 'function'
+      ) {
+        const baselineMarker = await tx.appConfig.findUnique({
+          where: { id: ACCESS_CONTROL_BASELINE_V2_KEY },
+        });
+        if (!baselineMarker) {
+          const backfillEntries = Object.entries(
+            BASELINE_V2_ROLE_BACKFILL,
+          ).flatMap(([roleCode, codes]) => {
+            const roleId = roleIdByCode.get(roleCode as UserRoleDto);
+            if (!roleId || !codes) return [];
+            return codes
+              .map((code) => permissionByCode.get(code))
+              .filter((permissionId): permissionId is string =>
+                Boolean(permissionId),
+              )
+              .map((permissionId) => ({ roleId, permissionId }));
+          });
+
+          if (backfillEntries.length > 0) {
+            await tx.rolePermission.createMany({
+              data: backfillEntries,
+              skipDuplicates: true,
+            });
+          }
+
+          await tx.appConfig.upsert({
+            where: { id: ACCESS_CONTROL_BASELINE_V2_KEY },
+            create: {
+              id: ACCESS_CONTROL_BASELINE_V2_KEY,
+              data: { version: 2, appliedAt: new Date().toISOString() },
+            },
+            update: {
+              data: { version: 2, appliedAt: new Date().toISOString() },
+            },
+          });
+        }
       }
     });
   }
@@ -202,6 +262,9 @@ export class AccessControlService implements OnModuleInit {
 
     const after = await this.getRole(id);
     await this.audit(actor, 'ACCESS_ROLE_UPDATED', { before, after });
+    this.eventEmitter?.emit(SECURITY_SOCKETS_REVALIDATE_EVENT, {
+      accessRoleId: id,
+    });
     return after;
   }
 
@@ -263,6 +326,7 @@ export class AccessControlService implements OnModuleInit {
         accessRoleName: role.name,
       });
     }
+    this.eventEmitter?.emit(SECURITY_SOCKETS_REVALIDATE_EVENT, { userId });
     return user;
   }
 

@@ -151,6 +151,7 @@ describe('OrdersController delivery and kitchen access', () => {
         endDate: '2026-10-12T23:59:59.999Z',
         page: 1,
         pageSize: 20,
+        view: 'all',
       },
       user('driver-99', UserRoleDto.motorizado),
     );
@@ -167,6 +168,7 @@ describe('OrdersController delivery and kitchen access', () => {
         endDate: '2026-10-12T23:59:59.999Z',
         page: 1,
         pageSize: 20,
+        view: 'all',
       },
       user('cook-1', UserRoleDto.cocinero),
     );
@@ -183,10 +185,20 @@ describe('OrdersController delivery and kitchen access', () => {
         endDate: '2026-10-12T23:59:59.999Z',
         page: 1,
         pageSize: 20,
+        view: 'all',
       },
       user('cook-unassigned', UserRoleDto.cocinero),
     );
     expect(unassignedCookResult.items).toEqual([]);
     expect(unassignedCookResult.total).toBe(0);
+  });
+
+  it('rechaza con BadRequestException fechas inválidas en métricas de cancelación y pagos (B41)', () => {
+    expect(() =>
+      controller.getCancellationMetrics('2026-11-31', '2026-11-30'),
+    ).toThrow('Fecha inválida');
+    expect(() =>
+      controller.getPaymentMetrics('fecha-mala', '2026-11-30'),
+    ).toThrow('Fecha inválida');
   });
 });

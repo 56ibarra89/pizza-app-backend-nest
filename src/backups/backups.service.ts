@@ -28,6 +28,7 @@ import {
 } from './interfaces/cloud-backup-provider.interface';
 import { SystemLogsService } from '../system-logs/services/system-logs.service';
 import {
+  isSqlBackupFilename,
   MAX_BACKUP_UPLOAD_BYTES,
   MAX_BACKUP_UPLOAD_MB,
 } from './backup-upload.config';
@@ -54,6 +55,7 @@ export class BackupsService implements OnModuleInit {
   private readonly storageDir = path.join(process.cwd(), 'storage', 'backups');
   private lastCronExecutionKey: string | null = null;
   private isRestoreInProgress = false;
+  private backupGenerationQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly configService: ConfigService,
@@ -214,7 +216,22 @@ export class BackupsService implements OnModuleInit {
   /**
    * Genera un nuevo archivo de respaldo PostgreSQL con el tipo especificado.
    */
-  async generateBackup(type: BackupType = 'MANUAL'): Promise<BackupItemDto> {
+  generateBackup(type: BackupType = 'MANUAL'): Promise<BackupItemDto> {
+    return this.enqueueBackupGeneration(() => this.executeGenerateBackup(type));
+  }
+
+  private enqueueBackupGeneration<T>(task: () => Promise<T>): Promise<T> {
+    const next = this.backupGenerationQueue.then(task, task);
+    this.backupGenerationQueue = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  private async executeGenerateBackup(
+    type: BackupType = 'MANUAL',
+  ): Promise<BackupItemDto> {
     if (this.isRestoreInProgress && type !== 'SAFETY_SNAPSHOT') {
       throw new ConflictException(
         'No se puede generar un respaldo mientras una restauración está en curso',
@@ -225,11 +242,12 @@ export class BackupsService implements OnModuleInit {
     const pgDumpPath = this.resolveBinaryPath('pg_dump');
 
     const now = new Date();
-    const timestamp = now
+    const milliseconds = String(now.getMilliseconds()).padStart(3, '0');
+    const timestamp = `${now
       .toISOString()
       .replace(/T/, '_')
       .replace(/:/g, '-')
-      .replace(/\..+/, '');
+      .replace(/\..+/, '')}-${milliseconds}`;
 
     let prefix = 'backup-manual';
     if (type === 'AUTOMATIC') prefix = 'backup-auto';
@@ -264,6 +282,7 @@ export class BackupsService implements OnModuleInit {
           ...process.env,
           PGPASSWORD: creds.password,
         },
+        maxBuffer: 16 * 1024 * 1024,
       });
 
       const stat = fs.statSync(destinationPath);
@@ -360,9 +379,18 @@ export class BackupsService implements OnModuleInit {
    * Obtiene la ruta física segura de un archivo de respaldo.
    */
   getBackupFilePath(filename: string): string {
-    const sanitized = path.basename(filename);
-    const fullPath = path.join(this.storageDir, sanitized);
-    if (!fs.existsSync(fullPath)) {
+    if (!isSqlBackupFilename(filename)) {
+      throw new BadRequestException('Nombre de archivo de respaldo inválido');
+    }
+
+    const sanitized = filename.trim();
+    const resolvedStorageDir = path.resolve(this.storageDir);
+    const fullPath = path.resolve(resolvedStorageDir, sanitized);
+    if (!fullPath.startsWith(`${resolvedStorageDir}${path.sep}`)) {
+      throw new BadRequestException('Ruta de archivo de respaldo inválida');
+    }
+
+    if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {
       throw new NotFoundException(
         `El archivo de respaldo ${filename} no existe`,
       );
@@ -462,6 +490,7 @@ export class BackupsService implements OnModuleInit {
         creds.username,
         '-d',
         creds.database,
+        '-q',
         '-v',
         'ON_ERROR_STOP=1',
         '--single-transaction',
@@ -480,6 +509,7 @@ export class BackupsService implements OnModuleInit {
       try {
         const restoreResult = await execFileAsync(psqlPath, args, {
           env: execEnv,
+          maxBuffer: 64 * 1024 * 1024,
         });
         const stderrText = restoreResult?.stderr ?? '';
         if (/(^|\n)\s*(psql:.*:\s*)?(ERROR|FATAL):/i.test(stderrText)) {
@@ -494,7 +524,12 @@ export class BackupsService implements OnModuleInit {
 
         // Si provino de un archivo subido temporalmente, conservarlo en el almacenamiento local
         if (options.tempFilePath) {
-          const storedImportedName = `backup-imported_${new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '')}.sql`;
+          const importedNow = new Date();
+          const importedMs = String(importedNow.getMilliseconds()).padStart(
+            3,
+            '0',
+          );
+          const storedImportedName = `backup-imported_${importedNow.toISOString().replace(/:/g, '-').replace(/\..+/, '')}-${importedMs}.sql`;
           const storedImportedPath = path.join(
             this.storageDir,
             storedImportedName,
@@ -560,7 +595,7 @@ export class BackupsService implements OnModuleInit {
         '-c',
         verificationQuery,
       ],
-      { env },
+      { env, maxBuffer: 16 * 1024 * 1024 },
     );
 
     const rawCount = (result?.stdout ?? '').trim();

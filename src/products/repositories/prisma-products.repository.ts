@@ -170,6 +170,15 @@ export class PrismaProductsRepository implements IProductsRepository {
     id: string,
     dto: UpdateCategoryDto,
   ): Promise<CategoryEntity> {
+    if (typeof this.prisma.category?.findFirst === 'function') {
+      const existing = await this.prisma.category.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
+      });
+      if (!existing) {
+        throw new NotFoundException('Categoría no encontrada');
+      }
+    }
     const updated = await this.prisma.category.update({
       where: { id },
       data: { label: dto.label, icon: dto.icon, kitchenId: dto.kitchenId },
@@ -199,6 +208,15 @@ export class PrismaProductsRepository implements IProductsRepository {
   }
 
   async deleteCategory(id: string): Promise<void> {
+    if (typeof this.prisma.category?.findFirst === 'function') {
+      const existing = await this.prisma.category.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
+      });
+      if (!existing) {
+        throw new NotFoundException('Categoría no encontrada');
+      }
+    }
     const now = new Date();
     await this.prisma.$transaction([
       this.prisma.product.updateMany({
@@ -215,6 +233,11 @@ export class PrismaProductsRepository implements IProductsRepository {
     dto: CreateCategoryExtraDto,
   ): Promise<ExtraIngredientEntity> {
     this.validateExtraPrices(dto.prices);
+    const category = await this.prisma.category.findFirst({
+      where: { id: categoryId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!category) throw new NotFoundException('Categoría no encontrada');
     const duplicate = await this.prisma.categoryExtra.findFirst({
       where: {
         categoryId,
@@ -351,6 +374,7 @@ export class PrismaProductsRepository implements IProductsRepository {
   }
 
   async createProduct(dto: CreateProductDto): Promise<ProductEntity> {
+    await this.assertValidProductReferences(dto.categoryId, dto.comboGroups);
     const created = await this.prisma.product.create({
       data: {
         categoryId: dto.categoryId,
@@ -401,11 +425,16 @@ export class PrismaProductsRepository implements IProductsRepository {
     id: string,
     dto: UpdateProductDto,
   ): Promise<ProductEntity> {
+    await this.assertValidProductReferences(
+      dto.categoryId,
+      dto.comboGroups,
+      id,
+    );
     const updated = await this.prisma.$transaction(async (tx) => {
       if (dto.prices) {
         await tx.productPrice.deleteMany({ where: { productId: id } });
       }
-      if (dto.comboGroups) {
+      if (dto.comboGroups || dto.isCombo === false) {
         await tx.comboGroup.deleteMany({ where: { productId: id } });
       }
       if (dto.comboPrice !== undefined && !dto.prices) {
@@ -425,7 +454,7 @@ export class PrismaProductsRepository implements IProductsRepository {
           isActive: dto.isActive,
           hasMultipleSizes: dto.hasMultipleSizes,
           isCombo: dto.isCombo,
-          comboPrice: dto.comboPrice,
+          comboPrice: dto.isCombo === false ? null : dto.comboPrice,
           prices: dto.prices
             ? {
                 create: dto.prices.map((p) => ({
@@ -472,11 +501,63 @@ export class PrismaProductsRepository implements IProductsRepository {
   }
 
   async deleteProduct(id: string): Promise<void> {
+    if (typeof this.prisma.product?.findFirst === 'function') {
+      const existing = await this.prisma.product.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
+      });
+      if (!existing) {
+        throw new NotFoundException('Producto no encontrado');
+      }
+    }
     await this.prisma.product.update({
       where: { id },
       data: { deletedAt: new Date() },
     });
     this.invalidateCategoryRevenueCache();
+  }
+
+  private async assertValidProductReferences(
+    categoryId: string | undefined,
+    comboGroups: CreateProductDto['comboGroups'],
+    productIdToExclude?: string,
+  ): Promise<void> {
+    if (categoryId && typeof this.prisma.category?.findFirst === 'function') {
+      const category = await this.prisma.category.findFirst({
+        where: { id: categoryId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!category) {
+        throw new BadRequestException('La categoría especificada no existe.');
+      }
+    }
+
+    const optionProductIds = [
+      ...new Set(
+        (comboGroups ?? [])
+          .flatMap((group) => group.options.map((opt) => opt.itemProductId))
+          .filter(Boolean),
+      ),
+    ];
+    if (optionProductIds.length === 0) return;
+
+    if (productIdToExclude && optionProductIds.includes(productIdToExclude)) {
+      throw new BadRequestException(
+        'Un combo no puede incluirse a sí mismo como opción.',
+      );
+    }
+
+    if (typeof this.prisma.product?.findMany === 'function') {
+      const foundProducts = await this.prisma.product.findMany({
+        where: { id: { in: optionProductIds }, deletedAt: null },
+        select: { id: true },
+      });
+      if (foundProducts.length !== optionProductIds.length) {
+        throw new BadRequestException(
+          'Uno o más productos referenciados en las opciones del combo no existen.',
+        );
+      }
+    }
   }
 
   private mapExtra(extra: {

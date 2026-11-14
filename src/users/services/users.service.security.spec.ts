@@ -41,7 +41,10 @@ describe('UsersService security boundaries', () => {
     };
     const jwtService = {
       sign: jest.fn(() => 'signed-token'),
-      verify: jest.fn(() => ({
+      verify: jest.fn<
+        { sub: string; tokenVersion: number; type: string; exp?: number },
+        [string, unknown?]
+      >(() => ({
         sub: user.id,
         tokenVersion: user.tokenVersion,
         type: 'password_reset',
@@ -230,7 +233,7 @@ describe('UsersService security boundaries', () => {
       tokenVersion: user.tokenVersion,
       type: 'password_reset',
       exp: Math.floor((Date.now() + 600_000) / 1000),
-    } as any);
+    });
 
     await expect(
       service.refreshSessionToken('reset-token'),

@@ -3,6 +3,7 @@ import {
   IsArray,
   IsEnum,
   IsInt,
+  IsISO8601,
   IsNumber,
   IsOptional,
   IsString,
@@ -15,6 +16,10 @@ import { OrderStatusDto } from './order-status.dto';
 import { OrderPromotionSourceDto } from './order-promotion-source.dto';
 
 export class FinalizeOrderDto {
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  expectedUpdatedAt?: string;
+
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })

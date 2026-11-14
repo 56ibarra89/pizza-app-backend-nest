@@ -87,30 +87,105 @@ export class PrismaCustomersRepository implements ICustomersRepository {
     return found ? this.mapCustomer(found) : null;
   }
 
+  private normalizePhoneList(
+    phones: Array<{ phone: string; isDefault?: boolean }>,
+  ): Array<{ phone: string; isDefault: boolean }> {
+    const phoneMap = new Map<string, { phone: string; isDefault?: boolean }>();
+    for (const p of phones) {
+      const cleanPhone = p.phone.trim();
+      if (!cleanPhone) continue;
+      const prev = phoneMap.get(cleanPhone);
+      phoneMap.set(cleanPhone, {
+        phone: cleanPhone,
+        isDefault: Boolean(prev?.isDefault || p.isDefault),
+      });
+    }
+    const items = Array.from(phoneMap.values());
+    if (items.length === 0) return [];
+    const foundDefault = items.findIndex((p) => p.isDefault);
+    const defaultIndex = foundDefault >= 0 ? foundDefault : 0;
+    return items.map((item, idx) => ({
+      phone: item.phone,
+      isDefault: idx === defaultIndex,
+    }));
+  }
+
+  private normalizeAddressList(
+    addresses: Array<{ address: string; isDefault?: boolean }>,
+  ): Array<{ address: string; isDefault: boolean }> {
+    const addressMap = new Map<
+      string,
+      { address: string; isDefault?: boolean }
+    >();
+    for (const a of addresses) {
+      const cleanAddress = a.address.trim();
+      if (!cleanAddress) continue;
+      const key = cleanAddress.toLowerCase();
+      const prev = addressMap.get(key);
+      addressMap.set(key, {
+        address: prev?.address ?? cleanAddress,
+        isDefault: Boolean(prev?.isDefault || a.isDefault),
+      });
+    }
+    const items = Array.from(addressMap.values());
+    if (items.length === 0) return [];
+    const foundDefault = items.findIndex((a) => a.isDefault);
+    const defaultIndex = foundDefault >= 0 ? foundDefault : 0;
+    return items.map((item, idx) => ({
+      address: item.address,
+      isDefault: idx === defaultIndex,
+    }));
+  }
+
   async create(params: {
     name: string;
     phone?: string;
     address?: string;
+    phones?: Array<{ phone: string; isDefault?: boolean }>;
+    addresses?: Array<{ address: string; isDefault?: boolean }>;
   }): Promise<CustomerEntity> {
     const cleanName = params.name.trim();
-    const phone = params.phone?.trim() || undefined;
-    const address = params.address?.trim() || undefined;
+    const rawPhones = [
+      ...(params.phones ?? []),
+      ...(params.phone?.trim() ? [{ phone: params.phone.trim() }] : []),
+    ];
+    const normalizedPhones = this.normalizePhoneList(rawPhones);
+    const primaryPhone =
+      normalizedPhones.find((p) => p.isDefault)?.phone ??
+      normalizedPhones[0]?.phone ??
+      null;
+
+    const rawAddresses = [
+      ...(params.addresses ?? []),
+      ...(params.address?.trim() ? [{ address: params.address.trim() }] : []),
+    ];
+    const normalizedAddresses = this.normalizeAddressList(rawAddresses);
     const now = new Date();
 
     const created = await this.prisma.customer.create({
       data: {
         name: cleanName,
-        phone: phone || null,
-        phones: phone
-          ? {
-              create: [{ phone, isDefault: true, lastUsed: now }],
-            }
-          : undefined,
-        addresses: address
-          ? {
-              create: [{ address, isDefault: true, lastUsed: now }],
-            }
-          : undefined,
+        phone: primaryPhone,
+        phones:
+          normalizedPhones.length > 0
+            ? {
+                create: normalizedPhones.map((p) => ({
+                  phone: p.phone,
+                  isDefault: p.isDefault,
+                  lastUsed: now,
+                })),
+              }
+            : undefined,
+        addresses:
+          normalizedAddresses.length > 0
+            ? {
+                create: normalizedAddresses.map((a) => ({
+                  address: a.address,
+                  isDefault: a.isDefault,
+                  lastUsed: now,
+                })),
+              }
+            : undefined,
       },
       include: CUSTOMER_INCLUDE,
     });
@@ -164,20 +239,7 @@ export class PrismaCustomersRepository implements ICustomersRepository {
           where: { customerId: id },
         });
 
-        const phoneMap = new Map<
-          string,
-          { phone: string; isDefault?: boolean }
-        >();
-        for (const p of dto.phones) {
-          const cleanPhone = p.phone.trim();
-          if (!cleanPhone) continue;
-          const prev = phoneMap.get(cleanPhone);
-          phoneMap.set(cleanPhone, {
-            phone: cleanPhone,
-            isDefault: Boolean(prev?.isDefault || p.isDefault),
-          });
-        }
-        const incomingPhones = Array.from(phoneMap.values());
+        const incomingPhones = this.normalizePhoneList(dto.phones);
 
         // Teléfonos a eliminar (no presentes en el array entrante)
         const phonesToDelete = existingPhones.filter(
@@ -187,17 +249,11 @@ export class PrismaCustomersRepository implements ICustomersRepository {
           await tx.customerPhone.delete({ where: { id: dp.id } });
         }
 
-        // Determinar cuál es el default (el primero marcado con isDefault, o el primero de la lista si ninguno lo está)
-        const hasDefault = incomingPhones.some((p) => p.isDefault);
-        const defaultIndex = hasDefault
-          ? incomingPhones.findIndex((p) => p.isDefault)
-          : 0;
-
         let primaryPhoneValue: string | null = null;
 
         for (let i = 0; i < incomingPhones.length; i++) {
           const ip = incomingPhones[i];
-          const isDef = i === defaultIndex;
+          const isDef = ip.isDefault;
           if (isDef) primaryPhoneValue = ip.phone;
 
           const matched = existingPhones.find((ep) => ep.phone === ip.phone);
@@ -255,21 +311,7 @@ export class PrismaCustomersRepository implements ICustomersRepository {
           where: { customerId: id },
         });
 
-        const addressMap = new Map<
-          string,
-          { address: string; isDefault?: boolean }
-        >();
-        for (const a of dto.addresses) {
-          const cleanAddress = a.address.trim();
-          if (!cleanAddress) continue;
-          const key = cleanAddress.toLowerCase();
-          const prev = addressMap.get(key);
-          addressMap.set(key, {
-            address: prev?.address ?? cleanAddress,
-            isDefault: Boolean(prev?.isDefault || a.isDefault),
-          });
-        }
-        const incomingAddresses = Array.from(addressMap.values());
+        const incomingAddresses = this.normalizeAddressList(dto.addresses);
 
         // Direcciones a eliminar
         const addressesToDelete = existingAddresses.filter(
@@ -282,15 +324,9 @@ export class PrismaCustomersRepository implements ICustomersRepository {
           await tx.customerAddress.delete({ where: { id: da.id } });
         }
 
-        // Determinar dirección default
-        const hasDefault = incomingAddresses.some((a) => a.isDefault);
-        const defaultIndex = hasDefault
-          ? incomingAddresses.findIndex((a) => a.isDefault)
-          : 0;
-
         for (let i = 0; i < incomingAddresses.length; i++) {
           const ia = incomingAddresses[i];
-          const isDef = i === defaultIndex;
+          const isDef = ia.isDefault;
           const addrLower = ia.address.toLowerCase();
 
           const matched = existingAddresses.find(

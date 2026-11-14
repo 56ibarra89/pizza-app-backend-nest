@@ -20,7 +20,10 @@ import {
   toDbCuponManualStatus,
   toDbDiscountType,
 } from '../mappers/promotions.mapper';
-import { getBusinessDateParts } from '../../common/time/business-time.util';
+import {
+  getBusinessDateParts,
+  parseBusinessDateInput,
+} from '../../common/time/business-time.util';
 
 @Injectable()
 export class CouponPromotionsService {
@@ -52,7 +55,7 @@ export class CouponPromotionsService {
       discountValue: dto.discountValue,
       maxUses: dto.maxUses ?? 0,
       currentUses: 0,
-      expiresDate: dto.expiresDate ? new Date(dto.expiresDate) : null,
+      expiresDate: this.parseExpirationDate(dto.expiresDate),
       manualStatus: toDbCuponManualStatus(dto.manualStatus ?? 'Activo'),
     });
 
@@ -85,7 +88,7 @@ export class CouponPromotionsService {
         : {}),
       ...(dto.expiresDate !== undefined
         ? {
-            expiresDate: dto.expiresDate ? new Date(dto.expiresDate) : null,
+            expiresDate: this.parseExpirationDate(dto.expiresDate),
           }
         : {}),
       ...(dto.manualStatus !== undefined
@@ -140,6 +143,18 @@ export class CouponPromotionsService {
 
   private normalizeCode(code: string): string {
     return code.trim().toUpperCase();
+  }
+
+  private parseExpirationDate(expiresDate?: string | null): Date | null {
+    if (!expiresDate) {
+      return null;
+    }
+
+    const parsed = parseBusinessDateInput(expiresDate, 'end');
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException('Fecha de expiración inválida');
+    }
+    return parsed;
   }
 
   private mapResponse(coupon: Cupon, now = new Date()) {

@@ -53,6 +53,18 @@ export class OrderTableAssignmentsService {
 
       if (uniqueTableIds.length === 0) return affectedOrderIds;
 
+      if (typeof transaction.mesa?.findMany === 'function') {
+        const activeMesas = await transaction.mesa.findMany({
+          where: { id: { in: uniqueTableIds }, isActive: true },
+          select: { id: true },
+        });
+        if (activeMesas.length !== uniqueTableIds.length) {
+          throw new BadRequestException(
+            'Una o más mesas seleccionadas no existen o están deshabilitadas.',
+          );
+        }
+      }
+
       await transaction.orderTable.createMany({
         data: affectedOrderIds.flatMap((affectedOrderId) =>
           uniqueTableIds.map((tableId) => ({

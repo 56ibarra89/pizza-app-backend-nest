@@ -98,4 +98,29 @@ describe('PrismaProductsRepository (H22)', () => {
     );
     expect(invalidate).toHaveBeenCalledTimes(1);
   });
+
+  it('valida referencias de categoría/combo y existencia antes de mutar (B43)', async () => {
+    const repo = new PrismaProductsRepository({
+      category: { findFirst: jest.fn().mockResolvedValue(null) },
+      product: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    } as unknown as PrismaService);
+
+    await expect(
+      repo.createProduct({
+        categoryId: '00000000-0000-0000-0000-000000000099',
+        name: 'Pizza Test',
+        prices: [{ size: 'único', price: 100 }],
+      }),
+    ).rejects.toThrow('categoría');
+
+    await expect(repo.deleteCategory('cat-missing')).rejects.toThrow(
+      'Categoría no encontrada',
+    );
+    await expect(repo.deleteProduct('prod-missing')).rejects.toThrow(
+      'Producto no encontrado',
+    );
+  });
 });

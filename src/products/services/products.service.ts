@@ -94,7 +94,7 @@ export class ProductsService {
 
     const effectiveHasMultipleSizes =
       dto.hasMultipleSizes ?? current.hasMultipleSizes;
-    validateUpdateProduct(dto, effectiveHasMultipleSizes);
+    validateUpdateProduct(dto, effectiveHasMultipleSizes, current);
     return this.repo.updateProduct(id, dto);
   }
 }

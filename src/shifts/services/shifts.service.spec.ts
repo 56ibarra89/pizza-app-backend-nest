@@ -1,4 +1,3 @@
-import { ForbiddenException } from '@nestjs/common';
 import { ShiftStatus } from '@prisma/client';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { UserRoleDto } from '../../users/dto/user-role.dto';
@@ -8,8 +7,10 @@ import { ShiftsService } from './shifts.service';
 describe('ShiftsService', () => {
   const repo = {
     findActive: jest.fn(),
+    findActiveSummary: jest.fn(),
     findActiveForCashier: jest.fn(),
     findById: jest.fn(),
+    findSummaryById: jest.fn(),
     getClosePreview: jest.fn(),
     list: jest.fn(),
     open: jest.fn(),
@@ -70,24 +71,6 @@ describe('ShiftsService', () => {
       notes: undefined,
       startTime: openingTime,
     });
-  });
-
-  it('bloquea el cierre de sesión del cajero principal con caja abierta', async () => {
-    repo.findActiveForCashier.mockResolvedValue(activeShift);
-
-    await expect(service.assertCanTerminateSession(user)).rejects.toThrow(
-      new ForbiddenException(
-        'No puedes cerrar sesión porque tu caja está abierta. Debes cerrar la caja primero.',
-      ),
-    );
-  });
-
-  it('permite cerrar sesión cuando el cajero principal no tiene caja abierta', async () => {
-    repo.findActiveForCashier.mockResolvedValue(null);
-
-    await expect(
-      service.assertCanTerminateSession(user),
-    ).resolves.toBeUndefined();
   });
 
   it('aplica cero tolerancia en la validación previa', async () => {

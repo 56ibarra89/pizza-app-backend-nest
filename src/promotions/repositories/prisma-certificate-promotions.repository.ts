@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { CertificadoStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type {
   CertificateWithRelations,
@@ -58,6 +59,17 @@ export class PrismaCertificatePromotionsRepository implements ICertificatePromot
       data,
       include: this.includeRelations,
     });
+  }
+
+  async markDeliveredIfAvailable(
+    id: number,
+    at: Date,
+  ): Promise<CertificateWithRelations | null> {
+    const changed = await this.prisma.certificado.updateMany({
+      where: { id, deletedAt: null, status: CertificadoStatus.DISPONIBLE },
+      data: { status: CertificadoStatus.ENTREGADO, redeemedAt: at },
+    });
+    return changed.count === 1 ? this.findById(id) : null;
   }
 
   async delete(id: number): Promise<void> {

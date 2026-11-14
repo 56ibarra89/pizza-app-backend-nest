@@ -2,16 +2,22 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CreateKitchenDto } from './dto/create-kitchen.dto';
 import { UpdateKitchenDto } from './dto/update-kitchen.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import type { Prisma, WeekDay } from '@prisma/client';
 import { getBusinessDateParts } from '../common/time/business-time.util';
+import { SECURITY_SOCKETS_REVALIDATE_EVENT } from '../common';
 
 @Injectable()
 export class KitchensService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
+  ) {}
 
   async create(createKitchenDto: CreateKitchenDto) {
     return this.prisma.kitchen.create({
@@ -37,10 +43,14 @@ export class KitchensService {
 
   async update(id: string, updateKitchenDto: UpdateKitchenDto) {
     await this.findOne(id); // Check existence
-    return this.prisma.kitchen.update({
+    const updated = await this.prisma.kitchen.update({
       where: { id },
       data: updateKitchenDto,
     });
+    this.eventEmitter?.emit(SECURITY_SOCKETS_REVALIDATE_EVENT, {
+      kitchenId: id,
+    });
+    return updated;
   }
 
   async remove(id: string) {
@@ -131,10 +141,11 @@ export class KitchensService {
       return { success: true };
     };
 
-    if (typeof this.prisma.$transaction === 'function') {
-      return this.prisma.$transaction(runUpdate);
-    }
-
-    return runUpdate(this.prisma);
+    const result =
+      typeof this.prisma.$transaction === 'function'
+        ? await this.prisma.$transaction(runUpdate)
+        : await runUpdate(this.prisma);
+    this.eventEmitter?.emit(SECURITY_SOCKETS_REVALIDATE_EVENT, { userId });
+    return result;
   }
 }

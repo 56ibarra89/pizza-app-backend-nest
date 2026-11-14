@@ -1,3 +1,4 @@
+import { WeekDay } from '@prisma/client';
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
@@ -66,6 +67,6 @@ export class CreateUserDto {
 
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
-  workDays?: string[];
+  @IsEnum(WeekDay, { each: true })
+  workDays?: WeekDay[];
 }

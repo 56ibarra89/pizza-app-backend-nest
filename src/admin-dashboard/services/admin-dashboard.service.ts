@@ -180,14 +180,18 @@ export class AdminDashboardService {
 
     const todayOrders = await this.prisma.order.findMany({
       where: {
-        timestamp: { gte: startOfDay, lte: endOfDay },
-        // El rendimiento financiero solo considera ventas liquidadas. Un
-        // padre aún pendiente no debe sumarse junto con sus subcuentas ya
-        // pagadas.
+        OR: [
+          { paidAt: { gte: startOfDay, lte: endOfDay } },
+          {
+            paidAt: null,
+            timestamp: { gte: startOfDay, lte: endOfDay },
+          },
+        ],
+        // El rendimiento financiero solo considera ventas liquidadas. Los padres
+        // ya liquidados en 0 sin factura propia (división completada) se omiten
+        // en el bucle inferior para no duplicar ventas ni perder padres con saldo
+        // cobrado por separado.
         status: 'PAID',
-        NOT: {
-          splitOrders: { some: { status: 'PAID' } },
-        },
       },
       include: {
         linkedTables: {

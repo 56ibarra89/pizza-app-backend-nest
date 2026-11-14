@@ -159,6 +159,7 @@ model Mesa {
   id                String       @id @default(uuid())
   floor             Int
   estado            MesaEstado
+  isActive          Boolean      @default(true)
   reservationName   String?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
@@ -171,6 +172,7 @@ model Mesa {
   @@unique([floor, number])
   @@index([floor])
   @@index([estado])
+  @@index([isActive])
 }
 
 model Shift {

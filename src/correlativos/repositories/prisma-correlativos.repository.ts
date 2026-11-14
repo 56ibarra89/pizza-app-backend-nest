@@ -6,6 +6,7 @@ import {
 import { CorrelativoStatus, DocumentType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { isBusinessDateExpired } from '../../common/time/business-time.util';
+import { acquireCorrelativoLock } from '../../common/database/correlativo-lock.util';
 import type { ICorrelativosRepository } from '../interfaces/correlativos.repository';
 import type { CorrelativoEntity } from '../entities/correlativo.entity';
 
@@ -25,7 +26,7 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
   ): Promise<CorrelativoEntity | null> {
     const row = await this.prisma.correlativo.findFirst({
       where: { documentType, status: CorrelativoStatus.ACTIVO },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
     return row ? this.map(row) : null;
   }
@@ -50,6 +51,7 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
   }): Promise<CorrelativoEntity> {
     const executeCreate = async (tx: typeof this.prisma) => {
       if (params.status === CorrelativoStatus.ACTIVO) {
+        await acquireCorrelativoLock(tx, params.documentType);
         await tx.correlativo.updateMany({
           where: {
             documentType: params.documentType,
@@ -113,6 +115,7 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
           docType = found?.documentType;
         }
         if (docType) {
+          await acquireCorrelativoLock(tx, docType);
           await tx.correlativo.updateMany({
             where: {
               documentType: docType,
@@ -147,6 +150,7 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
     status: CorrelativoStatus;
   }> {
     const txResult = await this.prisma.$transaction(async (tx) => {
+      await acquireCorrelativoLock(tx, documentType);
       let active: Awaited<ReturnType<typeof tx.correlativo.findFirst>> = null;
       if (typeof tx.$queryRaw === 'function') {
         const lockedRows = await tx.$queryRaw<Array<{ id: string }>>`
@@ -154,7 +158,7 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
           FROM "Correlativo"
           WHERE "documentType" = ${documentType}::"DocumentType"
             AND "status" = 'ACTIVO'::"CorrelativoStatus"
-          ORDER BY "createdAt" DESC
+          ORDER BY "createdAt" DESC, id DESC
           LIMIT 1
           FOR UPDATE
         `;
@@ -170,7 +174,7 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
       } else {
         active = await tx.correlativo.findFirst({
           where: { documentType, status: CorrelativoStatus.ACTIVO },
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         });
       }
 

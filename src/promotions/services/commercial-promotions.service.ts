@@ -118,17 +118,19 @@ export class CommercialPromotionsService {
       ...(dto.status !== undefined
         ? { status: toDbPromoActiveStatus(dto.status) }
         : {}),
-      ...(dto.promotionValue !== undefined
+      ...(nextPromotionType === '2x1'
         ? {
-            promotionValue:
-              nextPromotionType === '2x1' ? null : dto.promotionValue,
+            promotionValue: null,
+            ...(dto.appliesTo !== undefined
+              ? { appliesTo: dto.appliesTo }
+              : {}),
           }
-        : {}),
-      ...(dto.appliesTo !== undefined
-        ? {
-            appliesTo: nextPromotionType === '2x1' ? dto.appliesTo : null,
-          }
-        : {}),
+        : {
+            appliesTo: null,
+            ...(dto.promotionValue !== undefined
+              ? { promotionValue: dto.promotionValue }
+              : {}),
+          }),
       ...(dto.productIds !== undefined ? { productIds: dto.productIds } : {}),
       ...(dto.categoryIds !== undefined
         ? { categoryIds: dto.categoryIds }

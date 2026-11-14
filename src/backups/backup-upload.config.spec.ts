@@ -23,6 +23,10 @@ describe('backup upload security configuration', () => {
     ['BACKUP.SQL', true],
     ['backup.sql.exe', false],
     ['backup.zip', false],
+    ['../backup.sql', false],
+    ['..\\backup.sql', false],
+    ['subdir/backup.sql', false],
+    ['.sql', false],
     ['', false],
   ])('validates the SQL extension for %s', (filename, expected) => {
     expect(isSqlBackupFilename(filename)).toBe(expected);

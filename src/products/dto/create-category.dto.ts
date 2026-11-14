@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, ValidateIf } from 'class-validator';
 
 export class CreateCategoryDto {
   @IsString()
@@ -9,7 +9,8 @@ export class CreateCategoryDto {
   @IsString()
   icon?: string;
 
+  @ValidateIf((_, value) => value !== null)
   @IsOptional()
   @IsString()
-  kitchenId?: string;
+  kitchenId?: string | null;
 }

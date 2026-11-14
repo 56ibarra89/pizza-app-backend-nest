@@ -1,58 +1,42 @@
-import type { PrismaService } from '../../prisma/prisma.service';
 import { HiddenKitchenTicketsService } from './hidden-kitchen-tickets.service';
+import type { PrismaService } from '../../prisma/prisma.service';
 
-describe('HiddenKitchenTicketsService', () => {
-  const hiddenKitchenTicket = {
-    findMany: jest.fn(),
-    createMany: jest.fn(),
-  };
-  const order = { findMany: jest.fn() };
-  const prisma = { hiddenKitchenTicket, order };
-  const service = new HiddenKitchenTicketsService(
-    prisma as unknown as PrismaService,
-  );
+describe('HiddenKitchenTicketsService (F49)', () => {
+  it('separa tickets ocultos de cocina de las órdenes ocultas del tablero', async () => {
+    const findMany = jest
+      .fn()
+      .mockResolvedValueOnce([{ ticketId: 'ord-1-1700000000000' }])
+      .mockResolvedValueOnce([{ ticketId: 'order:ord-2' }]);
+    const orderFindMany = jest.fn().mockResolvedValue([{ id: 'ord-2' }]);
+    const createMany = jest.fn().mockResolvedValue({ count: 1 });
 
-  beforeEach(() => {
-    jest.clearAllMocks();
-    hiddenKitchenTicket.createMany.mockResolvedValue({ count: 1 });
-  });
+    const service = new HiddenKitchenTicketsService({
+      hiddenKitchenTicket: { findMany, createMany },
+      order: { findMany: orderFindMany },
+    } as unknown as PrismaService);
 
-  it('links a hidden virtual ticket to its existing order and sent time', async () => {
-    const sentAtMs = new Date('2026-10-27T14:30:00.000Z').getTime();
-    order.findMany.mockResolvedValue([{ id: 'order-1' }]);
+    const tickets = await service.listTicketIds();
+    const orders = await service.listHiddenOrderIds();
 
-    await service.hide([`order-1-${sentAtMs}`], 'cocinero1');
-
-    expect(order.findMany).toHaveBeenCalledWith({
-      where: { id: { in: ['order-1'] } },
-      select: { id: true },
+    expect(tickets).toEqual(['ord-1-1700000000000']);
+    expect(orders).toEqual(['ord-2']);
+    expect(findMany).toHaveBeenNthCalledWith(1, {
+      where: { NOT: { ticketId: { startsWith: 'order:' } } },
+      select: { ticketId: true },
     });
-    expect(hiddenKitchenTicket.createMany).toHaveBeenCalledWith({
+    expect(findMany).toHaveBeenNthCalledWith(2, {
+      where: { ticketId: { startsWith: 'order:' } },
+      select: { ticketId: true },
+    });
+
+    await service.hideOrderIds(['ord-2', 'ord-inexistente'], 'caja1');
+    expect(createMany).toHaveBeenCalledWith({
       data: [
         {
-          ticketId: `order-1-${sentAtMs}`,
-          orderId: 'order-1',
-          sentAt: new Date(sentAtMs),
-          hiddenBy: 'cocinero1',
-        },
-      ],
-      skipDuplicates: true,
-    });
-  });
-
-  it('keeps malformed or orphan legacy ticket IDs without a foreign key', async () => {
-    order.findMany.mockResolvedValue([]);
-
-    await service.hide(['legacy-ticket'], 'admin');
-
-    expect(order.findMany).not.toHaveBeenCalled();
-    expect(hiddenKitchenTicket.createMany).toHaveBeenCalledWith({
-      data: [
-        {
-          ticketId: 'legacy-ticket',
-          orderId: null,
+          ticketId: 'order:ord-2',
+          hiddenBy: 'caja1',
+          orderId: 'ord-2',
           sentAt: null,
-          hiddenBy: 'admin',
         },
       ],
       skipDuplicates: true,

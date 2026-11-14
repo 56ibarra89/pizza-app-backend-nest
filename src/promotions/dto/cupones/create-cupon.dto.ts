@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Min,
   ValidateBy,
 } from 'class-validator';
 import type {
@@ -37,6 +38,7 @@ export class CreateCuponDto {
   discountValue!: number;
 
   @IsInt()
+  @Min(0)
   @IsOptional()
   maxUses?: number;
 

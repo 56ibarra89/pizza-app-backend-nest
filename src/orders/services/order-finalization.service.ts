@@ -7,9 +7,15 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { FinalizeOrderDto } from '../dto/finalize-order.dto';
 import type { OrderEntity } from '../entities/order.entity';
+import type { CartItemEntity } from '../entities/order-item.entity';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { UserRoleDto } from '../../common';
 import { assertPaymentsMatchTotal } from '../validators/order-payments.validator';
+import {
+  getSplitFamilyState,
+  isSameStoredPromotion,
+  isSplitDiscountAdjustmentCandidate,
+} from '../validators/order-promotion.validator';
 import { InvoiceIssuingService } from './invoice-issuing.service';
 import { OrderPricingService } from './order-pricing.service';
 import type { OrderTotals } from '../types/order-totals';
@@ -29,6 +35,7 @@ export class OrderFinalizationService {
     order: OrderEntity,
     dto: FinalizeOrderDto,
     user?: AuthenticatedUser | string,
+    externalTx?: Prisma.TransactionClient,
   ): Promise<void> {
     if (order.status === OrderStatusDto.cancelled) {
       throw new BadRequestException(
@@ -48,48 +55,88 @@ export class OrderFinalizationService {
       },
       order.timestamp,
     );
-    const unadjusted = await this.pricing.calculateWithPrices(
-      order.items,
-      promotion,
-      undefined,
-      { useSnapshotPrices: true },
-    );
-    const calculatedTotals = unadjusted.totals;
-    const hasSplitAdjustedDiscount =
+    const splitFamily = await getSplitFamilyState(this.prisma, {
+      orderId: order.id,
+      items: order.items,
+      cuponId: promotion.source === 'coupon' ? promotion.cuponId : null,
+    });
+    const sameStoredPromotion = isSameStoredPromotion(order, promotion);
+    const preserveSplitDiscountForConsumedCoupon =
+      splitFamily.hasSplitHistory &&
+      splitFamily.couponAlreadyConsumedBySplit &&
+      sameStoredPromotion &&
       typeof order.discountAmount === 'number' &&
-      order.discountAmount >= 0 &&
-      ((promotion.source === 'none' && order.discountAmount > 0) ||
-        (promotion.source !== 'none' &&
-          order.discountAmount + 0.01 < calculatedTotals.discountAmount));
-    const { items: pricedItems, totals } = hasSplitAdjustedDiscount
-      ? await this.pricing.calculateWithPrices(
-          order.items,
-          promotion,
-          order.discountAmount,
-          { useSnapshotPrices: true },
-        )
-      : unadjusted;
+      order.discountAmount >= 0;
+
+    let pricedItems: CartItemEntity[];
+    let totals: OrderTotals;
+    if (preserveSplitDiscountForConsumedCoupon) {
+      // Un cobro dividido previo ya consumió el cupón en BD; conservar el
+      // remanente del padre evita recalcular y fallar si maxUses quedó en 0.
+      const preserved = await this.pricing.calculateWithPrices(
+        order.items,
+        promotion,
+        order.discountAmount ?? 0,
+        { useSnapshotPrices: true },
+      );
+      pricedItems = preserved.items;
+      totals = preserved.totals;
+    } else {
+      const unadjusted = await this.pricing.calculateWithPrices(
+        order.items,
+        promotion,
+        undefined,
+        { useSnapshotPrices: true },
+      );
+      const hasSplitAdjustedDiscount = isSplitDiscountAdjustmentCandidate({
+        hasSplitHistory: splitFamily.hasSplitHistory,
+        sameStoredPromotion,
+        storedDiscountAmount: order.discountAmount,
+        promotion,
+        calculatedDiscountAmount: unadjusted.totals.discountAmount,
+      });
+      const recalculated = hasSplitAdjustedDiscount
+        ? await this.pricing.calculateWithPrices(
+            order.items,
+            promotion,
+            order.discountAmount,
+            { useSnapshotPrices: true },
+          )
+        : unadjusted;
+      pricedItems = recalculated.items;
+      totals = recalculated.totals;
+    }
+
     const payments = dto.payments ?? order.payments;
     assertPaymentsMatchTotal(totals.total, payments);
 
+    const issueInvoice = (tx: Prisma.TransactionClient) =>
+      this.invoiceIssuing.issue(tx, {
+        orderId: order.id,
+        dto,
+        totals,
+        items: pricedItems,
+        expectedUpdatedAt: dto.expectedUpdatedAt
+          ? new Date(dto.expectedUpdatedAt)
+          : order.updatedAt,
+        promotion,
+        skipCouponConsumption: splitFamily.couponAlreadyConsumedBySplit,
+        cashierId: typeof user === 'string' ? undefined : user?.id,
+        cashierSnapshotName:
+          typeof user === 'string'
+            ? user === 'system'
+              ? undefined
+              : user
+            : user?.username,
+      });
+
+    if (externalTx) {
+      await issueInvoice(externalTx);
+      return;
+    }
+
     try {
-      await this.prisma.$transaction((tx) =>
-        this.invoiceIssuing.issue(tx, {
-          orderId: order.id,
-          dto,
-          totals,
-          items: pricedItems,
-          expectedUpdatedAt: order.updatedAt,
-          promotion,
-          cashierId: typeof user === 'string' ? undefined : user?.id,
-          cashierSnapshotName:
-            typeof user === 'string'
-              ? user === 'system'
-                ? undefined
-                : user
-              : user?.username,
-        }),
-      );
+      await this.prisma.$transaction((tx) => issueInvoice(tx));
     } catch (error) {
       await this.persistTerminalCorrelativoStatusIfNeeded(error);
       throw error;
@@ -104,6 +151,8 @@ export class OrderFinalizationService {
       totals: OrderTotals;
       promotion: ResolvedOrderPromotion;
       skipCouponConsumption?: boolean;
+      cashierId?: string;
+      cashierSnapshotName?: string;
     },
   ): Promise<void> {
     await this.invoiceIssuing.issue(tx, params);

@@ -30,6 +30,7 @@ import {
   getBusinessMonthEnd,
   isBusinessDateExpired,
 } from '../../common/time/business-time.util';
+import { acquireCorrelativoLock } from '../../common/database/correlativo-lock.util';
 
 interface IssueInvoiceParams {
   orderId: string;
@@ -165,11 +166,38 @@ export class InvoiceIssuingService {
 
     const status = toDbOrderStatus(OrderStatusDto.paid);
     await this.synchronizeBilledItemPrices(tx, items);
+    let shouldSkipCouponConsumption = Boolean(skipCouponConsumption);
+    if (
+      !shouldSkipCouponConsumption &&
+      cuponId !== null &&
+      typeof tx.order?.count === 'function'
+    ) {
+      // Garantiza que en divisiones de cuenta el cupón se descuente una sola vez
+      // aunque el caller directo no haya pasado skipCouponConsumption.
+      const priorConsumptions = Number(
+        (await tx.order.count({
+          where: {
+            id: { not: orderId },
+            status: 'PAID',
+            cuponId,
+            couponConsumptionRecorded: true,
+            OR: order.parentOrderId
+              ? [
+                  { id: order.parentOrderId },
+                  { parentOrderId: order.parentOrderId },
+                ]
+              : [{ parentOrderId: orderId }],
+          },
+        })) ?? 0,
+      );
+      shouldSkipCouponConsumption = priorConsumptions > 0;
+    }
+
     if (order.invoiceNumber) {
       const now = new Date();
       const shiftId = await this.requireActiveShiftId(tx);
 
-      if (cuponId !== null && !skipCouponConsumption) {
+      if (cuponId !== null && !shouldSkipCouponConsumption) {
         await this.consumeCoupon(tx, cuponId, now);
       }
       await this.consumeCertificates(
@@ -203,12 +231,9 @@ export class InvoiceIssuingService {
                     exchangeRate: payment.exchangeRate,
                     commissionRate: payment.commissionRate,
                     commissionAmount: payment.commissionAmount,
-                    cashierId:
-                      payment.cashierId ?? cashierId ?? order.cashierId,
+                    cashierId: cashierId ?? order.cashierId,
                     cashierSnapshotName:
-                      payment.cashierSnapshotName ??
-                      cashierSnapshotName ??
-                      order.cashierSnapshotName,
+                      cashierSnapshotName ?? order.cashierSnapshotName,
                   })),
                 },
               }
@@ -226,14 +251,15 @@ export class InvoiceIssuingService {
           cuponId,
           discountId,
           happyHourId,
-          couponConsumptionRecorded: cuponId !== null && !skipCouponConsumption,
+          couponConsumptionRecorded:
+            cuponId !== null && !shouldSkipCouponConsumption,
         },
       });
       return;
     }
 
     const now = new Date();
-    if (cuponId !== null && !skipCouponConsumption) {
+    if (cuponId !== null && !shouldSkipCouponConsumption) {
       await this.consumeCoupon(tx, cuponId, now);
     }
     await this.consumeCertificates(
@@ -246,42 +272,18 @@ export class InvoiceIssuingService {
 
     const shiftId = await this.requireActiveShiftId(tx);
 
+    await acquireCorrelativoLock(tx, DocumentType.FACTURA);
     const lockedRows = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT id FROM "Correlativo"
       WHERE "documentType" = 'FACTURA' AND "status" = 'ACTIVO'
+      ORDER BY "createdAt" DESC, id DESC
       LIMIT 1
       FOR UPDATE
     `;
 
     let correlativoId = lockedRows[0]?.id;
     if (!correlativoId) {
-      const prefix = this.buildMonthlyPrefix(now);
-      const dgiConfigRecord = await tx.appConfig.findUnique({
-        where: { id: 'dgi_resolution' },
-      });
-      const dgiConfig = readDgiConfig(dgiConfigRecord?.data ?? null);
-      const expirationDate = getBusinessMonthEnd(now);
-
-      const startNumber = Math.max(1, Number(dgiConfig.startNumber ?? 1));
-      const endNumber = Math.max(
-        startNumber,
-        Number(dgiConfig.endNumber ?? 99999),
-      );
-
-      const created = await tx.correlativo.create({
-        data: {
-          documentType: DocumentType.FACTURA,
-          resolutionNumber:
-            dgiConfig.resolutionNumber ?? `AUTO-${prefix.slice(0, -1)}`,
-          prefix,
-          startNumber,
-          endNumber,
-          currentNumber: startNumber,
-          issueDate: now,
-          expirationDate,
-          status: CorrelativoStatus.ACTIVO,
-        },
-      });
+      const created = await this.createDefaultCorrelativo(tx, now);
       correlativoId = created.id;
     }
 
@@ -366,11 +368,9 @@ export class InvoiceIssuingService {
                   exchangeRate: payment.exchangeRate,
                   commissionRate: payment.commissionRate,
                   commissionAmount: payment.commissionAmount,
-                  cashierId: payment.cashierId ?? cashierId ?? order.cashierId,
+                  cashierId: cashierId ?? order.cashierId,
                   cashierSnapshotName:
-                    payment.cashierSnapshotName ??
-                    cashierSnapshotName ??
-                    order.cashierSnapshotName,
+                    cashierSnapshotName ?? order.cashierSnapshotName,
                 })),
               },
             }
@@ -388,7 +388,8 @@ export class InvoiceIssuingService {
         cuponId,
         discountId,
         happyHourId,
-        couponConsumptionRecorded: cuponId !== null && !skipCouponConsumption,
+        couponConsumptionRecorded:
+          cuponId !== null && !shouldSkipCouponConsumption,
         shiftId,
         paidAt: now,
         pendingCertificateSerials: Prisma.DbNull,

@@ -71,6 +71,42 @@ describe('NotificationsService', () => {
     expect(notification.create).toHaveBeenCalledTimes(6);
   });
 
+  it('dirige la notificación de MESERO al mesero asignado o relevado vigente', async () => {
+    user.findUnique.mockResolvedValue({
+      username: 'bea',
+      role: UserRole.MESERO,
+      isActive: true,
+    });
+
+    await service.handleOrderReadyEvent({
+      orderId: 'ORD-MESA-1',
+      isFullOrder: true,
+      orderType: 'local',
+      tableName: 'F1-M1',
+      targetUsername: 'cajero1',
+      waiterId: 'waiter-bea',
+    });
+
+    expect(user.findUnique).toHaveBeenCalledWith({
+      where: { id: 'waiter-bea' },
+      select: { username: true, role: true, isActive: true },
+    });
+    expect(notification.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        role: UserRole.CAJERO,
+        targetUsername: 'cajero1',
+        orderId: 'ORD-MESA-1',
+      }),
+    });
+    expect(notification.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        role: UserRole.MESERO,
+        targetUsername: 'bea',
+        orderId: 'ORD-MESA-1',
+      }),
+    });
+  });
+
   it('consulta las notificaciones del motorizado por usuario exacto', async () => {
     notification.findMany.mockResolvedValue([]);
 
@@ -201,5 +237,35 @@ describe('NotificationsService', () => {
       role: UserRole.CAJERO,
       username: 'caja1',
     });
+
+    const cachedResult = await service.validateStreamSubscriber({
+      id: 'user-1',
+      username: 'caja1',
+      role: 'cajero' as never,
+      tokenVersion: 2,
+      tokenExpiresAtMs: Date.now() + 60_000,
+    });
+    expect(cachedResult).toEqual({
+      role: UserRole.CAJERO,
+      username: 'caja1',
+    });
+    expect(user.findUnique).toHaveBeenCalledTimes(2);
+
+    service.handleSecuritySocketsRevalidate({ userId: 'user-1' });
+    user.findUnique.mockResolvedValueOnce({
+      isActive: false,
+      tokenVersion: 2,
+      role: UserRole.CAJERO,
+      username: 'caja1',
+    });
+    const invalidatedResult = await service.validateStreamSubscriber({
+      id: 'user-1',
+      username: 'caja1',
+      role: 'cajero' as never,
+      tokenVersion: 2,
+      tokenExpiresAtMs: Date.now() + 60_000,
+    });
+    expect(invalidatedResult).toBeNull();
+    expect(user.findUnique).toHaveBeenCalledTimes(3);
   });
 });

@@ -16,6 +16,7 @@ import type { ListShiftsQueryDto } from '../dto/list-shifts-query.dto';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { UserRoleDto } from '../../common';
+import { parseBusinessDateInput } from '../../common/time/business-time.util';
 
 const DEFAULT_DISCREPANCY_THRESHOLD = 0;
 
@@ -30,16 +31,28 @@ export class ShiftsService {
     return this.repo.findActive();
   }
 
+  async getActiveSummary() {
+    return this.repo.findActiveSummary();
+  }
+
   async getById(id: string) {
     const found = await this.repo.findById(id);
     if (!found) throw new NotFoundException('Turno no encontrado');
     return found;
   }
 
+  async getSummaryById(id: string) {
+    const found = await this.repo.findSummaryById(id);
+    if (!found) throw new NotFoundException('Turno no encontrado');
+    return found;
+  }
+
   list(query: ListShiftsQueryDto) {
     const limit = query.limit ?? 200;
-    const from = query.from ? new Date(query.from) : undefined;
-    const to = query.to ? new Date(query.to) : undefined;
+    const from = query.from
+      ? parseBusinessDateInput(query.from, 'start')
+      : undefined;
+    const to = query.to ? parseBusinessDateInput(query.to, 'end') : undefined;
     return this.repo.list({ limit, status: query.status, from, to });
   }
 
@@ -148,20 +161,6 @@ export class ShiftsService {
       canClose: preview.canClose,
       requiresAuthorization,
     };
-  }
-
-  async assertCanTerminateSession(user: AuthenticatedUser): Promise<void> {
-    if (user.role !== UserRoleDto.cajero_principal) return;
-
-    const activeShift = await this.repo.findActiveForCashier({
-      cashierId: user.id,
-      cashierSnapshotName: user.username,
-    });
-    if (activeShift) {
-      throw new ForbiddenException(
-        'No puedes cerrar sesión porque tu caja está abierta. Debes cerrar la caja primero.',
-      );
-    }
   }
 
   private assertCanCloseShift(

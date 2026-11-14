@@ -4,9 +4,12 @@ import {
   IsArray,
   IsBoolean,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
+  Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { ProductPriceDto } from './product-price.dto';
@@ -38,8 +41,14 @@ export class CreateProductDto {
 
   @IsOptional()
   @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   comboPrice?: number;
 
+  @ValidateIf(
+    (dto: CreateProductDto) =>
+      !dto.isCombo || dto.comboPrice === undefined || dto.prices !== undefined,
+  )
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

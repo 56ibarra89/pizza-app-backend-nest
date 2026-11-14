@@ -8,3 +8,7 @@ export { Public, IS_PUBLIC_KEY } from './decorators/public.decorator';
 export { RolesGuard } from './guards/roles.guard';
 export { UserRoleDto } from './enums/user-role.enum';
 export type { AuthenticatedUser } from './interfaces/authenticated-user.interface';
+export {
+  SECURITY_SOCKETS_REVALIDATE_EVENT,
+  type SecuritySocketsRevalidateEvent,
+} from './events/security-events';
