@@ -110,6 +110,23 @@ export class OrderFinalizationService {
     const payments = dto.payments ?? order.payments;
     assertPaymentsMatchTotal(totals.total, payments);
 
+    const isDriverActor =
+      typeof user !== 'string' && user?.role === UserRoleDto.motorizado;
+    const resolvedCashierId =
+      typeof user === 'string'
+        ? undefined
+        : isDriverActor
+          ? order.cashierId
+          : user?.id;
+    const resolvedCashierSnapshotName =
+      typeof user === 'string'
+        ? user === 'system'
+          ? undefined
+          : user
+        : isDriverActor
+          ? order.cashierSnapshotName
+          : user?.username;
+
     const issueInvoice = (tx: Prisma.TransactionClient) =>
       this.invoiceIssuing.issue(tx, {
         orderId: order.id,
@@ -121,13 +138,8 @@ export class OrderFinalizationService {
           : order.updatedAt,
         promotion,
         skipCouponConsumption: splitFamily.couponAlreadyConsumedBySplit,
-        cashierId: typeof user === 'string' ? undefined : user?.id,
-        cashierSnapshotName:
-          typeof user === 'string'
-            ? user === 'system'
-              ? undefined
-              : user
-            : user?.username,
+        cashierId: resolvedCashierId,
+        cashierSnapshotName: resolvedCashierSnapshotName,
       });
 
     if (externalTx) {

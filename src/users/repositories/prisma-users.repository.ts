@@ -9,6 +9,7 @@ import type { IUsersRepository } from '../interfaces/users.repository';
 import type { UserEntity } from '../entities/user.entity';
 import type { UserRoleDto } from '../dto/user-role.dto';
 import { fromDbRole, toDbRole } from '../mappers/user-role.mapper';
+import { DEFAULT_ROLE_PERMISSIONS } from '../../access-control/permission-catalog';
 import { PinHasherService } from '../../common/security/pin-hasher.service';
 import { PinAttemptService } from '../../common/security/pin-attempt.service';
 import type { WeekDay } from '@prisma/client';
@@ -128,17 +129,37 @@ export class PrismaUsersRepository implements IUsersRepository {
     }
 
     const mapped = found && hashMatches ? this.mapUser(found) : null;
+    const isLockedOut = Boolean(
+      mapped?.lockedUntil && mapped.lockedUntil.getTime() > Date.now(),
+    );
+    const accessRoleActive = found?.accessRole
+      ? found.accessRole.isActive !== false
+      : true;
     const roleAllowed =
       !options.allowedRoles?.length ||
       (mapped ? options.allowedRoles.includes(mapped.role) : false);
     const permissionCodes = new Set(
-      found?.accessRole?.permissions.map((entry) => entry.permission.code) ??
-        [],
+      found?.accessRole
+        ? accessRoleActive
+          ? (found.accessRole.permissions?.map(
+              (entry) => entry.permission.code,
+            ) ?? [])
+          : []
+        : mapped
+          ? (DEFAULT_ROLE_PERMISSIONS[mapped.role] ?? [])
+          : [],
     );
     const permissionsAllowed =
       !options.requiredPermissions?.length ||
       options.requiredPermissions.every((code) => permissionCodes.has(code));
-    if (!mapped || !mapped.isActive || !roleAllowed || !permissionsAllowed) {
+    if (
+      !mapped ||
+      !mapped.isActive ||
+      isLockedOut ||
+      !accessRoleActive ||
+      !roleAllowed ||
+      !permissionsAllowed
+    ) {
       const lockout = await this.pinAttempts.registerPinFailure(scopes);
       if (options.exposeLockout) {
         throw new HttpException(
@@ -297,16 +318,26 @@ export class PrismaUsersRepository implements IUsersRepository {
           : current?.accessRole;
         const wasAdmin =
           current?.isActive &&
-          (current.role === 'ADMIN' || current.accessRole?.code === 'admin');
+          (current.accessRole?.code === 'admin' ||
+            (!current.accessRoleId && current.role === 'ADMIN'));
         const remainsAdmin =
           data.isActive !== false &&
           (data.role
             ? toDbRole(data.role) === 'ADMIN'
             : current?.role === 'ADMIN') &&
-          (!data.accessRoleId || nextAccessRole?.baseRole === 'ADMIN');
+          (!nextAccessRole ||
+            (nextAccessRole.code === 'admin' &&
+              nextAccessRole.isActive !== false));
         if (wasAdmin && !remainsAdmin) {
           const count = await tx.user.count({
-            where: { isActive: true, role: 'ADMIN' },
+            where: {
+              isActive: true,
+              role: 'ADMIN',
+              OR: [
+                { accessRoleId: null },
+                { accessRole: { code: 'admin', isActive: true } },
+              ],
+            },
           });
           if (count <= 1)
             throw new ConflictException(

@@ -86,8 +86,12 @@ export class AdminDashboardService {
           continue;
         }
 
+        const rawCashierRole = (order.cashier?.role || '').toUpperCase();
+        const isDriverCashier = rawCashierRole === 'MOTORIZADO';
         let orderKey: string;
-        if (order.cashierId) {
+        if (isDriverCashier) {
+          orderKey = principalKey;
+        } else if (order.cashierId) {
           orderKey = `user-${order.cashierId}`;
         } else if (order.cashierSnapshotName) {
           orderKey = `snap-${order.cashierSnapshotName.toLowerCase()}`;

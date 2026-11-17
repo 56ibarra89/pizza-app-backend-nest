@@ -734,11 +734,21 @@ export class UsersService {
   }
 
   async addExtraDay(userId: string, date: string, notes?: string) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new BadRequestException(
+        'La fecha debe usar el formato YYYY-MM-DD.',
+      );
+    }
+    const parsedDate = new Date(`${date}T00:00:00.000Z`);
+    if (
+      Number.isNaN(parsedDate.getTime()) ||
+      parsedDate.toISOString().slice(0, 10) !== date
+    ) {
+      throw new BadRequestException('La fecha indicada no existe.');
+    }
+
     const user = await this.repo.findById(userId);
     if (!user) throw new NotFoundException('User not found');
-
-    // date from frontend should be YYYY-MM-DD
-    const parsedDate = new Date(`${date}T00:00:00.000Z`);
 
     await this.prisma.userExtraDay.upsert({
       where: {
@@ -815,17 +825,20 @@ export class UsersService {
       );
     }
 
-    // Only count DELIVERED orders, or all orders assigned to driver?
-    // Usually they want to see how many were completed today, so DELIVERED.
+    const includeActive = endOfDay.getTime() >= Date.now() - 60_000;
     const stats = await this.prisma.order.groupBy({
       by: ['driverId'],
       where: {
         driverId: { not: null },
+        orderType: 'DELIVERY',
         status: { not: 'CANCELLED' },
-        createdAt: {
-          gte: startOfDay,
-          lte: endOfDay,
-        },
+        OR: [
+          { createdAt: { gte: startOfDay, lte: endOfDay } },
+          { paidAt: { gte: startOfDay, lte: endOfDay } },
+          ...(includeActive
+            ? [{ status: { notIn: ['PAID' as const, 'CANCELLED' as const] } }]
+            : []),
+        ],
       },
       _count: {
         id: true,
@@ -834,7 +847,8 @@ export class UsersService {
 
     return stats.map((s) => ({
       userId: s.driverId,
-      todayDeliveries: s._count.id,
+      todayDeliveries:
+        typeof s._count === 'object' && s._count ? (s._count.id ?? 0) : 0,
     }));
   }
 

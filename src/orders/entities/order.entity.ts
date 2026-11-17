@@ -53,6 +53,7 @@ export interface OrderEntity {
   happyHourId?: number;
   certificateSerials?: string[];
 
+  cashierId?: string;
   cashierSnapshotName?: string;
   customerTendered?: number;
   deliveryChange?: number;

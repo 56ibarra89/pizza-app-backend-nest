@@ -103,9 +103,17 @@ describe('OrdersService split checkout safeguards', () => {
           price: 10,
           size: 'único',
           quantity: 1,
+          giftQuantity: 0,
           extras: [],
         },
-        { name: 'Delivery', price: 10, size: 'único', quantity: 1, extras: [] },
+        {
+          name: 'Delivery',
+          price: 10,
+          size: 'único',
+          quantity: 1,
+          giftQuantity: 0,
+          extras: [],
+        },
       ],
     };
     const restore = await (

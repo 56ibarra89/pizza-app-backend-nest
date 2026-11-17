@@ -44,5 +44,6 @@ export interface ICertificatePromotionsRepository {
     id: number,
     at: Date,
   ): Promise<CertificateWithRelations | null>;
+  cancelIfAvailable?(id: number): Promise<CertificateWithRelations | null>;
   delete(id: number): Promise<void>;
 }

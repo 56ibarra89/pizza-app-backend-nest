@@ -152,20 +152,25 @@ export interface IOrdersRepository {
       deliverySlaAlertedAt?: Date | null;
       certificateSerials?: string[] | null;
       allowFinalSplitSettlement?: boolean;
+      operationalItemsOnly?: boolean;
     },
     tx?: Prisma.TransactionClient,
   ): Promise<OrderEntity>;
 
-  updateItemsKitchenStatus(params: {
-    orderId: string;
-    sentAt: Date;
-    kitchenStatus: KitchenStatusDto;
-    kitchenId?: string;
-    itemId?: number;
-  }): Promise<void>;
+  updateItemsKitchenStatus(
+    params: {
+      orderId: string;
+      sentAt: Date;
+      kitchenStatus: KitchenStatusDto;
+      kitchenId?: string;
+      itemId?: number;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<void>;
 
   updateOperationalStatus(
     id: string,
     data: { status: OrderStatusDto; kitchenReadyAt?: Date },
+    tx?: Prisma.TransactionClient,
   ): Promise<Date>;
 }

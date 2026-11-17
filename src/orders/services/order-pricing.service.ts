@@ -359,25 +359,28 @@ export class OrderPricingService {
             options?.allowConsumedCoupon,
           )
         : 0;
-    const discountAmount =
+    const rawDiscountAmount =
       overrideDiscountAmount !== undefined
         ? Math.min(Math.max(0, overrideDiscountAmount), Math.max(0, subTotal))
         : calculatedDiscountAmount;
-    const taxableTotal = Math.max(0, subTotal - discountAmount);
+    const roundedSubTotal = Number(subTotal.toFixed(2));
+    const discountAmount = Number(rawDiscountAmount.toFixed(2));
+    const taxableTotal = Math.max(0, roundedSubTotal - discountAmount);
 
     const { taxes, isExonerated } = readTaxConfig(taxConfig.data);
     const taxPercentage = isExonerated
       ? 0
       : taxes.reduce((sum, tax) => sum + tax.percentage, 0);
-    const taxAmount =
+    const rawTaxAmount =
       taxPercentage > 0 ? taxableTotal * (taxPercentage / 100) : 0;
+    const taxAmount = Number(rawTaxAmount.toFixed(2));
 
     return {
       items: pricedItems,
       totals: {
-        subTotal,
+        subTotal: roundedSubTotal,
         discountAmount,
-        taxAmount: Number(taxAmount.toFixed(2)),
+        taxAmount,
         total: Number(Math.max(0, taxableTotal + taxAmount).toFixed(2)),
       },
     };
@@ -387,14 +390,14 @@ export class OrderPricingService {
     calculation: { items: CartItemEntity[]; totals: OrderTotals },
     overrideDiscountAmount: number,
   ): Promise<{ items: CartItemEntity[]; totals: OrderTotals }> {
-    const discountAmount = Math.min(
-      Math.max(0, overrideDiscountAmount),
-      Math.max(0, calculation.totals.subTotal),
+    const roundedSubTotal = Number(calculation.totals.subTotal.toFixed(2));
+    const discountAmount = Number(
+      Math.min(
+        Math.max(0, overrideDiscountAmount),
+        Math.max(0, roundedSubTotal),
+      ).toFixed(2),
     );
-    const taxableTotal = Math.max(
-      0,
-      calculation.totals.subTotal - discountAmount,
-    );
+    const taxableTotal = Math.max(0, roundedSubTotal - discountAmount);
     const originalTaxableTotal = Math.max(
       0,
       calculation.totals.subTotal - calculation.totals.discountAmount,
@@ -412,14 +415,15 @@ export class OrderPricingService {
         ? 0
         : taxes.reduce((sum, tax) => sum + tax.percentage, 0);
     }
-    const taxAmount =
+    const rawTaxAmount =
       taxPercentage > 0 ? taxableTotal * (taxPercentage / 100) : 0;
+    const taxAmount = Number(rawTaxAmount.toFixed(2));
     return {
       items: calculation.items,
       totals: {
-        subTotal: calculation.totals.subTotal,
+        subTotal: roundedSubTotal,
         discountAmount,
-        taxAmount: Number(taxAmount.toFixed(2)),
+        taxAmount,
         total: Number(Math.max(0, taxableTotal + taxAmount).toFixed(2)),
       },
     };

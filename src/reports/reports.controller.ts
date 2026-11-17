@@ -1,7 +1,8 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Permissions, UserRoleDto } from '../common';
 import { Roles } from '../common/decorators/roles.decorator';
+import { parseBusinessDateInput } from '../common/time/business-time.util';
 import { SalesReportQueryDto } from './dto/sales-report-query.dto';
 import { ReportsService } from './reports.service';
 
@@ -14,9 +15,17 @@ export class ReportsController {
 
   @Get('sales')
   getSalesReport(@Query() query: SalesReportQueryDto) {
+    let startDate: Date;
+    let endDate: Date;
+    try {
+      startDate = parseBusinessDateInput(query.startDate, 'start');
+      endDate = parseBusinessDateInput(query.endDate, 'end');
+    } catch {
+      throw new BadRequestException('El rango de fechas no es válido.');
+    }
     return this.reports.getSalesReport({
-      startDate: new Date(query.startDate),
-      endDate: new Date(query.endDate),
+      startDate,
+      endDate,
       timezoneOffsetMinutes: query.timezoneOffsetMinutes,
     });
   }

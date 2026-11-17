@@ -104,8 +104,23 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
         if (nextCurrent < nextStart || nextCurrent > nextEnd + 1) {
           throw new BadRequestException('currentNumber fuera de rango');
         }
+        const nextIssueDate = params.issueDate ?? existing.issueDate;
+        const nextExpirationDate =
+          params.expirationDate ?? existing.expirationDate;
+        if (
+          nextIssueDate instanceof Date &&
+          nextExpirationDate instanceof Date &&
+          nextExpirationDate < nextIssueDate
+        ) {
+          throw new BadRequestException(
+            'expirationDate no puede ser anterior a issueDate',
+          );
+        }
       }
-      if (params.status === CorrelativoStatus.ACTIVO) {
+      const touchesActive =
+        params.status === CorrelativoStatus.ACTIVO ||
+        existing?.status === CorrelativoStatus.ACTIVO;
+      if (touchesActive) {
         let docType = params.documentType ?? existing?.documentType;
         if (!docType && tx.correlativo.findUnique) {
           const found = await tx.correlativo.findUnique({
@@ -116,14 +131,16 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
         }
         if (docType) {
           await acquireCorrelativoLock(tx, docType);
-          await tx.correlativo.updateMany({
-            where: {
-              documentType: docType,
-              status: CorrelativoStatus.ACTIVO,
-              id: { not: id },
-            },
-            data: { status: CorrelativoStatus.VENCIDO },
-          });
+          if (params.status === CorrelativoStatus.ACTIVO) {
+            await tx.correlativo.updateMany({
+              where: {
+                documentType: docType,
+                status: CorrelativoStatus.ACTIVO,
+                id: { not: id },
+              },
+              data: { status: CorrelativoStatus.VENCIDO },
+            });
+          }
         }
       }
       const updated = await tx.correlativo.update({

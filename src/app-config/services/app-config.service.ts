@@ -17,12 +17,12 @@ export class AppConfigService {
     return { id, data: {}, updatedAt: new Date(0) };
   }
 
-  upsert(id: string, dto: UpdateAppConfigDto) {
+  upsert(id: string, dto: UpdateAppConfigDto, actorId?: string) {
     return this.repo.upsert({
       id,
       data: dto.data,
-      createdById: dto.createdById,
-      updatedById: dto.updatedById,
+      createdById: actorId ?? dto.createdById,
+      updatedById: actorId ?? dto.updatedById,
     });
   }
 }

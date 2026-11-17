@@ -14,11 +14,12 @@ import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.
 import type { CreateAccessRoleDto } from './dto/create-access-role.dto';
 import type { UpdateAccessRoleDto } from './dto/update-access-role.dto';
 import {
+  ADMIN_ONLY_PERMISSIONS,
   DEFAULT_ROLE_PERMISSIONS,
   PERMISSION_CATALOG,
   SYSTEM_ROLE_NAMES,
 } from './permission-catalog';
-import { toDbRole } from '../users/mappers/user-role.mapper';
+import { fromDbRole, toDbRole } from '../users/mappers/user-role.mapper';
 import { SECURITY_SOCKETS_REVALIDATE_EVENT, UserRoleDto } from '../common';
 
 const ACCESS_CONTROL_BASELINE_V2_KEY = 'access_control_baseline_v2';
@@ -174,13 +175,15 @@ export class AccessControlService implements OnModuleInit {
       dto.permissionCodes,
     );
     await this.assertPermissionCodes(permissionCodes);
+    const baseRole = toDbRole(dto.baseRole);
+    this.assertPermissionsAllowedForBaseRole(baseRole, permissionCodes);
     const code = await this.uniqueCode(dto.name);
     const role = await this.prisma.accessRole.create({
       data: {
         code,
         name: dto.name,
         description: dto.description,
-        baseRole: toDbRole(dto.baseRole),
+        baseRole,
         permissions: {
           create: permissionCodes.map((permissionCode) => ({
             permission: { connect: { code: permissionCode } },
@@ -220,7 +223,10 @@ export class AccessControlService implements OnModuleInit {
     const permissionCodes = dto.permissionCodes
       ? this.withRequiredReadPermissions(dto.permissionCodes)
       : undefined;
-    if (permissionCodes) await this.assertPermissionCodes(permissionCodes);
+    if (permissionCodes) {
+      await this.assertPermissionCodes(permissionCodes);
+      this.assertPermissionsAllowedForBaseRole(role.baseRole, permissionCodes);
+    }
 
     await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "AccessRole" WHERE id = ${id} FOR UPDATE`;
@@ -253,6 +259,8 @@ export class AccessControlService implements OnModuleInit {
             })),
           });
         }
+      }
+      if (permissionCodes || dto.isActive !== undefined) {
         await tx.user.updateMany({
           where: { accessRoleId: id },
           data: { tokenVersion: { increment: 1 } },
@@ -305,11 +313,38 @@ export class AccessControlService implements OnModuleInit {
     const user = await this.prisma.$transaction(async (tx) => {
       const roles = await tx.$queryRaw<
         Array<{ isActive: boolean }>
-      >`SELECT "isActive" FROM "AccessRole" WHERE id = ${accessRoleId} FOR UPDATE`;
+      >`SELECT "isActive", pg_advisory_xact_lock(19731021)::text FROM "AccessRole" WHERE id = ${accessRoleId} FOR UPDATE`;
       if (!roles[0]?.isActive)
         throw new BadRequestException(
           'El rol seleccionado está inactivo o no existe',
         );
+      const current = await tx.user?.findUnique?.({
+        where: { id: userId },
+        include: { accessRole: true },
+      });
+      const wasSystemAdmin =
+        Boolean(current?.isActive) &&
+        (current?.accessRole?.code === 'admin' ||
+          (!current?.accessRoleId && current?.role === 'ADMIN'));
+      const remainsSystemAdmin =
+        role.code === 'admin' && role.isActive !== false;
+      if (wasSystemAdmin && !remainsSystemAdmin && tx.user?.count) {
+        const count = await tx.user.count({
+          where: {
+            isActive: true,
+            role: 'ADMIN',
+            OR: [
+              { accessRoleId: null },
+              { accessRole: { code: 'admin', isActive: true } },
+            ],
+          },
+        });
+        if (count <= 1) {
+          throw new ConflictException(
+            'No se puede desactivar o cambiar el rol del último administrador activo.',
+          );
+        }
+      }
       return tx.user.update({
         where: { id: userId },
         data: {
@@ -340,11 +375,19 @@ export class AccessControlService implements OnModuleInit {
       },
     });
     if (!user) throw new NotFoundException('Usuario no encontrado');
+    const mappedRole = fromDbRole(user.role);
+    const activeAccessRole =
+      user.accessRole && user.accessRole.isActive !== false
+        ? user.accessRole
+        : undefined;
     return {
-      accessRoleId: user.accessRole?.id,
-      accessRoleName: user.accessRole?.name,
-      permissions:
-        user.accessRole?.permissions.map((item) => item.permission.code) ?? [],
+      accessRoleId: activeAccessRole?.id,
+      accessRoleName: activeAccessRole?.name,
+      permissions: user.accessRole
+        ? user.accessRole.isActive !== false
+          ? user.accessRole.permissions.map((item) => item.permission.code)
+          : []
+        : [...(DEFAULT_ROLE_PERMISSIONS[mappedRole] ?? [])],
     };
   }
 
@@ -360,6 +403,20 @@ export class AccessControlService implements OnModuleInit {
     }
   }
 
+  private assertPermissionsAllowedForBaseRole(
+    baseRole: UserRole,
+    codes: string[],
+  ) {
+    if (baseRole === UserRole.ADMIN) return;
+    const adminOnlySet = new Set<string>(ADMIN_ONLY_PERMISSIONS);
+    const disallowed = codes.filter((code) => adminOnlySet.has(code));
+    if (disallowed.length > 0) {
+      throw new BadRequestException(
+        `Los siguientes permisos son exclusivos del perfil base Administrador: ${disallowed.join(', ')}`,
+      );
+    }
+  }
+
   private withRequiredReadPermissions(codes: string[]) {
     const normalized = new Set(codes);
     const dependencies: Record<string, readonly string[]> = {
@@ -368,9 +425,10 @@ export class AccessControlService implements OnModuleInit {
       'products.manage': ['products.read'],
       'orders.manage': ['orders.read'],
       'orders.cancel': ['orders.read'],
+      'invoices.cancel': ['orders.cancel', 'orders.read', 'invoices.read'],
       'tables.operate': ['tables.read'],
       'tables.configure': ['tables.read'],
-      'tables.assign_zones': ['tables.read'],
+      'tables.assign_zones': ['tables.read', 'users.directory'],
       'kitchen.update': ['kitchen.read'],
       'kitchen.configure': ['kitchen.read'],
       'delivery.manage': ['delivery.read'],

@@ -93,6 +93,7 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
             price: 0.01,
             size: 'único',
             quantity: 1,
+            giftQuantity: 0,
             extras: [],
           },
         ]),
@@ -1541,5 +1542,306 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
         },
       });
     });
+  });
+});
+
+describe('Pass-5 remaining integrity safeguards (B54 & B59)', () => {
+  it('B59 — redondea descuento e impuesto a 2 decimales antes de sumar el total', async () => {
+    const productsService = {
+      getProductById: jest.fn().mockResolvedValue({
+        id: 'prod-round-1',
+        name: 'Pizza Personal',
+        categoryId: 'cat-1',
+        isCombo: false,
+        prices: [{ size: 'mediana', price: 10.04 }],
+        extras: [],
+      }),
+    };
+    const appConfigService = {
+      getByIdOrDefault: jest.fn().mockImplementation((key: string) =>
+        key === 'packaging_sizes'
+          ? Promise.resolve({ data: { sizes: [] } })
+          : Promise.resolve({
+              data: { isExonerated: false, taxes: [{ percentage: 15 }] },
+            }),
+      ),
+    };
+    const coupons = {
+      findById: jest.fn().mockResolvedValue({
+        id: 7,
+        status: 'Activo',
+        discountType: 'porcentaje',
+        discountValue: 10,
+        maxUses: 0,
+        currentUses: 0,
+      }),
+    };
+
+    const pricing = new OrderPricingService(
+      productsService as never,
+      appConfigService as never,
+      coupons as never,
+      {} as never,
+      {} as never,
+    );
+
+    const result = await pricing.calculateWithPrices(
+      [
+        {
+          productId: 'prod-round-1',
+          name: 'Pizza Personal',
+          price: 10.04,
+          size: 'mediana',
+          quantity: 1,
+          giftQuantity: 0,
+          extras: [],
+        },
+      ],
+      { source: 'coupon', cuponId: 7 },
+    );
+
+    expect(result.totals).toEqual({
+      subTotal: 10.04,
+      discountAmount: 1,
+      taxAmount: 1.36,
+      total: 10.4,
+    });
+    expect(
+      Number(
+        (
+          result.totals.subTotal -
+          result.totals.discountAmount +
+          result.totals.taxAmount
+        ).toFixed(2),
+      ),
+    ).toBe(result.totals.total);
+  });
+
+  it('B54 — rechaza expectedUpdatedAt obsoleto en updateStatus y lo propaga hacia finalize (-> paid)', async () => {
+    const existing: OrderEntity = {
+      id: 'ord-b54-1',
+      status: OrderStatusDto.pending,
+      orderType: OrderTypeDto.local,
+      total: 100,
+      subTotal: 100,
+      discountAmount: 0,
+      taxAmount: 0,
+      timestamp: new Date('2026-11-13T12:00:00.000Z'),
+      updatedAt: new Date('2026-11-13T12:05:00.000Z'),
+      items: [],
+      payments: [{ method: PaymentMethodDto.EFECTIVO, amount: 100 } as never],
+    };
+    const repo = {
+      findById: jest.fn().mockResolvedValue(existing),
+      update: jest.fn(),
+      updateOperationalStatus: jest.fn(),
+    };
+    const service = new OrdersService(
+      repo as never,
+      { emit: jest.fn() } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const user = {
+      id: 'cashier-1',
+      username: 'cajero',
+      role: UserRoleDto.cajero,
+    };
+
+    await expect(
+      service.updateStatus(
+        'ord-b54-1',
+        {
+          status: OrderStatusDto.preparing,
+          expectedUpdatedAt: '2026-11-13T12:04:00.000Z',
+        },
+        user,
+      ),
+    ).rejects.toThrow(ConflictException);
+    expect(repo.update).not.toHaveBeenCalled();
+    expect(repo.updateOperationalStatus).not.toHaveBeenCalled();
+
+    const finalizeSpy = jest
+      .spyOn(service, 'finalize')
+      .mockResolvedValue({ ...existing, status: OrderStatusDto.paid });
+
+    await service.updateStatus(
+      'ord-b54-1',
+      {
+        status: OrderStatusDto.paid,
+        expectedUpdatedAt: '2026-11-13T12:05:00.000Z',
+      },
+      user,
+    );
+
+    expect(finalizeSpy).toHaveBeenCalledWith(
+      'ord-b54-1',
+      expect.objectContaining({
+        expectedUpdatedAt: '2026-11-13T12:05:00.000Z',
+        payments: [
+          expect.objectContaining({
+            method: PaymentMethodDto.EFECTIVO,
+            amount: 100,
+          }),
+        ],
+      }),
+      user,
+    );
+  });
+
+  it('B54 — detecta carrera concurrente de updatedAt bajo SELECT FOR UPDATE al anular una orden', async () => {
+    const existing: OrderEntity = {
+      id: 'ord-b54-cancel',
+      status: OrderStatusDto.pending,
+      orderType: OrderTypeDto.local,
+      total: 100,
+      subTotal: 100,
+      discountAmount: 0,
+      taxAmount: 0,
+      timestamp: new Date('2026-11-13T12:00:00.000Z'),
+      updatedAt: new Date('2026-11-13T12:05:00.000Z'),
+      items: [],
+      payments: [],
+    };
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([
+        {
+          status: 'PENDING',
+          updatedAt: new Date('2026-11-13T12:06:00.000Z'),
+        },
+      ]),
+      order: { update: jest.fn() },
+    };
+    const prisma = {
+      appConfig: { findUnique: jest.fn().mockResolvedValue(null) },
+      $transaction: jest.fn(async (cb: (client: unknown) => Promise<unknown>) =>
+        cb(tx),
+      ),
+    };
+    const repo = {
+      findById: jest.fn().mockResolvedValue(existing),
+    };
+    const cancellationAuthorization = {
+      authorize: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new OrdersService(
+      repo as never,
+      { emit: jest.fn() } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      cancellationAuthorization as never,
+      {} as never,
+      prisma as never,
+    );
+
+    await expect(
+      service.updateStatus(
+        'ord-b54-cancel',
+        {
+          status: OrderStatusDto.cancelled,
+          expectedUpdatedAt: '2026-11-13T12:05:00.000Z',
+          cancelReasonId: 'error-comanda-mesero',
+        },
+        {
+          id: 'admin-1',
+          username: 'admin',
+          role: UserRoleDto.admin,
+        },
+      ),
+    ).rejects.toThrow(ConflictException);
+    expect(tx.order.update).not.toHaveBeenCalled();
+  });
+
+  it('B60 & F79 — updateStatus bloquea fila con FOR UPDATE, protege items con operationalItemsOnly y permite liberar mesa vacía con motivo fallback', async () => {
+    const existing: OrderEntity = {
+      id: 'ord-b60-1',
+      status: OrderStatusDto.pending,
+      orderType: OrderTypeDto.local,
+      total: 100,
+      subTotal: 100,
+      discountAmount: 0,
+      taxAmount: 0,
+      timestamp: new Date('2026-11-13T12:00:00.000Z'),
+      updatedAt: new Date('2026-11-13T12:05:00.000Z'),
+      items: [
+        {
+          id: 1,
+          productId: 'prod-1',
+          name: 'Pizza',
+          price: 100,
+          size: 'mediana',
+          quantity: 1,
+          giftQuantity: 0,
+          extras: [],
+        },
+      ],
+      payments: [],
+    };
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([
+        {
+          status: 'PAID',
+          updatedAt: new Date('2026-11-13T12:05:00.000Z'),
+        },
+      ]),
+    };
+    const prisma = {
+      $transaction: jest.fn(async (cb: (client: unknown) => Promise<unknown>) =>
+        cb(tx),
+      ),
+    };
+    const repo = {
+      findById: jest.fn().mockResolvedValue(existing),
+      update: jest.fn().mockImplementation(async (_id, data) => ({
+        ...existing,
+        status: data.status,
+      })),
+      updateOperationalStatus: jest.fn(),
+    };
+    const service = new OrdersService(
+      repo as never,
+      { emit: jest.fn() } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      prisma as never,
+    );
+
+    await service.updateStatus(
+      'ord-b60-1',
+      {
+        status: OrderStatusDto.ready,
+        expectedUpdatedAt: '2026-11-13T12:05:00.000Z',
+      },
+      {
+        id: 'cashier-1',
+        username: 'cajero',
+        role: UserRoleDto.cajero,
+      },
+    );
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(repo.update).toHaveBeenCalledWith(
+      'ord-b60-1',
+      expect.objectContaining({
+        status: OrderStatusDto.paid,
+        operationalItemsOnly: true,
+      }),
+      tx,
+    );
   });
 });

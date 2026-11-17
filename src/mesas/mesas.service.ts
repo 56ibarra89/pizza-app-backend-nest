@@ -1,6 +1,7 @@
 import {
   Injectable,
   BadRequestException,
+  ConflictException,
   OnModuleInit,
   Logger,
 } from '@nestjs/common';
@@ -228,22 +229,47 @@ export class MesasService implements OnModuleInit {
     expirationTime: null,
   } as const;
 
+  private async assertNoActiveOrdersOnMesa(id: string): Promise<void> {
+    if (typeof this.prisma.orderTable?.count !== 'function') {
+      return;
+    }
+    const activeOrders = await this.prisma.orderTable.count({
+      where: {
+        tableId: id,
+        order: {
+          status: {
+            notIn: ['PAID', 'CANCELLED'],
+          },
+        },
+      },
+    });
+    if (activeOrders > 0) {
+      throw new ConflictException(
+        `La mesa ${id} tiene una orden activa en curso y no puede liberarse ni reservarse.`,
+      );
+    }
+  }
+
   async updateStatus(id: string, estado: MesaEstado) {
     const mesa = await this.prisma.mesa.findUnique({ where: { id } });
     if (!mesa || mesa.isActive === false) {
       throw new BadRequestException(`La mesa ${id} no existe.`);
     }
+    if (estado === 'DISPONIBLE' || estado === 'RESERVADO') {
+      await this.assertNoActiveOrdersOnMesa(id);
+    }
 
     return this.prisma.mesa.update({
       where: { id },
       data:
-        estado === 'DISPONIBLE'
+        estado === 'DISPONIBLE' || estado === 'OCUPADO'
           ? { estado, ...MesasService.EMPTY_RESERVATION_DATA }
           : { estado },
     });
   }
 
   async reserveMesa(id: string, dto: ReserveMesaDto) {
+    await this.assertNoActiveOrdersOnMesa(id);
     const reserved = await this.prisma.mesa.updateMany({
       where: { id, estado: 'DISPONIBLE', isActive: true },
       data: {
@@ -280,6 +306,9 @@ export class MesasService implements OnModuleInit {
     const mesa = await this.prisma.mesa.findUnique({ where: { id } });
     if (!mesa || mesa.isActive === false) {
       throw new BadRequestException(`La mesa ${id} no existe.`);
+    }
+    if (mesa.estado !== 'RESERVADO') {
+      await this.assertNoActiveOrdersOnMesa(id);
     }
 
     return this.prisma.mesa.update({

@@ -311,6 +311,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     const list = await this.prisma.order.findMany({
       where: {
         driverId,
+        orderType: 'DELIVERY',
         status: { not: 'CANCELLED' },
         OR: [
           { createdAt: { gte: startDate, lte: endDate } },
@@ -580,6 +581,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       deliverySlaAlertedAt?: Date | null;
       certificateSerials?: string[] | null;
       allowFinalSplitSettlement?: boolean;
+      operationalItemsOnly?: boolean;
     },
     tx?: Prisma.TransactionClient,
   ): Promise<OrderEntity> {
@@ -816,9 +818,10 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       });
 
       const isFinalOrderStatus =
-        !data.allowFinalSplitSettlement &&
-        (data.status === OrderStatusDto.paid ||
-          data.status === OrderStatusDto.cancelled);
+        Boolean(data.operationalItemsOnly) ||
+        (!data.allowFinalSplitSettlement &&
+          (data.status === OrderStatusDto.paid ||
+            data.status === OrderStatusDto.cancelled));
 
       updateData.items = isFinalOrderStatus
         ? {
@@ -883,14 +886,17 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     return this.mapOrder(updated);
   }
 
-  async updateItemsKitchenStatus(params: {
-    orderId: string;
-    sentAt: Date;
-    kitchenStatus: KitchenStatusDto;
-    kitchenId?: string;
-    itemId?: number;
-  }): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
+  async updateItemsKitchenStatus(
+    params: {
+      orderId: string;
+      sentAt: Date;
+      kitchenStatus: KitchenStatusDto;
+      kitchenId?: string;
+      itemId?: number;
+    },
+    externalTx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const execute = async (tx: Prisma.TransactionClient) => {
       // Serializa las estaciones que actualizan selecciones distintas del mismo
       // combo; sin este bloqueo una escritura podía borrar la de otra cocina.
       await tx.$queryRaw`
@@ -961,7 +967,14 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           },
         });
       }
-    });
+    };
+
+    if (externalTx) {
+      await execute(externalTx);
+      return;
+    }
+
+    await this.prisma.$transaction(execute);
   }
 
   async updateOperationalStatus(
@@ -970,8 +983,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       status: import('../dto/order-status.dto').OrderStatusDto;
       kitchenReadyAt?: Date;
     },
+    tx?: Prisma.TransactionClient,
   ): Promise<Date> {
-    const updated = await this.prisma.order.update({
+    const updated = await (tx ?? this.prisma).order.update({
       where: { id },
       data: {
         status: toDbOrderStatus(data.status),
@@ -1016,6 +1030,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     cuponId: number | null;
     discountId: number | null;
     happyHourId: number | null;
+    cashierId?: string | null;
     cashierSnapshotName: string | null;
     cancelReason: string | null;
     cancellationReasonId: string | null;
@@ -1153,6 +1168,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
             (serial): serial is string => typeof serial === 'string',
           )
         : undefined,
+      cashierId: o.cashierId ?? undefined,
       cashierSnapshotName: o.cashierSnapshotName ?? undefined,
       cancelReason: o.cancelReason ?? undefined,
       cancellationReasonId: o.cancellationReasonId ?? undefined,

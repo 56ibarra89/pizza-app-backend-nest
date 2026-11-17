@@ -1,9 +1,17 @@
-import { Body, Controller, Get, Param, Put } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  Put,
+} from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { AppConfigService } from '../services/app-config.service';
 import { UpdateAppConfigDto } from '../dto/update-app-config.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { Permissions, UserRoleDto } from '../../common';
+import { CurrentUser, Permissions, UserRoleDto } from '../../common';
+import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 
 @ApiTags('config')
 @Roles(UserRoleDto.admin)
@@ -29,7 +37,16 @@ export class AppConfigController {
   @Put(':id')
   @Permissions('settings.manage')
   @Roles(UserRoleDto.admin)
-  upsert(@Param('id') id: string, @Body() dto: UpdateAppConfigDto) {
-    return this.service.upsert(id, dto);
+  upsert(
+    @Param('id') id: string,
+    @Body() dto: UpdateAppConfigDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    if (id === 'floors_config') {
+      throw new BadRequestException(
+        'Usa el endpoint /mesas/floors para actualizar la configuración de plantas y mesas.',
+      );
+    }
+    return this.service.upsert(id, dto, user?.id);
   }
 }

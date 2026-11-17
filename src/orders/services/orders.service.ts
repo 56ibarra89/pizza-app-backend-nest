@@ -456,6 +456,19 @@ export class OrdersService {
     user?: AuthenticatedUser,
   ) {
     const existing = await this.getById(id);
+    const expectedUpdatedAtDate = dto.expectedUpdatedAt
+      ? new Date(dto.expectedUpdatedAt)
+      : undefined;
+    if (
+      expectedUpdatedAtDate &&
+      (Number.isNaN(expectedUpdatedAtDate.getTime()) ||
+        (existing.updatedAt &&
+          existing.updatedAt.getTime() !== expectedUpdatedAtDate.getTime()))
+    ) {
+      throw new ConflictException(
+        'La orden fue modificada desde otra estación. Recarga antes de actualizar su estado.',
+      );
+    }
     const wasReadyForPickup = this.isReadyForPickup(existing.items);
     const isFinal =
       existing.status === OrderStatusDto.paid ||
@@ -591,41 +604,82 @@ export class OrdersService {
         throw new BadRequestException('Status inválido para cocina');
       }
 
-      await this.repo.updateItemsKitchenStatus({
-        orderId: id,
-        sentAt: new Date(dto.sentAt),
-        kitchenStatus: dto.status as unknown as KitchenStatusDto,
-        kitchenId: dto.kitchenId,
-        itemId: dto.itemId,
-      });
+      const { updated, becameReady } = await this.runInTransactionIfAvailable(
+        async (tx) => {
+          let lockedStatus: string | undefined;
+          if (typeof tx?.$queryRaw === 'function') {
+            const lockedRows = await tx.$queryRaw<
+              Array<{ status?: string; updatedAt?: Date }>
+            >`
+              SELECT status, "updatedAt" FROM "Order" WHERE id = ${id} FOR UPDATE
+            `;
+            const locked = lockedRows[0];
+            if (!locked) {
+              throw new NotFoundException('Orden no encontrada');
+            }
+            lockedStatus = locked.status;
+            if (locked.status === 'CANCELLED') {
+              throw new ConflictException(
+                'La orden fue anulada desde otra estación.',
+              );
+            }
+          }
 
-      const reloaded = await this.getById(id);
+          const kitchenParams = {
+            orderId: id,
+            sentAt: new Date(dto.sentAt!),
+            kitchenStatus: dto.status as unknown as KitchenStatusDto,
+            kitchenId: dto.kitchenId,
+            itemId: dto.itemId,
+          };
+          if (tx) {
+            await this.repo.updateItemsKitchenStatus(kitchenParams, tx);
+          } else {
+            await this.repo.updateItemsKitchenStatus(kitchenParams);
+          }
 
-      const derived = this.deriveGlobalStatus(
-        reloaded.items,
-        reloaded.orderType,
+          const reloaded =
+            (tx ? await this.repo.findById(id, tx) : null) ??
+            (await this.getById(id));
+
+          const derived = this.deriveGlobalStatus(
+            reloaded.items,
+            reloaded.orderType,
+          );
+          const isCurrentlyPaidOrCancelled =
+            reloaded.status === OrderStatusDto.paid ||
+            reloaded.status === OrderStatusDto.cancelled ||
+            lockedStatus === 'PAID' ||
+            lockedStatus === 'CANCELLED' ||
+            existing.status === OrderStatusDto.paid ||
+            existing.status === OrderStatusDto.cancelled;
+          const nextGlobalStatus = isCurrentlyPaidOrCancelled
+            ? reloaded.status === OrderStatusDto.cancelled ||
+              lockedStatus === 'CANCELLED'
+              ? OrderStatusDto.cancelled
+              : OrderStatusDto.paid
+            : derived;
+          this.logger.debug(`Estado global derivado: ${nextGlobalStatus}`);
+          const becameReadyNow =
+            !wasReadyForPickup && this.isReadyForPickup(reloaded.items);
+          const kitchenReadyAt = becameReadyNow ? new Date() : undefined;
+          const opData = {
+            status: nextGlobalStatus,
+            kitchenReadyAt,
+          };
+          const updatedAt = tx
+            ? await this.repo.updateOperationalStatus(id, opData, tx)
+            : await this.repo.updateOperationalStatus(id, opData);
+          const updatedOrder: OrderEntity = {
+            ...reloaded,
+            status: nextGlobalStatus,
+            updatedAt,
+            ...(kitchenReadyAt ? { kitchenReadyAt } : {}),
+          };
+          return { updated: updatedOrder, becameReady: becameReadyNow };
+        },
       );
-      const nextGlobalStatus =
-        existing.status === OrderStatusDto.paid ||
-        existing.status === OrderStatusDto.cancelled
-          ? existing.status
-          : derived;
-      this.logger.debug(`Estado global derivado: ${nextGlobalStatus}`);
-      const kitchenReadyAt =
-        !wasReadyForPickup && this.isReadyForPickup(reloaded.items)
-          ? new Date()
-          : undefined;
-      const updatedAt = await this.repo.updateOperationalStatus(id, {
-        status: nextGlobalStatus,
-        kitchenReadyAt,
-      });
-      const updated: OrderEntity = {
-        ...reloaded,
-        status: nextGlobalStatus,
-        updatedAt,
-        ...(kitchenReadyAt ? { kitchenReadyAt } : {}),
-      };
-      if (!wasReadyForPickup && this.isReadyForPickup(reloaded.items)) {
+      if (becameReady) {
         this.emitOrderReady(updated);
       }
       this.publishOrder(updated, 'updated', {
@@ -669,7 +723,14 @@ export class OrdersService {
     ) {
       this.assertCanFinalizeOrder(user, existing);
       assertPaymentsMatchTotal(existing.total, existing.payments);
-      return this.finalize(id, { payments: existing.payments }, user);
+      return this.finalize(
+        id,
+        {
+          payments: existing.payments,
+          expectedUpdatedAt: dto.expectedUpdatedAt,
+        },
+        user,
+      );
     }
 
     const updateItemsKitchen =
@@ -697,6 +758,7 @@ export class OrdersService {
           ? OrderStatusDto.paid
           : nextStatus,
       items,
+      operationalItemsOnly: true,
     };
     const becameReadyForPickup =
       !wasReadyForPickup && this.isReadyForPickup(items);
@@ -762,20 +824,43 @@ export class OrdersService {
 
     const shouldReversePaidBenefits =
       Boolean(cancellationPolicy) && existing.status === OrderStatusDto.paid;
-    const splitRestore = shouldReversePaidBenefits
-      ? await this.prepareSplitCancellationRestore(existing)
-      : undefined;
-    if (splitRestore) {
-      updateData.cancellationLossAmount = 0;
-      updateData.cancellationCountsAsWaste = false;
-    }
+    let splitRestore:
+      | Awaited<ReturnType<OrdersService['prepareSplitCancellationRestore']>>
+      | undefined;
     let restoredSplitParent: OrderEntity | undefined;
     const updated = cancellationPolicy
       ? await this.prisma.$transaction(async (tx) => {
-          const lockedChild = await tx.$queryRaw<Array<{ status: string }>>`
-            SELECT status FROM "Order" WHERE id = ${id} FOR UPDATE
+          if (
+            shouldReversePaidBenefits &&
+            existing.parentOrderId &&
+            existing.splitMode
+          ) {
+            splitRestore = await this.prepareSplitCancellationRestore(
+              existing,
+              tx,
+            );
+            if (splitRestore) {
+              await this.lockUnchangedSplitParent(
+                tx,
+                splitRestore.parent,
+                true,
+              );
+              updateData.cancellationLossAmount = 0;
+              updateData.cancellationCountsAsWaste = false;
+            }
+          }
+          const lockedChild = await tx.$queryRaw<
+            Array<{ status: string; updatedAt?: Date }>
+          >`
+            SELECT status, "updatedAt" FROM "Order" WHERE id = ${id} FOR UPDATE
           `;
-          if (lockedChild[0]?.status !== existing.status.toUpperCase()) {
+          if (
+            lockedChild[0]?.status !== existing.status.toUpperCase() ||
+            (expectedUpdatedAtDate &&
+              lockedChild[0]?.updatedAt &&
+              new Date(lockedChild[0].updatedAt).getTime() !==
+                expectedUpdatedAtDate.getTime())
+          ) {
             throw new ConflictException(
               'La factura cambió mientras se procesaba su anulación.',
             );
@@ -801,7 +886,6 @@ export class OrdersService {
           if (!shouldReversePaidBenefits)
             return this.repo.update(id, updateData, tx);
           if (splitRestore) {
-            await this.lockUnchangedSplitParent(tx, splitRestore.parent, true);
             restoredSplitParent = await this.repo.update(
               splitRestore.parent.id,
               splitRestore.update,
@@ -852,7 +936,47 @@ export class OrdersService {
           }
           return this.repo.update(id, updateData, tx);
         })
-      : await this.repo.update(id, updateData);
+      : await this.runInTransactionIfAvailable(async (tx) => {
+          if (typeof tx?.$queryRaw === 'function') {
+            const lockedRows = await tx.$queryRaw<
+              Array<{ status?: string; updatedAt?: Date }>
+            >`
+              SELECT status, "updatedAt" FROM "Order" WHERE id = ${id} FOR UPDATE
+            `;
+            const locked = lockedRows[0];
+            if (!locked) {
+              throw new NotFoundException('Orden no encontrada');
+            }
+            if (locked.status === 'CANCELLED') {
+              throw new ConflictException(
+                'La orden fue anulada desde otra estación.',
+              );
+            }
+            if (
+              tx &&
+              locked.updatedAt instanceof Date &&
+              existing.updatedAt instanceof Date &&
+              locked.updatedAt.getTime() !== existing.updatedAt.getTime()
+            ) {
+              const latestOrder = await this.repo.findById(id, tx);
+              if (latestOrder) {
+                updateData.items = updateItemsKitchen
+                  ? latestOrder.items.map((item) =>
+                      requiresKitchenPreparation(item)
+                        ? { ...item, kitchenStatus: updateItemsKitchen }
+                        : item,
+                    )
+                  : latestOrder.items;
+              }
+            }
+            if (locked.status === 'PAID') {
+              updateData.status = OrderStatusDto.paid;
+            }
+          }
+          return tx
+            ? this.repo.update(id, updateData, tx)
+            : this.repo.update(id, updateData);
+        });
     if (restoredSplitParent) {
       this.publishOrder(restoredSplitParent, 'updated', {
         previousDriverId: splitRestore?.parent.driverId,
@@ -2213,7 +2337,10 @@ export class OrdersService {
     return { paidOrder, parentOrder };
   }
 
-  private async prepareSplitCancellationRestore(child: OrderEntity): Promise<
+  private async prepareSplitCancellationRestore(
+    child: OrderEntity,
+    tx?: Prisma.TransactionClient,
+  ): Promise<
     | {
         parent: OrderEntity;
         update: Parameters<IOrdersRepository['update']>[1];
@@ -2221,7 +2348,9 @@ export class OrdersService {
     | undefined
   > {
     if (!child.parentOrderId || !child.splitMode) return undefined;
-    const parent = await this.repo.findById(child.parentOrderId);
+    const parent = tx
+      ? await this.repo.findById(child.parentOrderId, tx)
+      : await this.repo.findById(child.parentOrderId);
     if (
       !parent ||
       (parent.status === OrderStatusDto.paid && Boolean(parent.invoice)) ||
@@ -2920,9 +3049,18 @@ export class OrdersService {
     const config = normalizeVoidWastePolicyConfig(
       saved?.data ?? DEFAULT_VOID_WASTE_POLICY_CONFIG,
     );
-    const reason = config.reasons.find(
-      (candidate) => candidate.id === dto.cancelReasonId && candidate.isActive,
-    );
+    const isEmptyPendingOrder =
+      order.items.length === 0 && order.status === OrderStatusDto.pending;
+    const reason =
+      config.reasons.find(
+        (candidate) =>
+          candidate.id === dto.cancelReasonId && candidate.isActive,
+      ) ??
+      (isEmptyPendingOrder
+        ? (config.reasons.find(
+            (candidate) => candidate.isActive && !candidate.requiresSupervisor,
+          ) ?? config.reasons.find((candidate) => candidate.isActive))
+        : undefined);
     if (!reason) {
       throw new BadRequestException(
         'Selecciona un motivo de anulación activo y válido.',
@@ -2985,10 +3123,12 @@ export class OrdersService {
       config.methods,
       defaultExchangeRate,
     );
+    const cashierActor =
+      user?.role === UserRoleDto.motorizado ? undefined : user;
     return normalized.map((payment) => ({
       ...payment,
-      cashierId: user?.id,
-      cashierSnapshotName: user?.username,
+      cashierId: cashierActor?.id,
+      cashierSnapshotName: cashierActor?.username,
     }));
   }
 

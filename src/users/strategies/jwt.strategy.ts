@@ -3,6 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { fromDbRole } from '../mappers/user-role.mapper';
+import { DEFAULT_ROLE_PERMISSIONS } from '../../access-control/permission-catalog';
 import { ConfigService } from '@nestjs/config';
 import {
   getJwtAudience,
@@ -66,16 +67,24 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         'La sesión ha expirado en este dispositivo.',
       );
     }
+    if (user.accessRole && user.accessRole.isActive === false) {
+      throw new UnauthorizedException(
+        'El rol asignado al usuario se encuentra inactivo.',
+      );
+    }
+
+    const mappedRole = fromDbRole(user.role);
+    const permissions = user.accessRole
+      ? user.accessRole.permissions.map((entry) => entry.permission.code)
+      : [...(DEFAULT_ROLE_PERMISSIONS[mappedRole] ?? [])];
 
     return {
       id: user.id,
       username: user.username,
-      role: fromDbRole(user.role),
+      role: mappedRole,
       accessRoleId: user.accessRole?.id,
       accessRoleName: user.accessRole?.name,
-      permissions:
-        user.accessRole?.permissions.map((entry) => entry.permission.code) ??
-        [],
+      permissions,
       tokenVersion: user.tokenVersion,
       tokenExpiresAtMs:
         typeof payload.exp === 'number' ? payload.exp * 1000 : undefined,

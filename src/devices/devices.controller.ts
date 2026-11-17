@@ -45,6 +45,8 @@ export class DevicesController {
     UserRoleDto.cajero,
     UserRoleDto.cajero_principal,
     UserRoleDto.mesero,
+    UserRoleDto.cocinero,
+    UserRoleDto.despachador,
   )
   getDevices(): Promise<any[]> {
     return this.devicesService.getLegacyDevices();

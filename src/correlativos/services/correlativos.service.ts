@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CorrelativoStatus, type DocumentType } from '@prisma/client';
+import type { DocumentType } from '@prisma/client';
 import {
   CORRELATIVOS_REPOSITORY,
   type ICorrelativosRepository,
@@ -45,8 +45,12 @@ export class CorrelativosService {
       throw new BadRequestException('currentNumber fuera de rango');
     }
 
-    if (dto.status === CorrelativoStatus.ACTIVO) {
-      // El repositorio desactiva correlativos previos dentro de la misma transacción.
+    const issueDate = parseBusinessDateInput(dto.issueDate, 'start');
+    const expirationDate = parseBusinessDateInput(dto.expirationDate, 'end');
+    if (expirationDate < issueDate) {
+      throw new BadRequestException(
+        'expirationDate no puede ser anterior a issueDate',
+      );
     }
 
     return this.repo.create({
@@ -56,8 +60,8 @@ export class CorrelativosService {
       startNumber,
       endNumber,
       currentNumber,
-      issueDate: parseBusinessDateInput(dto.issueDate, 'start'),
-      expirationDate: parseBusinessDateInput(dto.expirationDate, 'end'),
+      issueDate,
+      expirationDate,
       status: dto.status,
     });
   }
@@ -86,8 +90,16 @@ export class CorrelativosService {
     ) {
       throw new BadRequestException('currentNumber fuera de rango');
     }
-    if (dto.status === CorrelativoStatus.ACTIVO && dto.documentType) {
-      // El repositorio desactiva correlativos previos dentro de la misma transacción.
+    const issueDate = dto.issueDate
+      ? parseBusinessDateInput(dto.issueDate, 'start')
+      : undefined;
+    const expirationDate = dto.expirationDate
+      ? parseBusinessDateInput(dto.expirationDate, 'end')
+      : undefined;
+    if (issueDate && expirationDate && expirationDate < issueDate) {
+      throw new BadRequestException(
+        'expirationDate no puede ser anterior a issueDate',
+      );
     }
 
     return this.repo.update(id, {
@@ -97,12 +109,8 @@ export class CorrelativosService {
       startNumber: dto.startNumber,
       endNumber: dto.endNumber,
       currentNumber: dto.currentNumber,
-      issueDate: dto.issueDate
-        ? parseBusinessDateInput(dto.issueDate, 'start')
-        : undefined,
-      expirationDate: dto.expirationDate
-        ? parseBusinessDateInput(dto.expirationDate, 'end')
-        : undefined,
+      issueDate,
+      expirationDate,
       status: dto.status,
     });
   }

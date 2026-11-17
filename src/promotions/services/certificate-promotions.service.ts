@@ -87,6 +87,20 @@ export class CertificatePromotionsService {
   }
 
   async cancel(id: number) {
+    if (typeof this.repository.cancelIfAvailable === 'function') {
+      const updated = await this.repository.cancelIfAvailable(id);
+      if (!updated) {
+        const certificate = await this.requireById(id);
+        if (certificate.status !== CertificadoStatus.DISPONIBLE) {
+          throw new BadRequestException(
+            'Solo se pueden anular certificados disponibles',
+          );
+        }
+        throw new BadRequestException('No se pudo anular el certificado.');
+      }
+      return this.mapResponse(updated);
+    }
+
     const certificate = await this.requireById(id);
     if (certificate.status !== CertificadoStatus.DISPONIBLE) {
       throw new BadRequestException(
@@ -104,6 +118,14 @@ export class CertificatePromotionsService {
   async delete(id: number): Promise<void> {
     const existing = await this.repository.findById(id);
     if (!existing) return;
+    if (
+      existing.status === CertificadoStatus.ENTREGADO ||
+      existing.redeemedOrderId
+    ) {
+      throw new BadRequestException(
+        'No se puede eliminar un certificado que ya fue entregado o canjeado.',
+      );
+    }
 
     await this.repository.delete(id);
   }

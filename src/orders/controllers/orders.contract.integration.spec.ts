@@ -829,4 +829,58 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
       .set('x-test-permissions', 'orders.read,reports.read');
     expect(badMetricsRes.status).toBe(400);
   });
+
+  it('valida expectedUpdatedAt en PATCH /orders/:id/status (400 formato inválido, 409 versión obsoleta) (B54)', async () => {
+    ordersStore.set('ord-b54-contract', {
+      id: 'ord-b54-contract',
+      status: OrderStatusDto.pending,
+      total: 287.5,
+      subTotal: 250,
+      discountAmount: 0,
+      taxAmount: 37.5,
+      timestamp: new Date('2026-11-04T12:00:00.000Z'),
+      updatedAt: new Date('2026-11-04T12:05:00.000Z'),
+      orderType: OrderTypeDto.local,
+      payments: [],
+      items: [
+        {
+          id: 1,
+          productId: 'prod-pizza-1',
+          name: 'Pizza Margarita',
+          size: 'Grande',
+          price: 250,
+          quantity: 1,
+          giftQuantity: 0,
+          extras: [],
+        },
+      ],
+    });
+
+    const badDateRes = await request(app.getHttpServer())
+      .patch('/orders/ord-b54-contract/status')
+      .set('x-test-role', 'admin')
+      .set(
+        'x-test-permissions',
+        'orders.status,orders.read,orders.cancel,orders.finalize',
+      )
+      .send({
+        status: 'cancelled',
+        expectedUpdatedAt: 'no-es-iso',
+      });
+    expect(badDateRes.status).toBe(400);
+
+    const staleRes = await request(app.getHttpServer())
+      .patch('/orders/ord-b54-contract/status')
+      .set('x-test-role', 'admin')
+      .set(
+        'x-test-permissions',
+        'orders.status,orders.read,orders.cancel,orders.finalize',
+      )
+      .send({
+        status: 'cancelled',
+        cancelReasonId: 'error-comanda-mesero',
+        expectedUpdatedAt: '2026-11-04T12:04:00.000Z',
+      });
+    expect(staleRes.status).toBe(409);
+  });
 });

@@ -248,6 +248,26 @@ export const PERMISSION_CATALOG = [
 
 export type PermissionCode = (typeof PERMISSION_CATALOG)[number]['code'];
 
+export const ADMIN_ONLY_PERMISSIONS = [
+  'users.read',
+  'users.manage',
+  'roles.read',
+  'roles.manage',
+  'products.manage',
+  'tables.configure',
+  'tables.assign_zones',
+  'kitchen.configure',
+  'cash.configure',
+  'reports.read',
+  'reports.export',
+  'promotions.manage',
+  'settings.manage',
+  'audit.read',
+  'devices.manage',
+  'backups.read',
+  'backups.manage',
+] as const satisfies readonly PermissionCode[];
+
 const common = ['home.access', 'settings.read'] as const;
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<
@@ -361,6 +381,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     'delivery.manage',
     'cash.status',
     'cash.read',
+    'cash.expenses',
   ],
 };
 

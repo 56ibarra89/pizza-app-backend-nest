@@ -1,5 +1,6 @@
 import {
   IsEnum,
+  IsISO8601,
   IsNumber,
   IsOptional,
   IsString,
@@ -12,6 +13,10 @@ import { OrderStatusDto } from './order-status.dto';
 export class UpdateOrderStatusDto {
   @IsEnum(OrderStatusDto)
   status!: OrderStatusDto;
+
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  expectedUpdatedAt?: string;
 
   @IsOptional()
   @IsNumber()

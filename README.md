@@ -1,121 +1,254 @@
-# Pizza POS Backend (NestJS & Prisma)
+# Pizza To Go POS — Backend API (NestJS 11 & Prisma)
 
-Este es el backend del sistema de Punto de Venta (POS) y Gestión de Pedidos para una Pizzería, desarrollado con **NestJS** y **Prisma ORM** utilizando **PostgreSQL**.
-
----
-
-## 🚀 Requisitos Previos
-
-Asegúrate de tener instalado en tu máquina:
-- [Node.js](https://nodejs.org/) (versión 18 o superior recomendada)
-- [PostgreSQL](https://www.postgresql.org/) (o acceso a una base de datos PostgreSQL)
-- [npm](https://www.npmjs.com/) (incluido con Node.js)
+> **Idioma / Language**: [🇪🇸 Español](#-español) | [🇺🇸 English](#-english)
 
 ---
 
-## 🛠️ Configuración e Inicialización
+## 🇪🇸 Español
 
-Sigue estos pasos para poner en marcha el proyecto localmente:
+Backend transaccional del sistema de Punto de Venta (POS), Facturación, Cocina (KDS), Despacho, Arqueo de Caja y Administración para **Pizza To Go**, desarrollado con **NestJS 11**, **TypeScript**, **Prisma ORM**, **PostgreSQL** y **Socket.IO**.
 
-### 1. Configurar las variables de entorno
-Crea un archivo `.env` en la raíz del proyecto basándote en el archivo `.env.example`:
-```bash
-cp .env.example .env
+---
+
+### ✨ Características e Invariantes de Arquitectura
+
+1. **Monolito Modular en Capas con Inversión de Dependencias**:
+   - Cada dominio sigue una separación limpia: `Controller / Gateway -> Service + Validator -> Repository Interface -> Prisma Repository -> Mapper`.
+   - Comunicación desacoplada entre dominios mediante bus de eventos interno (`EventEmitter2`).
+2. **Seguridad y Control de Acceso Granular (`RBAC` + Recursos)**:
+   - Cadena global de seguridad: `ThrottlerGuard` -> `JwtAuthGuard` -> `RolesGuard`.
+   - Siete roles base del sistema (`ADMIN`, `CAJERO`, `CAJERO_PRINCIPAL`, `MESERO`, `COCINERO`, `MOTORIZADO`, `DESPACHADOR`) más roles personalizados (`AccessRole`) y catálogo de permisos evaluados con lógica estricta **`AND` (`every`)**.
+   - Autorización a nivel de recurso: un `motorizado` sólo puede operar sus propios pedidos de `delivery`, y un `cocinero` sólo opera ítems de su cocina asignada en el día comercial.
+   - Revalidación continua de sesiones (`isActive`, `tokenVersion` y expiración de JWT) en conexiones persistentes (`Socket.IO` y `SSE`).
+3. **Integridad Financiera y Concurrencia Pesimista/Optimista**:
+   - **Inmutabilidad Comercial**: Las órdenes `PAID` o `CANCELLED` bloquean cualquier modificación de líneas, precios, cantidades o descuentos.
+   - **Precios Congelados y Bloqueo en Cobro**: `InvoiceIssuingService` utiliza precios snapshot (`useSnapshotPrices: true`), valida concurrencia optimista (`expectedUpdatedAt`) y bloquea la orden con `SELECT ... FOR UPDATE`.
+   - **Serialización de Caja (`Shift`)**: Toda emisión de factura, registro de gasto (`CashExpense`) o cierre de caja (`Shift.close`) serializa la fila del turno activo con `SELECT ... FOR UPDATE`.
+   - **Correlativos (`Correlativo`)**: Consumo secuencial bajo bloqueo `FOR UPDATE` con rotación automática mensual para series `AUTO-*`.
+   - **Certificados y Pagos Multidivisa**: Validación estricta de números de serie de vales/certificados (`order-certificate.validator.ts`) y reconciliación de tipo de cambio `USD`/`NIO` (`order-payments.validator.ts`).
+4. **Política Única de Zona Horaria (`America/Managua`)**:
+   - Todos los cortes diarios, turnos, reportes y promociones utilizan [`business-time.util.ts`](src/common/time/business-time.util.ts) (`getBusinessDayBounds`, `getBusinessDateParts`, `getBusinessMonthEnd`).
+5. **Auditoría Durable y Respaldos Transaccionales**:
+   - Cola de escritura de bitácora (`AuditWriteQueueService`) con spool de respaldo en disco (`.jsonl`) ante fallos transitorios de base de datos.
+   - Generación y restauración de respaldos PostgreSQL (`pg_dump` / `psql --single-transaction -v ON_ERROR_STOP=1`) con verificación posterior de tablas críticas (`BackupsService`).
+
+---
+
+### 🏗️ Estructura del Proyecto
+
+```text
+pizza-app-backend-nest/
+├── prisma/
+│   ├── schema.prisma  # Esquema PostgreSQL (31 modelos y 15 enums)
+│   └── seed.ts        # Semilla idempotente del administrador inicial (hash + PIN_PEPPER)
+├── src/
+│   ├── main.ts        # Bootstrap: Helmet, CORS, ValidationPipe (whitelist + forbidNonWhitelisted)
+│   ├── app.module.ts  # Ensamblaje de los 22 módulos de dominio y guards globales
+│   ├── common/        # Utilidades transversales: business-time, guards, filtros y criptografía
+│   └── <dominio>/     # Módulos: access-control, admin-dashboard, app-config, backups,
+│                      # cash-expenses, correlativos, customers, devices, kitchens, mesas,
+│                      # notifications, orders, prisma, products, promotions, reports,
+│                      # shifts, system-logs, users
+├── Dockerfile         # Construcción multi-etapa (Node 20 + Prisma + postgresql-client)
+└── package.json
 ```
-Luego, abre el archivo `.env` y define tu cadena de conexión a PostgreSQL en la variable `DATABASE_URL`.
 
-Para la instalación local de Electron conserva `API_HOST=127.0.0.1`. Así, el
-inicio de sesión por PIN solo puede invocarse desde la misma computadora. Swagger
-permanece desactivado salvo que se configure explícitamente
-`SWAGGER_ENABLED=true`.
-
-### 2. Ejecutar comandos de inicialización
-Ejecuta los siguientes comandos en tu terminal para configurar y levantar la aplicación:
-
-```bash
-# Instala deps (en la carpeta del backend):
-cd D:\Dev-Personal\Electron\pizza-app-backend-nest
-npm install
-
-# Genera Prisma Client:
-npm run prisma:generate
-
-# Aplica migraciones (crea tablas en tu DB):
-npm run prisma:migrate -- --name init
-
-# Levanta el API en dev:
-npm run start:dev
-```
+Consulta [`AGENTS.md`](AGENTS.md) para ver el detalle completo de reglas e invariantes del servidor.
 
 ---
 
-## 🚦 Comandos Disponibles
+### 🚀 Requisitos e Instalación Local
 
-En el proyecto puedes ejecutar los siguientes scripts:
+1. **Requisitos**:
+   - **Node.js** `20.x`.
+   - **PostgreSQL** `15+` o `16+` (incluyendo herramientas de cliente `pg_dump` y `psql` si deseas usar el módulo de respaldos localmente).
+
+2. **Configurar variables de entorno**:
+   ```bash
+   cp .env.example .env
+   ```
+   Variables principales en `.env`:
+   ```env
+   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/pizza_app?schema=public"
+   NODE_ENV=development
+   API_HOST=127.0.0.1
+   PORT=3000
+
+   # Secretos criptográficos (mínimo 32 bytes cada uno, distintos entre sí)
+   JWT_SECRET=tu_jwt_secret_seguro_de_al_menos_32_caracteres
+   PIN_PEPPER=tu_pin_pepper_seguro_de_al_menos_32_caracteres
+
+   # Credenciales para crear el usuario administrador inicial con npm run db:setup
+   SEED_ADMIN_USERNAME=admin
+   SEED_ADMIN_PASSWORD=Admin123!
+   SEED_ADMIN_PIN=123456
+   ```
+   > **Reglas del Seed**: `SEED_ADMIN_PASSWORD` debe tener entre 8 y 128 caracteres, incluyendo mayúscula, minúscula, número y símbolo (`@$!%*?&`). `SEED_ADMIN_PIN` debe tener exactamente 6 dígitos numéricos.
+
+3. **Instalar dependencias, sincronizar base de datos e iniciar**:
+   ```bash
+   npm install
+   npm run prisma:generate
+   npm run db:setup
+   npm run start:dev
+   ```
+
+---
+
+### 📜 Scripts Disponibles
 
 | Comando | Descripción |
 | :--- | :--- |
-| `npm run start:dev` | Inicia el servidor NestJS en modo desarrollo con recarga automática (watch mode). |
-| `npm run build` | Compila el proyecto TypeScript a JavaScript de producción (directorio `/dist`). |
-| `npm run start:prod` | Ejecuta la aplicación compilada en producción. |
-| `npm run prisma:migrate:init` | Aplica la migración inicial para configurar la base de datos desde cero. |
-| `npm run prisma:migrate` | Detecta cambios en `schema.prisma` y crea una nueva migración de desarrollo. |
-| `npm run prisma:studio` | Abre la interfaz gráfica de Prisma (Prisma Studio) en tu navegador para ver/editar los datos. |
-| `npm run lint` | Ejecuta el linter (ESLint) para asegurar la calidad de código. |
-| `npm run format` | Aplica formato al código usando Prettier. |
+| `npm run start:dev` | Inicia el servidor NestJS en modo desarrollo (`watch mode`). |
+| `npm run build` | Compila el proyecto en `dist/`. |
+| `npm run start:prod` | Ejecuta el servidor compilado (`node dist/main`). |
+| `npm test` | Ejecuta las 55 suites de pruebas unitarias y de integración de contratos (`Jest` + `Supertest`). |
+| `npm run lint` | Ejecuta ESLint sobre `src/` y `test/`. |
+| `npm run prisma:generate` | Genera el cliente tipado de Prisma (`@prisma/client`). |
+| `npm run prisma:push` | Sincroniza el esquema `prisma/schema.prisma` con PostgreSQL. |
+| `npm run db:setup` | Sincroniza el esquema (`prisma db push`) y ejecuta la semilla del usuario `admin` (`prisma db seed`). |
+| `npm run prisma:studio` | Abre Prisma Studio para explorar la base de datos en el navegador. |
 
 ---
 
-## ☁️ Deploy en Heroku (Node + Postgres + Prisma)
+### 🐳 Ejecución con Docker
 
-Este proyecto ya incluye lo necesario para Heroku:
+Puedes levantar todo el ecosistema (`PostgreSQL 16 + Backend + Frontend`) desde la raíz del workspace (`c:\DEV\Electron`) con un solo comando:
 
-- `Procfile`:
-	- `web: npm run start:prod`
-	- `release: npm run prisma:migrate:deploy` (aplica migraciones en cada deploy)
-- `package.json`:
-	- `heroku-postbuild`: genera Prisma Client + compila Nest (`dist/`)
+```bash
+# Desde la carpeta raíz c:\DEV\Electron
+docker compose up --build
+```
 
-### Variables de entorno requeridas
+El contenedor `pizza-pos-backend` espera automáticamente a que `postgres` esté saludable, sincroniza el esquema Prisma, ejecuta `prisma/seed.ts` y expone la API en `http://localhost:3000` (healthcheck en `GET /health`).
 
-- `DATABASE_URL`: lo crea automáticamente el addon de Heroku Postgres.
-- `PORT`: lo asigna Heroku automáticamente (el backend ya lo usa).
-- `JWT_SECRET`: valor aleatorio exclusivo de al menos 32 bytes.
-- `PIN_PEPPER`: otro valor aleatorio, distinto de `JWT_SECRET`, de al menos 32 bytes.
-- `JWT_ISSUER` y `JWT_AUDIENCE`: deben coincidir con la configuración esperada por la aplicación.
-- `API_HOST=0.0.0.0`: necesario únicamente cuando el proveedor debe exponer el proceso.
-- `CORS_ORIGINS`: lista exacta de frontends HTTPS permitidos, separada por comas.
-- `TRUST_PROXY_HOPS=1`: solo cuando existe exactamente un proxy confiable delante del API.
+Si necesitas recrear o desbloquear las credenciales del usuario `admin` con el contenedor en marcha:
+```bash
+docker exec -e SEED_ADMIN_FORCE_OVERWRITE=true -it pizza-pos-backend npx ts-node prisma/seed.ts
+```
 
-La aplicación falla de forma segura al iniciar si faltan `JWT_SECRET` o
-`PIN_PEPPER`. Genere los secretos con un generador criptográfico y configúrelos
-directamente en el proveedor; nunca los guarde en Git.
+---
+---
 
-### Migración de PIN segura
+## 🇺🇸 English
 
-La migración `20260913000000_secure_auth_credentials` elimina todos los PIN en
-texto plano. Después de desplegarla, inicie sesión con contraseña y asigne a
-cada usuario un nuevo PIN de exactamente seis dígitos. Para crear o rotar el
-administrador inicial con `npm run db:setup`, configure también
-`SEED_ADMIN_PASSWORD` y `SEED_ADMIN_PIN`; el seed ya no contiene credenciales
-predeterminadas.
-
-Nota: si tu instancia de Postgres requiere SSL y tu `DATABASE_URL` no trae `sslmode=require`, agrégalo en la config de Heroku.
-
-### Pasos rápidos (CLI)
-
-1. Crear app y agregar Postgres
-2. Configurar variables (si aplica)
-3. Deploy
-
-Swagger no se publica por defecto. Habilítalo temporalmente solo si necesitas
-consultar `https://<tu-app>.herokuapp.com/docs` y vuelve a desactivarlo después.
+Transactional backend for the **Pizza To Go** Point of Sale (POS), Invoicing, Kitchen Display System (KDS), Delivery Dispatch, Cash Register Shifts, and Administration platform, built with **NestJS 11**, **TypeScript**, **Prisma ORM**, **PostgreSQL**, and **Socket.IO**.
 
 ---
 
-## 📐 Aspectos Destacados del Diseño y Arquitectura
+### ✨ Key Features & Architectural Invariants
 
-* **Separación de Usuarios**: El sistema diferencia estrictamente a los usuarios administrativos/personal (`User`) con roles específicos (`ADMIN`, `CAJERO`, `MESERO`, `COCINERO`) de los clientes finales (`Customer`) que realizan los pedidos.
-* **Integridad en Promociones**: Soporte robusto de promociones (`HappyHourPromotion`, `DiscountPromotion`, `Cupon`, `Certificado`) con relaciones relacionales reales a productos y categorías específicos para evitar inconsistencias.
-* **Bloqueo Pesimista (`FOR UPDATE`)**: Prevención de colisiones de números de factura (`Correlativo`) en ambientes concurrentes usando transacciones nativas y bloqueos a nivel de fila.
-* **Precisión Matemática**: Validación exacta de pagos a nivel de base de datos para mitigar errores de coma flotante en transacciones monetarias.
+1. **Layered Modular Monolith with Dependency Inversion**:
+   - Every domain module follows a clean layered structure: `Controller / Gateway -> Service + Validator -> Repository Interface -> Prisma Repository -> Mapper`.
+   - Decoupled cross-module communication via an internal event bus (`EventEmitter2`).
+2. **Security & Granular Access Control (`RBAC` + Resource-Level Auth)**:
+   - Global security pipeline: `ThrottlerGuard` -> `JwtAuthGuard` -> `RolesGuard`.
+   - Seven system base roles (`ADMIN`, `CAJERO`, `CAJERO_PRINCIPAL`, `MESERO`, `COCINERO`, `MOTORIZADO`, `DESPACHADOR`), custom roles (`AccessRole`), and a granular permission catalog evaluated with strict logical **`AND` (`every`)** semantics.
+   - Resource-level authorization: a `motorizado` (driver) can only view/update `delivery` orders assigned to their `driverId`, and a `cocinero` (cook) only operates items belonging to their assigned kitchen for the current business day.
+   - Continuous session revalidation (`isActive`, `tokenVersion`, and JWT expiration) across persistent connections (`Socket.IO` and `SSE`).
+3. **Financial Integrity & Pessimistic/Optimistic Concurrency**:
+   - **Commercial Immutability**: `PAID` and `CANCELLED` orders reject any modification to line items, prices, quantities, or discounts.
+   - **Frozen Snapshot Prices & Checkout Locking**: `InvoiceIssuingService` enforces snapshot prices (`useSnapshotPrices: true`), validates optimistic concurrency (`expectedUpdatedAt`), and locks the order row with `SELECT ... FOR UPDATE`.
+   - **Cash Shift Serialization (`Shift`)**: Every invoice issuance, cash expense (`CashExpense`), and shift closure (`Shift.close`) locks the active shift row with `SELECT ... FOR UPDATE` inside the transaction.
+   - **Sequential Tax Correlatives (`Correlativo`)**: Sequential consumption under `FOR UPDATE` row locks with automatic monthly rollover for `AUTO-*` series.
+   - **Gift Certificates & Multi-Currency Payments**: Strict certificate serial validation (`order-certificate.validator.ts`) and `USD`/`NIO` exchange-rate reconciliation (`order-payments.validator.ts`).
+4. **Unified Business Timezone Policy (`America/Managua`)**:
+   - All daily cutoffs, shifts, reports, and promotions use [`business-time.util.ts`](src/common/time/business-time.util.ts) (`getBusinessDayBounds`, `getBusinessDateParts`, `getBusinessMonthEnd`).
+5. **Durable Audit Logging & Transactional Backups**:
+   - Asynchronous audit queue (`AuditWriteQueueService`) with a durable on-disk `.jsonl` spool fallback during transient database outages.
+   - PostgreSQL backup generation and restoration (`pg_dump` / `psql --single-transaction -v ON_ERROR_STOP=1`) with post-restore core table verification (`BackupsService`).
+
+---
+
+### 🏗️ Project Structure
+
+```text
+pizza-app-backend-nest/
+├── prisma/
+│   ├── schema.prisma  # PostgreSQL schema (31 models & 15 enums)
+│   └── seed.ts        # Idempotent initial administrator seed (credential hashing + PIN_PEPPER)
+├── src/
+│   ├── main.ts        # Bootstrap: Helmet, CORS, ValidationPipe (whitelist + forbidNonWhitelisted)
+│   ├── app.module.ts  # Composition of all 22 domain modules & global guards
+│   ├── common/        # Cross-cutting utilities: business-time, guards, filters & cryptography
+│   └── <domain>/      # Modules: access-control, admin-dashboard, app-config, backups,
+│                      # cash-expenses, correlativos, customers, devices, kitchens, mesas,
+│                      # notifications, orders, prisma, products, promotions, reports,
+│                      # shifts, system-logs, users
+├── Dockerfile         # Multi-stage build (Node 20 + Prisma + postgresql-client)
+└── package.json
+```
+
+See [`AGENTS.md`](AGENTS.md) for the complete reference of backend architectural rules and invariants.
+
+---
+
+### 🚀 Requirements & Local Setup
+
+1. **Prerequisites**:
+   - **Node.js** `20.x`.
+   - **PostgreSQL** `15+` or `16+` (including `pg_dump` and `psql` client binaries if using the backups module locally).
+
+2. **Environment Configuration**:
+   ```bash
+   cp .env.example .env
+   ```
+   Core variables in `.env`:
+   ```env
+   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/pizza_app?schema=public"
+   NODE_ENV=development
+   API_HOST=127.0.0.1
+   PORT=3000
+
+   # Cryptographic secrets (at least 32 bytes each, distinct from one another)
+   JWT_SECRET=your_secure_jwt_secret_at_least_32_bytes_long
+   PIN_PEPPER=your_secure_pin_pepper_at_least_32_bytes_long
+
+   # Initial administrator credentials used by npm run db:setup
+   SEED_ADMIN_USERNAME=admin
+   SEED_ADMIN_PASSWORD=Admin123!
+   SEED_ADMIN_PIN=123456
+   ```
+   > **Seed Policy**: `SEED_ADMIN_PASSWORD` must be 8–128 characters and include uppercase, lowercase, digit, and special character (`@$!%*?&`). `SEED_ADMIN_PIN` must be exactly 6 numeric digits.
+
+3. **Install Dependencies, Sync Database & Start**:
+   ```bash
+   npm install
+   npm run prisma:generate
+   npm run db:setup
+   npm run start:dev
+   ```
+
+---
+
+### 📜 Available Scripts
+
+| Command | Description |
+| :--- | :--- |
+| `npm run start:dev` | Starts the NestJS server in development watch mode. |
+| `npm run build` | Compiles the project into `dist/`. |
+| `npm run start:prod` | Runs the compiled production server (`node dist/main`). |
+| `npm test` | Runs all 55 unit and contract integration test suites (`Jest` + `Supertest`). |
+| `npm run lint` | Runs ESLint across `src/` and `test/`. |
+| `npm run prisma:generate` | Generates the typed Prisma client (`@prisma/client`). |
+| `npm run prisma:push` | Pushes `prisma/schema.prisma` to the PostgreSQL database. |
+| `npm run db:setup` | Syncs the Prisma schema (`prisma db push`) and seeds the `admin` user (`prisma db seed`). |
+| `npm run prisma:studio` | Opens Prisma Studio to inspect and edit database records in the browser. |
+
+---
+
+### 🐳 Running with Docker
+
+You can launch the entire stack (`PostgreSQL 16 + Backend + Frontend`) from the workspace root (`c:\DEV\Electron`) with a single command:
+
+```bash
+# From the workspace root c:\DEV\Electron
+docker compose up --build
+```
+
+The `pizza-pos-backend` container automatically waits for `postgres` to report healthy, pushes the Prisma schema, runs `prisma/seed.ts`, and serves the API at `http://localhost:3000` (healthcheck at `GET /health`).
+
+To force-reset or unlock the `admin` user credentials while the container is running:
+```bash
+docker exec -e SEED_ADMIN_FORCE_OVERWRITE=true -it pizza-pos-backend npx ts-node prisma/seed.ts
+```

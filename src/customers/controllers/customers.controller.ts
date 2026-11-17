@@ -57,7 +57,6 @@ export class CustomersController {
     UserRoleDto.cajero,
     UserRoleDto.cajero_principal,
     UserRoleDto.despachador,
-    UserRoleDto.motorizado,
   )
   async createCustomer(@Body() dto: CreateCustomerDto) {
     const created = await this.customers.create(dto);
@@ -71,7 +70,6 @@ export class CustomersController {
     UserRoleDto.cajero,
     UserRoleDto.cajero_principal,
     UserRoleDto.despachador,
-    UserRoleDto.motorizado,
   )
   async upsertCustomer(@Body() dto: UpsertCustomerDto) {
     const result = await this.customers.upsert(dto);

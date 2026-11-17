@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { CertificadoStatus } from '@prisma/client';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { CertificadoStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type {
   CertificateWithRelations,
@@ -72,12 +72,54 @@ export class PrismaCertificatePromotionsRepository implements ICertificatePromot
     return changed.count === 1 ? this.findById(id) : null;
   }
 
+  async cancelIfAvailable(
+    id: number,
+  ): Promise<CertificateWithRelations | null> {
+    const changed = await this.prisma.certificado.updateMany({
+      where: { id, deletedAt: null, status: CertificadoStatus.DISPONIBLE },
+      data: { status: CertificadoStatus.ANULADO },
+    });
+    return changed.count === 1 ? this.findById(id) : null;
+  }
+
   async delete(id: number): Promise<void> {
     const existing = await this.prisma.certificado.findUnique({
       where: { id },
-      select: { serial: true },
+      select: { serial: true, status: true, redeemedOrderId: true },
     });
     if (!existing) return;
+    if (
+      existing.status === CertificadoStatus.ENTREGADO ||
+      existing.redeemedOrderId
+    ) {
+      throw new BadRequestException(
+        'No se puede eliminar un certificado que ya fue entregado o canjeado.',
+      );
+    }
+    if (typeof this.prisma.order?.findMany === 'function') {
+      const activeOrdersWithCerts = await this.prisma.order.findMany({
+        where: {
+          status: { notIn: ['PAID', 'CANCELLED'] },
+          NOT: { pendingCertificateSerials: { equals: Prisma.DbNull } },
+        },
+        select: { pendingCertificateSerials: true },
+      });
+      const targetSerial = existing.serial.trim().toUpperCase();
+      const isReserved = activeOrdersWithCerts.some(
+        (order) =>
+          Array.isArray(order.pendingCertificateSerials) &&
+          order.pendingCertificateSerials.some(
+            (serial) =>
+              typeof serial === 'string' &&
+              serial.trim().toUpperCase() === targetSerial,
+          ),
+      );
+      if (isReserved) {
+        throw new BadRequestException(
+          'El certificado está reservado en una orden activa y no puede eliminarse.',
+        );
+      }
+    }
 
     // `serial` es único a nivel de base. Conservamos el registro borrado para
     // auditoría, pero liberamos su serial comercial para una nueva emisión.
