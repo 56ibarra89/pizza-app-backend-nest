@@ -92,7 +92,7 @@ function toLegacyPaymentMethod(method: PaymentMethodConfig): PaymentMethodDto {
 export function normalizeAndValidateOrderPayments(
   payments: OrderPaymentDto[],
   methods: PaymentMethodConfig[],
-  defaultExchangeRate = 36.5,
+  configuredExchangeRate = 0,
 ): OrderPaymentDto[] {
   return payments.map((payment) => {
     const configured = findPaymentMethod(methods, payment);
@@ -142,12 +142,16 @@ export function normalizeAndValidateOrderPayments(
         'Los pagos en córdobas deben tener tipo de cambio igual a 1.',
       );
     }
-    const exchangeRate =
-      configured.currency === 'USD'
-        ? providedExchangeRate > 0
-          ? providedExchangeRate
-          : Math.max(0.0001, Number(defaultExchangeRate) || 36.5)
-        : 1;
+    if (configured.currency === 'USD') {
+      if (!Number.isFinite(configuredExchangeRate) || configuredExchangeRate <= 0) {
+        throw new BadRequestException('Configura una tasa de cambio USD válida antes de cobrar en dólares.');
+      }
+      if (payment.exchangeRate !== undefined &&
+          (!Number.isFinite(providedExchangeRate) || Math.abs(providedExchangeRate - configuredExchangeRate) > 0.0001)) {
+        throw new BadRequestException('La tasa de cambio cambió. Actualiza la pantalla e intenta nuevamente.');
+      }
+    }
+    const exchangeRate = configured.currency === 'USD' ? configuredExchangeRate : 1;
     const providedOriginalAmount = Number(payment.originalAmount);
     if (
       payment.originalAmount !== undefined &&

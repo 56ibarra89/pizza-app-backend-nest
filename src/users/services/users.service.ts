@@ -683,7 +683,6 @@ export class UsersService {
 
   async resetPassword(token: string, newPassword: string) {
     try {
-      // Verificar el token
       const payload: unknown = this.jwtService.verify(token);
       if (!isPasswordResetJwtPayload(payload)) {
         throw new UnauthorizedException(
@@ -871,7 +870,6 @@ export class UsersService {
       return { ...zone, day };
     });
 
-    // We can delete all and recreate, or upsert. Delete + Create is easier.
     await this.prisma.$transaction(async (tx) => {
       await tx.waiterZoneAssignment.deleteMany({
         where: { userId },

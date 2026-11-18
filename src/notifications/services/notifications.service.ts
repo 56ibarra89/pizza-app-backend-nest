@@ -249,7 +249,6 @@ export class NotificationsService {
         payload.targetUsername,
         payload.orderId,
       ),
-      // Guardamos notificación para CAJERO_PRINCIPAL
       this.createNotification(
         title,
         message,
@@ -257,7 +256,6 @@ export class NotificationsService {
         undefined,
         payload.orderId,
       ),
-      // Guardamos notificación para ADMIN
       this.createNotification(
         title,
         message,
@@ -325,7 +323,6 @@ export class NotificationsService {
       },
     });
 
-    // Emitir al SSE
     this.notificationStream.next(notification);
   }
 

@@ -25,6 +25,7 @@ describe('normalizeAndValidateOrderPayments', () => {
         },
       ],
       [usdCashMethod] as never,
+      36.5,
     );
 
     expect(payment.originalAmount).toBe(2.7397);
@@ -44,7 +45,20 @@ describe('normalizeAndValidateOrderPayments', () => {
           },
         ],
         [usdCashMethod] as never,
+        36.5,
       ),
     ).toThrow(BadRequestException);
+  });
+
+  it('exige una tasa configurada aunque el cliente envíe una', () => {
+    const payments = [{ method: PaymentMethodDto.EFECTIVO, methodConfigId: 'cash-usd', amount: 100, exchangeRate: 36.5 }];
+    expect(() => normalizeAndValidateOrderPayments(payments, [usdCashMethod] as never)).toThrow('Configura una tasa');
+    expect(() => normalizeAndValidateOrderPayments(payments, [usdCashMethod] as never, 37)).toThrow('La tasa de cambio cambió');
+  });
+
+  it('permite pagos en córdobas sin configurar una tasa', () => {
+    const nio = { ...usdCashMethod, id: 'cash-nio', currency: 'NIO' };
+    const [payment] = normalizeAndValidateOrderPayments([{ method: PaymentMethodDto.EFECTIVO, methodConfigId: 'cash-nio', amount: 100 }], [nio] as never);
+    expect(payment.exchangeRate).toBe(1);
   });
 });

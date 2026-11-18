@@ -3113,10 +3113,7 @@ export class OrdersService {
       !Array.isArray(general.data)
         ? (general.data as Record<string, unknown>)
         : undefined;
-    const defaultExchangeRate = Math.max(
-      0.0001,
-      Number(generalData?.exchangeRate) || 36.5,
-    );
+    const defaultExchangeRate = Number(generalData?.exchangeRate);
 
     const normalized = normalizeAndValidateOrderPayments(
       payments,
