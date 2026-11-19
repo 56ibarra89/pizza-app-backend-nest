@@ -28,48 +28,7 @@ export interface VoidWastePolicyConfig {
 export const DEFAULT_VOID_WASTE_POLICY_CONFIG: VoidWastePolicyConfig = {
   requireSupervisorForPaidOrders: true,
   requireSupervisorWhenPreparationStarted: true,
-  reasons: [
-    {
-      id: 'pizza-quemada',
-      label: 'Pizza quemada en horno',
-      category: 'KITCHEN',
-      isActive: true,
-      countsAsWaste: true,
-      requiresSupervisor: true,
-    },
-    {
-      id: 'cliente-cancelo-tardanza',
-      label: 'Cliente canceló por tardanza en delivery',
-      category: 'CUSTOMER',
-      isActive: true,
-      countsAsWaste: false,
-      requiresSupervisor: false,
-    },
-    {
-      id: 'error-comanda-mesero',
-      label: 'Error de comanda del mesero',
-      category: 'SERVICE',
-      isActive: true,
-      countsAsWaste: false,
-      requiresSupervisor: false,
-    },
-    {
-      id: 'cortesia-gerencia',
-      label: 'Cortesía de la casa / Gerencia',
-      category: 'COURTESY',
-      isActive: true,
-      countsAsWaste: false,
-      requiresSupervisor: true,
-    },
-    {
-      id: 'cliente-cambio-opinion',
-      label: 'Cliente cambió de opinión',
-      category: 'CUSTOMER',
-      isActive: true,
-      countsAsWaste: false,
-      requiresSupervisor: false,
-    },
-  ],
+  reasons: [],
 };
 
 const isObject = (value: unknown): value is Record<string, unknown> =>

@@ -526,7 +526,7 @@ describe('OrdersService split checkout safeguards', () => {
     };
     const prisma = {
       appConfig: {
-        findUnique: jest.fn().mockResolvedValue(null),
+        findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'payment_methods' ? { data: { methods: [{ id: 'cash-nio', name: 'Efectivo', type: 'CASH', currency: 'NIO', requiresReference: false, commissionRate: 0, isActive: true }, { id: 'card-generic', name: 'Tarjeta', type: 'CARD_POS', currency: 'NIO', requiresReference: true, commissionRate: 0, isActive: true }] } } : where.id === 'void_waste_policies' ? { data: { reasons: [{ id: 'error-comanda-mesero', label: 'Error de comanda', category: 'SERVICE', isActive: true, countsAsWaste: false, requiresSupervisor: false }] } } : null)),
       },
       $transaction: jest.fn(
         <T>(callback: (tx: unknown) => Promise<T>): Promise<T> =>
@@ -723,7 +723,7 @@ describe('OrdersService split checkout safeguards', () => {
       }),
     };
     const prisma = {
-      appConfig: { findUnique: jest.fn().mockResolvedValue(null) },
+      appConfig: { findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'payment_methods' ? { data: { methods: [{ id: 'cash-nio', name: 'Efectivo', type: 'CASH', currency: 'NIO', requiresReference: false, commissionRate: 0, isActive: true }, { id: 'card-generic', name: 'Tarjeta', type: 'CARD_POS', currency: 'NIO', requiresReference: true, commissionRate: 0, isActive: true }] } } : where.id === 'void_waste_policies' ? { data: { reasons: [{ id: 'error-comanda-mesero', label: 'Error de comanda', category: 'SERVICE', isActive: true, countsAsWaste: false, requiresSupervisor: false }] } } : null)) },
       order: {
         findFirst: jest.fn().mockResolvedValue({ id: 'child-1' }),
         count: jest.fn().mockResolvedValue(1),

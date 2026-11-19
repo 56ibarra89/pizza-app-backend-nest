@@ -10,6 +10,8 @@ describe('normalizeVoidWastePolicyConfig', () => {
     expect(result.requireSupervisorForPaidOrders).toBe(true);
     expect(result.requireSupervisorWhenPreparationStarted).toBe(true);
     expect(result.reasons).toEqual(DEFAULT_VOID_WASTE_POLICY_CONFIG.reasons);
+    expect(result.reasons).toEqual([]);
+    expect(normalizeVoidWastePolicyConfig({ reasons: [] }).reasons).toEqual([]);
   });
 
   it('removes invalid and duplicate reasons while normalizing categories', () => {

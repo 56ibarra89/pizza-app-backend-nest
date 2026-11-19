@@ -120,6 +120,13 @@ describe('CashExpensesService', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
+  it('rechaza gastos cuando la política no está configurada', async () => {
+    shiftsService.getActiveSummary.mockResolvedValue({ id: 'shift-123', status: ShiftStatus.OPEN });
+    configService.getByIdOrDefault.mockResolvedValue({ id: 'petty_cash_policy', data: {} });
+    await expect(service.create({ amount: 200, category: CashExpenseCategoryDto.OTROS, reason: 'Compra urgente' }, user)).rejects.toThrow('Configura y guarda la política');
+    expect(repo.create).not.toHaveBeenCalled();
+  });
+
   it('exige y valida el PIN de administrador cuando la política lo requiere', async () => {
     shiftsService.getActiveSummary.mockResolvedValue({
       id: 'shift-123',

@@ -1,8 +1,17 @@
 import { BadRequestException } from '@nestjs/common';
 import { PaymentMethodDto } from '../dto/payment-method.dto';
 import { normalizeAndValidateOrderPayments } from './order-payments.validator';
+import { normalizePaymentMethodsConfig } from '../../common/payment-methods.config';
 
 describe('normalizeAndValidateOrderPayments', () => {
+  it('acepta efectivo NIO sin configuración de métodos ni tasa de cambio', () => {
+    const methods = normalizePaymentMethodsConfig(undefined).methods;
+    const [payment] = normalizeAndValidateOrderPayments(
+      [{ method: PaymentMethodDto.EFECTIVO, methodConfigId: 'cash-nio', amount: 100 }],
+      methods,
+    );
+    expect(payment).toMatchObject({ currency: 'NIO', exchangeRate: 1, commissionAmount: 0 });
+  });
   const usdCashMethod = {
     id: 'cash-usd',
     name: 'Efectivo USD',

@@ -36,48 +36,34 @@ export interface PaymentMethodsConfig {
 }
 
 export const DEFAULT_PAYMENT_METHODS_CONFIG: PaymentMethodsConfig = {
-  methods: [
-    {
-      id: 'cash-nio',
-      name: 'Efectivo Córdobas',
-      type: 'CASH',
-      currency: 'NIO',
-      requiresReference: false,
-      commissionRate: 0,
-      isActive: true,
-    },
-    {
-      id: 'cash-usd',
-      name: 'Efectivo Dólares',
-      type: 'CASH',
-      currency: 'USD',
-      requiresReference: false,
-      commissionRate: 0,
-      isActive: true,
-    },
-    {
-      id: 'card-generic',
-      name: 'POS Tarjeta',
-      type: 'CARD_POS',
-      currency: 'NIO',
-      requiresReference: true,
-      commissionRate: 2.5,
-      isActive: true,
-    },
-    {
-      id: 'transfer-generic',
-      name: 'Transferencia bancaria',
-      type: 'BANK_TRANSFER',
-      currency: 'NIO',
-      requiresReference: true,
-      commissionRate: 0,
-      isActive: true,
-    },
-  ],
+  methods: [{
+    id: 'cash-nio',
+    name: 'Efectivo Córdobas',
+    type: 'CASH',
+    currency: 'NIO',
+    requiresReference: false,
+    commissionRate: 0,
+    isActive: true,
+  }],
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+export function resolveOperationalPaymentMethods(
+  config: PaymentMethodsConfig,
+  general: unknown,
+): PaymentMethodsConfig {
+  const settings = isRecord(general) ? general : {};
+  const code = typeof settings.secondaryCurrencyCode === 'string'
+    ? settings.secondaryCurrencyCode.toUpperCase()
+    : settings.secondaryCurrencyCode === undefined ? 'USD' : '';
+  const rate = Number(settings.exchangeRate);
+  const enabled = settings.enableSecondaryCurrency === true && code === 'USD' && Number.isFinite(rate) && rate > 0;
+  if (!enabled) return { methods: config.methods.filter((method) => method.currency !== 'USD') };
+  if (config.methods.some((method) => (method.type === 'CASH' && method.currency === 'USD') || method.id === 'cash-usd')) return config;
+  return { methods: [...config.methods, { id: 'cash-usd', name: 'Efectivo Dólares', type: 'CASH', currency: 'USD', requiresReference: false, commissionRate: 0, isActive: true }] };
+}
 
 const clampRate = (value: unknown) => {
   const parsed = Number(value);
@@ -89,6 +75,9 @@ export function normalizePaymentMethodsConfig(
   value: unknown,
 ): PaymentMethodsConfig {
   const record = isRecord(value) ? value : {};
+  if (value == null || (isRecord(value) && Object.keys(value).length === 0)) {
+    return { methods: DEFAULT_PAYMENT_METHODS_CONFIG.methods.map((method) => ({ ...method })) };
+  }
   const source = Array.isArray(record.methods) ? record.methods : [];
   const methods = source.flatMap((candidate) => {
     if (!isRecord(candidate)) return [];
@@ -129,8 +118,6 @@ export function normalizePaymentMethodsConfig(
       methods.findIndex((candidate) => candidate.id === method.id) === index,
   );
   return {
-    methods: unique.length
-      ? unique
-      : DEFAULT_PAYMENT_METHODS_CONFIG.methods.map((method) => ({ ...method })),
+    methods: unique,
   };
 }

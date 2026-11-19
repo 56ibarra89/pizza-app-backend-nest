@@ -149,6 +149,9 @@ export class CashExpensesService {
     const config = await this.configService.getByIdOrDefault(
       PETTY_CASH_POLICY_KEY,
     );
+    if (typeof config.data !== 'object' || config.data === null || Array.isArray(config.data) || Object.keys(config.data).length === 0) {
+      throw new BadRequestException('Configura y guarda la política de caja chica antes de registrar gastos.');
+    }
     const policy = readPolicy(config.data);
     const categoryPolicy = policy.categoryPolicies[dto.category] ?? {
       enabled: true,

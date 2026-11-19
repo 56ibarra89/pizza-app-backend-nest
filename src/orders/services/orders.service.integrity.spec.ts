@@ -601,7 +601,7 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
     it('rejects creating an immediately paid order when user lacks orders.finalize (H07)', async () => {
       const repo = { create: jest.fn() };
       const prisma = {
-        appConfig: { findUnique: jest.fn().mockResolvedValue(null) },
+        appConfig: { findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'payment_methods' ? { data: { methods: [{ id: 'cash-nio', name: 'Efectivo', type: 'CASH', currency: 'NIO', requiresReference: false, commissionRate: 0, isActive: true }, { id: 'card-generic', name: 'Tarjeta', type: 'CARD_POS', currency: 'NIO', requiresReference: true, commissionRate: 0, isActive: true }] } } : where.id === 'void_waste_policies' ? { data: { reasons: [{ id: 'error-comanda-mesero', label: 'Error de comanda', category: 'SERVICE', isActive: true, countsAsWaste: false, requiresSupervisor: false }] } } : null)) },
       };
       const service = new OrdersService(
         repo as never,
@@ -1019,9 +1019,16 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
       );
     });
 
+    it('resuelve efectivo USD con tasa y multimoneda guardadas', async () => {
+      const prisma = { appConfig: { findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'general_config' ? { data: { enableSecondaryCurrency: true, secondaryCurrencyCode: 'USD', exchangeRate: 36.5 } } : null)) } };
+      const service = new OrdersService({} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, prisma as never);
+      const resolve = (service as unknown as { resolvePayments: (payments: unknown[]) => Promise<unknown> }).resolvePayments.bind(service);
+      await expect(resolve([{ method: PaymentMethodDto.EFECTIVO, methodConfigId: 'cash-usd', amount: 365, originalAmount: 10, exchangeRate: 36.5 }])).resolves.toEqual([expect.objectContaining({ currency: 'USD', originalAmount: 10, amount: 365, exchangeRate: 36.5 })]);
+    });
+
     it('rejects inconsistent originalAmount/exchangeRate and prevents altering non-cash payments in split reconciliation (H15)', async () => {
       const prisma = {
-        appConfig: { findUnique: jest.fn().mockResolvedValue(null) },
+        appConfig: { findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'payment_methods' ? { data: { methods: [{ id: 'cash-nio', name: 'Efectivo', type: 'CASH', currency: 'NIO', requiresReference: false, commissionRate: 0, isActive: true }, { id: 'card-generic', name: 'Tarjeta', type: 'CARD_POS', currency: 'NIO', requiresReference: true, commissionRate: 0, isActive: true }] } } : where.id === 'void_waste_policies' ? { data: { reasons: [{ id: 'error-comanda-mesero', label: 'Error de comanda', category: 'SERVICE', isActive: true, countsAsWaste: false, requiresSupervisor: false }] } } : null)) },
       };
       const service = new OrdersService(
         {} as never,
@@ -1308,7 +1315,7 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
         }),
       };
       const prisma = {
-        appConfig: { findUnique: jest.fn().mockResolvedValue(null) },
+        appConfig: { findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'payment_methods' ? { data: { methods: [{ id: 'cash-nio', name: 'Efectivo', type: 'CASH', currency: 'NIO', requiresReference: false, commissionRate: 0, isActive: true }, { id: 'card-generic', name: 'Tarjeta', type: 'CARD_POS', currency: 'NIO', requiresReference: true, commissionRate: 0, isActive: true }] } } : where.id === 'void_waste_policies' ? { data: { reasons: [{ id: 'error-comanda-mesero', label: 'Error de comanda', category: 'SERVICE', isActive: true, countsAsWaste: false, requiresSupervisor: false }] } } : null)) },
         $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
           fn(sharedTx),
         ),
@@ -1400,7 +1407,7 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
       };
       const prisma = {
         appConfig: {
-          findUnique: jest.fn().mockResolvedValue(null),
+          findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'payment_methods' ? { data: { methods: [{ id: 'cash-nio', name: 'Efectivo', type: 'CASH', currency: 'NIO', requiresReference: false, commissionRate: 0, isActive: true }, { id: 'card-generic', name: 'Tarjeta', type: 'CARD_POS', currency: 'NIO', requiresReference: true, commissionRate: 0, isActive: true }] } } : where.id === 'void_waste_policies' ? { data: { reasons: [{ id: 'error-comanda-mesero', label: 'Error de comanda', category: 'SERVICE', isActive: true, countsAsWaste: false, requiresSupervisor: false }] } } : null)),
         },
         $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
           fn({}),
@@ -1720,7 +1727,7 @@ describe('Pass-5 remaining integrity safeguards (B54 & B59)', () => {
       order: { update: jest.fn() },
     };
     const prisma = {
-      appConfig: { findUnique: jest.fn().mockResolvedValue(null) },
+      appConfig: { findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'payment_methods' ? { data: { methods: [{ id: 'cash-nio', name: 'Efectivo', type: 'CASH', currency: 'NIO', requiresReference: false, commissionRate: 0, isActive: true }, { id: 'card-generic', name: 'Tarjeta', type: 'CARD_POS', currency: 'NIO', requiresReference: true, commissionRate: 0, isActive: true }] } } : where.id === 'void_waste_policies' ? { data: { reasons: [{ id: 'error-comanda-mesero', label: 'Error de comanda', category: 'SERVICE', isActive: true, countsAsWaste: false, requiresSupervisor: false }] } } : null)) },
       $transaction: jest.fn(async (cb: (client: unknown) => Promise<unknown>) =>
         cb(tx),
       ),

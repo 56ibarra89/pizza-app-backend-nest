@@ -82,10 +82,7 @@ function readPackagingSizes(value: unknown): PackagingSizeConfig[] {
 
 function readTaxConfig(value: unknown): TaxConfig {
   if (!isRecord(value) || Object.keys(value).length === 0) {
-    return {
-      taxes: [{ percentage: 15 }],
-      isExonerated: false,
-    };
+    throw new BadRequestException('Configura los impuestos antes de calcular el total de la orden.');
   }
 
   const taxes = Array.isArray(value.taxes)

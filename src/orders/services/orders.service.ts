@@ -76,6 +76,7 @@ import {
   DEFAULT_PAYMENT_METHODS_CONFIG,
   PAYMENT_METHODS_CONFIG_ID,
   normalizePaymentMethodsConfig,
+  resolveOperationalPaymentMethods,
 } from '../../common/payment-methods.config';
 import type { OrderPaymentDto } from '../dto/order-payment.dto';
 import { collectOrderKitchenIds } from '../mappers/orders.mapper';
@@ -3104,7 +3105,7 @@ export class OrdersService {
         select: { data: true },
       }),
     ]);
-    const config = normalizePaymentMethodsConfig(
+    const configuredMethods = normalizePaymentMethodsConfig(
       saved?.data ?? DEFAULT_PAYMENT_METHODS_CONFIG,
     );
     const generalData =
@@ -3114,6 +3115,10 @@ export class OrdersService {
         ? (general.data as Record<string, unknown>)
         : undefined;
     const defaultExchangeRate = Number(generalData?.exchangeRate);
+    const config = resolveOperationalPaymentMethods(configuredMethods, generalData);
+    if (payments.length > 0 && !config.methods.some((method) => method.isActive)) {
+      throw new BadRequestException('Configura al menos un método de pago activo antes de cobrar.');
+    }
 
     const normalized = normalizeAndValidateOrderPayments(
       payments,

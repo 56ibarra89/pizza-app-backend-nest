@@ -143,7 +143,7 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
       }),
     ),
     appConfig: {
-      findUnique: jest.fn().mockResolvedValue(null),
+      findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'payment_methods' ? { data: { methods: [{ id: 'cash-nio', name: 'Efectivo', type: 'CASH', currency: 'NIO', requiresReference: false, commissionRate: 0, isActive: true }, { id: 'card-generic', name: 'Tarjeta', type: 'CARD_POS', currency: 'NIO', requiresReference: true, commissionRate: 0, isActive: true }] } } : where.id === 'void_waste_policies' ? { data: { reasons: [{ id: 'error-comanda-mesero', label: 'Error de comanda', category: 'SERVICE', isActive: true, countsAsWaste: false, requiresSupervisor: false }] } } : null)),
     },
     order: {
       count: jest.fn().mockResolvedValue(0),
@@ -185,7 +185,7 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
             getByIdOrDefault: jest
               .fn()
               .mockImplementation(async (id: string) => {
-                if (id === 'tax_config') {
+                if (id === 'app_factura_tax_config') {
                   return {
                     id,
                     data: { isExonerated: false, taxes: [{ percentage: 15 }] },
@@ -644,6 +644,24 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
 
     expect(response.status).toBe(400);
     expect(String(response.body.message)).toMatch(/facturada|pagada/i);
+  });
+
+  it('rechaza calcular órdenes cuando no hay impuestos configurados', async () => {
+    const config = app.get(AppConfigService);
+    const original = (config.getByIdOrDefault as jest.Mock).getMockImplementation();
+    const spy = jest.spyOn(config, 'getByIdOrDefault').mockResolvedValue({ id: 'app_factura_tax_config', data: {}, updatedAt: new Date(0) });
+    try {
+      const response = await request(app.getHttpServer())
+        .post('/orders')
+        .set('x-test-role', 'cajero')
+        .set('x-test-permissions', 'orders.read,orders.manage')
+        .send({ items: [], total: 0, status: 'pending', orderType: 'local' });
+      expect(response.status).toBe(400);
+      expect(String(response.body.message)).toContain('Configura los impuestos');
+    } finally {
+      spy.mockRestore();
+      if (original) (config.getByIdOrDefault as jest.Mock).mockImplementation(original);
+    }
   });
 
   it('ejecuta el flujo completo de creación y cobro de orden validando pagos e importes (H04, H15, H28)', async () => {
