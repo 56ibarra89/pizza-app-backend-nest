@@ -22,7 +22,7 @@ export interface OrderHistoryPage {
 export interface IOrdersRepository {
   listTodayOrActive(
     now: Date,
-    filters?: { driverId?: string; kitchenId?: string; limit?: number },
+    filters?: { driverId?: string; kitchenId?: string; limit?: number; deliveryOnly?: boolean },
   ): Promise<OrderEntity[]>;
   listHistory(params: {
     startDate: Date;
@@ -60,6 +60,7 @@ export interface IOrdersRepository {
       timestamp: Date;
       customerSnapshotName?: string;
       customerAddress?: string;
+      customerPhoneSnapshot?: string;
       orderType?: OrderTypeDto;
       cuponId?: number;
       discountId?: number;
@@ -110,6 +111,7 @@ export interface IOrdersRepository {
       customerId?: string | null;
       customerSnapshotName?: string | null;
       customerAddress?: string | null;
+      customerPhoneSnapshot?: string;
       orderType?: OrderTypeDto | null;
       cuponId?: number | null;
       discountId?: number | null;

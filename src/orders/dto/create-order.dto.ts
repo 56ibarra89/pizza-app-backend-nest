@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsString,
   Min,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { CartItemDto } from './cart-item.dto';
@@ -81,6 +82,16 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   customerAddress?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  deliveryZoneId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(250)
+  deliveryFeeOverrideReason?: string;
 
   @IsOptional()
   @IsInt()

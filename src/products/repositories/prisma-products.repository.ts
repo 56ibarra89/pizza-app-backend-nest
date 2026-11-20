@@ -84,6 +84,7 @@ export class PrismaProductsRepository implements IProductsRepository {
       totalRevenue: revenueByCategory.get(c.id) ?? 0,
       icon: c.icon ?? undefined,
       kitchenId: c.kitchenId ?? undefined,
+      requiresPreparation: c.requiresPreparation,
       extras: c.extras.map((extra) => this.mapExtra(extra)),
       items: c.products.map((p) => this.mapProduct(p, c.extras)),
     }));
@@ -150,7 +151,12 @@ export class PrismaProductsRepository implements IProductsRepository {
 
   async createCategory(dto: CreateCategoryDto): Promise<CategoryEntity> {
     const created = await this.prisma.category.create({
-      data: { label: dto.label, icon: dto.icon, kitchenId: dto.kitchenId },
+      data: {
+        label: dto.label,
+        icon: dto.icon,
+        kitchenId: dto.kitchenId,
+        requiresPreparation: dto.requiresPreparation,
+      },
       include: { products: true, extras: true },
     });
 
@@ -161,6 +167,7 @@ export class PrismaProductsRepository implements IProductsRepository {
       totalRevenue: 0,
       icon: created.icon ?? undefined,
       kitchenId: created.kitchenId ?? undefined,
+      requiresPreparation: created.requiresPreparation,
       extras: [],
       items: [],
     };
@@ -181,7 +188,12 @@ export class PrismaProductsRepository implements IProductsRepository {
     }
     const updated = await this.prisma.category.update({
       where: { id },
-      data: { label: dto.label, icon: dto.icon, kitchenId: dto.kitchenId },
+      data: {
+        label: dto.label,
+        icon: dto.icon,
+        kitchenId: dto.kitchenId,
+        requiresPreparation: dto.requiresPreparation,
+      },
       include: {
         extras: {
           orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
@@ -202,6 +214,7 @@ export class PrismaProductsRepository implements IProductsRepository {
       totalRevenue: 0,
       icon: updated.icon ?? undefined,
       kitchenId: updated.kitchenId ?? undefined,
+      requiresPreparation: updated.requiresPreparation,
       extras: updated.extras.map((extra) => this.mapExtra(extra)),
       items: updated.products.map((p) => this.mapProduct(p, updated.extras)),
     };
@@ -599,6 +612,7 @@ export class PrismaProductsRepository implements IProductsRepository {
       prices: { size: string; price: unknown }[];
       category?: {
         kitchenId?: string | null;
+        requiresPreparation?: boolean;
         extras: Array<{
           id: string;
           name: string;
@@ -668,6 +682,7 @@ export class PrismaProductsRepository implements IProductsRepository {
       id: p.id,
       categoryId: p.categoryId,
       kitchenId: p.category?.kitchenId ?? undefined,
+      requiresPreparation: p.category?.requiresPreparation,
       name: p.name,
       description: p.description ?? undefined,
       isActive: p.isActive,

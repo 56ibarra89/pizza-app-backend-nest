@@ -35,7 +35,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
 
   async listTodayOrActive(
     now: Date,
-    filters?: { driverId?: string; kitchenId?: string; limit?: number },
+    filters?: { driverId?: string; kitchenId?: string; limit?: number; deliveryOnly?: boolean },
   ): Promise<OrderEntity[]> {
     const { startOfDay } = getBusinessDayBounds(now);
     const take = Math.min(
@@ -53,10 +53,11 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       },
     ];
 
-    if (filters?.driverId) {
+    const deliveryOnly = Boolean(filters?.deliveryOnly || filters?.driverId);
+    if (deliveryOnly) {
       conditions.push({
         orderType: 'DELIVERY',
-        driverId: filters.driverId,
+        driverId: filters?.driverId,
       });
     }
 
@@ -90,7 +91,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         },
         linkedTables: { select: { tableId: true } },
       },
-      orderBy: { timestamp: 'desc' },
+      orderBy: deliveryOnly
+        ? [{ status: 'asc' }, { timestamp: 'desc' }, { id: 'desc' }]
+        : [{ timestamp: 'desc' }, { id: 'desc' }],
     });
 
     return orders.map((o) => this.mapOrder(o));
@@ -375,6 +378,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       timestamp: Date;
       customerSnapshotName?: string;
       customerAddress?: string;
+      customerPhoneSnapshot?: string;
       orderType?: import('../dto/order-type.dto').OrderTypeDto;
       cuponId?: number;
       discountId?: number;
@@ -428,6 +432,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
 
         customerSnapshotName: data.customerSnapshotName ?? null,
         customerAddress: data.customerAddress ?? null,
+        customerPhoneSnapshot: data.customerPhoneSnapshot,
         orderType: data.orderType ? toDbOrderType(data.orderType) : undefined,
         cuponId: data.cuponId ?? null,
         discountId: data.discountId ?? null,
@@ -489,6 +494,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
             giftQuantity: i.giftQuantity ?? 0,
             giftReason: i.giftReason,
             isSentToKitchen: i.isSentToKitchen ?? false,
+            requiresPreparation: i.requiresPreparation ?? true,
             sentAt: i.sentAt ? new Date(i.sentAt) : undefined,
             kitchenStatus: i.kitchenStatus
               ? toDbKitchenStatus(i.kitchenStatus)
@@ -535,6 +541,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       customerId?: string | null;
       customerSnapshotName?: string | null;
       customerAddress?: string | null;
+      customerPhoneSnapshot?: string;
       orderType?: import('../dto/order-type.dto').OrderTypeDto | null;
       cuponId?: number | null;
       discountId?: number | null;
@@ -611,6 +618,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           : data.customerSnapshotName,
       customerAddress:
         data.customerAddress === undefined ? undefined : data.customerAddress,
+      customerPhoneSnapshot: data.customerPhoneSnapshot,
       orderType:
         data.orderType === undefined
           ? undefined
@@ -806,6 +814,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         giftQuantity: i.giftQuantity ?? 0,
         giftReason: i.giftReason ?? null,
         isSentToKitchen: i.isSentToKitchen ?? false,
+        requiresPreparation: i.requiresPreparation ?? true,
         sentAt: i.sentAt ? new Date(i.sentAt) : null,
         kitchenStatus: i.kitchenStatus
           ? toDbKitchenStatus(i.kitchenStatus)
@@ -932,19 +941,22 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         const selections =
           item.comboSelections as unknown as SelectedComboOptionEntity[];
         const updatedSelections = selections.map((sel) =>
-          !params.kitchenId || sel.kitchenId === params.kitchenId
+          sel.requiresPreparation !== false &&
+          (!params.kitchenId || sel.kitchenId === params.kitchenId)
             ? { ...sel, kitchenStatus: params.kitchenStatus }
             : sel,
         );
-        const allDelivered = updatedSelections.every(
+        const preparedSelections = updatedSelections.filter((s) => s.requiresPreparation !== false);
+        if (preparedSelections.length === 0) continue;
+        const allDelivered = preparedSelections.every(
           (s) => s.kitchenStatus === KitchenStatusDto.delivered,
         );
-        const allReadyOrDelivered = updatedSelections.every(
+        const allReadyOrDelivered = preparedSelections.every(
           (s) =>
             s.kitchenStatus === KitchenStatusDto.ready ||
             s.kitchenStatus === KitchenStatusDto.delivered,
         );
-        const anyPreparingOrReady = updatedSelections.some(
+        const anyPreparingOrReady = preparedSelections.some(
           (s) =>
             s.kitchenStatus === KitchenStatusDto.preparing ||
             s.kitchenStatus === KitchenStatusDto.ready,
@@ -1023,6 +1035,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     customerId?: string | null;
     customer?: { id: string; name: string; phone: string | null } | null;
     customerAddress: string | null;
+    customerPhoneSnapshot?: string | null;
     orderType: import('@prisma/client').OrderType | null;
     driverId: string | null;
     waiterId: string | null;
@@ -1073,6 +1086,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       giftQuantity: number;
       giftReason: string | null;
       isSentToKitchen: boolean;
+      requiresPreparation?: boolean;
       sentAt: Date | null;
       kitchenStatus: KitchenStatus | null;
       kitchenId: string | null;
@@ -1126,6 +1140,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         giftQuantity: i.giftQuantity,
         giftReason: i.giftReason ?? undefined,
         isSentToKitchen: i.isSentToKitchen,
+        requiresPreparation: i.requiresPreparation,
         sentAt: i.sentAt ? i.sentAt.getTime() : undefined,
         kitchenStatus: i.kitchenStatus
           ? fromDbKitchenStatus(i.kitchenStatus)
@@ -1154,7 +1169,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       customerId: o.customerId ?? o.customer?.id ?? undefined,
       customerSnapshotName:
         o.customerSnapshotName ?? o.customer?.name ?? undefined,
-      customerPhone: o.customer?.phone ?? undefined,
+      customerPhone: o.customerPhoneSnapshot ?? o.customer?.phone ?? undefined,
       customerAddress: o.customerAddress ?? undefined,
       orderType: o.orderType ? fromDbOrderType(o.orderType) : undefined,
       driverId: o.driverId ?? undefined,

@@ -33,12 +33,19 @@ import { AccessControlService } from '../../access-control/access-control.servic
 import { OrderTypeDto } from '../dto/order-type.dto';
 
 const FULL_ORDERS_ROOM = 'authenticated-full-orders-clients';
+const DELIVERIES_ROOM = 'authenticated-delivery-clients';
 const ORDERS_READ_PERMISSION = 'orders.read';
 const DELIVERY_READ_PERMISSION = 'delivery.read';
 const DELIVERY_OWN_PERMISSION = 'delivery.own';
 const REVALIDATION_TTL_MS = 30_000;
 const kitchenRoom = (kitchenId: string) => `authenticated-kitchen:${kitchenId}`;
 const driverRoom = (driverId: string) => `authenticated-driver:${driverId}`;
+const DELIVERY_LIST_ROLES: readonly (UserRoleDto | string)[] = [
+  UserRoleDto.admin,
+  UserRoleDto.cajero,
+  UserRoleDto.cajero_principal,
+  UserRoleDto.despachador,
+];
 
 function hasOrdersSocketAccess(
   role: UserRoleDto | string,
@@ -53,7 +60,10 @@ function hasOrdersSocketAccess(
       permissions.includes(DELIVERY_OWN_PERMISSION)
     );
   }
-  return false;
+  return (
+    DELIVERY_LIST_ROLES.includes(role) &&
+    permissions.includes(DELIVERY_READ_PERMISSION)
+  );
 }
 
 let activeCorsOriginChecker:
@@ -207,15 +217,18 @@ export class OrdersGateway implements OnGatewayInit {
       occurredAt,
     });
 
-    if (
-      event.order.orderType === OrderTypeDto.delivery &&
-      event.order.driverId
-    ) {
-      this.server.to(driverRoom(event.order.driverId)).emit('orders:changed', {
+    if (event.order.orderType === OrderTypeDto.delivery) {
+      const payload = {
         mutation: event.mutation,
         order: fullOrderDto,
         occurredAt,
-      });
+      };
+      this.server.to(DELIVERIES_ROOM).emit('orders:changed', payload);
+      if (event.order.driverId) {
+        this.server
+          .to(driverRoom(event.order.driverId))
+          .emit('orders:changed', payload);
+      }
     }
 
     if (
@@ -326,15 +339,17 @@ export class OrdersGateway implements OnGatewayInit {
     let targetRoom: string | undefined;
     if (user.role === UserRoleDto.motorizado) {
       targetRoom = driverRoom(user.id);
-    } else if (user.role !== UserRoleDto.cocinero) {
-      targetRoom = FULL_ORDERS_ROOM;
-    } else {
+    } else if (user.role === UserRoleDto.cocinero) {
       const assignedKitchenId = await this.kitchens.getAssignedKitchenIdForDate(
         user.id,
       );
       targetRoom = assignedKitchenId
         ? kitchenRoom(assignedKitchenId)
         : undefined;
+    } else {
+      targetRoom = user.permissions.includes(ORDERS_READ_PERMISSION)
+        ? FULL_ORDERS_ROOM
+        : DELIVERIES_ROOM;
     }
 
     const previousRoom = socket.data.joinedRoom;

@@ -24,6 +24,7 @@ export function toOrderResponseDto(order: OrderEntity) {
       sentAt: i.sentAt,
       kitchenStatus: i.kitchenStatus,
       kitchenId: i.kitchenId,
+      requiresPreparation: i.requiresPreparation,
       isCombo: Boolean(i.isCombo),
       comboSelections: i.comboSelections,
     })),
@@ -97,7 +98,7 @@ export function collectOrderKitchenIds(order: OrderEntity): string[] {
     if (item.kitchenId) kitchenIds.add(item.kitchenId);
     if (item.isCombo && Array.isArray(item.comboSelections)) {
       for (const selection of item.comboSelections) {
-        if (selection.kitchenId) kitchenIds.add(selection.kitchenId);
+        if (selection.requiresPreparation !== false && selection.kitchenId) kitchenIds.add(selection.kitchenId);
       }
     }
   }
@@ -114,7 +115,7 @@ export function toKitchenOrderResponseDto(
         requiresKitchenPreparation(item) &&
         (item.isCombo
           ? item.comboSelections?.some(
-              (selection) => selection.kitchenId === kitchenId,
+              (selection) => selection.requiresPreparation !== false && selection.kitchenId === kitchenId,
             )
           : item.kitchenId === kitchenId),
     )
@@ -136,7 +137,7 @@ export function toKitchenOrderResponseDto(
       kitchenId: item.isCombo ? undefined : item.kitchenId,
       isCombo: Boolean(item.isCombo),
       comboSelections: item.comboSelections
-        ?.filter((selection) => selection.kitchenId === kitchenId)
+        ?.filter((selection) => selection.requiresPreparation !== false && selection.kitchenId === kitchenId)
         .map((selection) => ({
           groupId: selection.groupId,
           groupName: selection.groupName,

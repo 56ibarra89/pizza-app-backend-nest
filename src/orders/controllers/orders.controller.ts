@@ -170,6 +170,21 @@ export class OrdersController {
     });
   }
 
+  @Get('deliveries')
+  @Permissions('delivery.read')
+  @Roles(
+    UserRoleDto.admin,
+    UserRoleDto.cajero,
+    UserRoleDto.cajero_principal,
+    UserRoleDto.despachador,
+  )
+  async listDeliveries() {
+    const list = await this.orders.listTodayOrActive(new Date(), {
+      deliveryOnly: true,
+    });
+    return list.map(toOrderResponseDto);
+  }
+
   @Get('my-deliveries')
   @Permissions('delivery.read')
   @Roles(UserRoleDto.motorizado)

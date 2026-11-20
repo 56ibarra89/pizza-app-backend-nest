@@ -124,21 +124,37 @@ export class OrderPricingService {
             return {
               ...item,
               categoryId: product.categoryId,
-              kitchenId: product.kitchenId,
+              kitchenId: product.requiresPreparation === false ? undefined : product.kitchenId,
+              requiresPreparation: product.requiresPreparation,
+              ...(product.requiresPreparation === false && {
+                isSentToKitchen: false,
+                sentAt: undefined,
+                kitchenStatus: undefined,
+              }),
             };
           }
           throw new BadRequestException('El producto indicado no es un combo');
         }
+        const comboSelections = await this.normalizeComboSelections(
+          product,
+          item.comboSelections ?? [],
+          productCache,
+        );
+        const requiresPreparation = comboSelections.length
+          ? comboSelections.some((selection) => selection.requiresPreparation !== false)
+          : product.requiresPreparation !== false;
         return {
           ...item,
           isCombo: true,
           categoryId: product.categoryId,
-          kitchenId: product.kitchenId,
-          comboSelections: await this.normalizeComboSelections(
-            product,
-            item.comboSelections ?? [],
-            productCache,
-          ),
+          kitchenId: requiresPreparation ? product.kitchenId : undefined,
+          requiresPreparation,
+          comboSelections,
+          ...(!requiresPreparation && {
+            isSentToKitchen: false,
+            sentAt: undefined,
+            kitchenStatus: undefined,
+          }),
         };
       }),
     );
@@ -815,7 +831,9 @@ export class OrderPricingService {
           size: selection.size ?? option.size,
           extraPrice: option.extraPrice,
           categoryId: component.categoryId,
-          kitchenId: component.kitchenId,
+          kitchenId: component.requiresPreparation === false ? undefined : component.kitchenId,
+          requiresPreparation: component.requiresPreparation,
+          kitchenStatus: component.requiresPreparation === false ? undefined : selection.kitchenStatus,
           extras,
         });
       }

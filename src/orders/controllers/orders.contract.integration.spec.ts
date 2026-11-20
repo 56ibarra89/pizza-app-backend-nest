@@ -63,6 +63,7 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
   let app: INestApplication;
   const ordersStore = new Map<string, OrderEntity>();
   const hiddenOrdersStore = new Set<string>();
+  const writeDeliveryAudit = jest.fn();
 
   const repoMock = {
     listTodayOrActive: jest.fn(async () => Array.from(ordersStore.values())),
@@ -82,6 +83,7 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
         updatedAt: new Date('2026-11-04T12:00:00.000Z'),
         orderType: data.orderType ?? OrderTypeDto.local,
         driverId: data.driverId,
+        customerPhone: data.customerPhoneSnapshot,
         waiterId: data.waiterId,
         waiterSnapshotName: data.waiterSnapshotName,
         payments: data.payments ?? [],
@@ -139,11 +141,16 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
           findMany: jest.fn().mockResolvedValue([]),
         },
         certificado: { findMany: jest.fn().mockResolvedValue([]) },
+        systemLog: { create: writeDeliveryAudit },
         cupon: { findUnique: jest.fn().mockResolvedValue(null) },
       }),
     ),
     appConfig: {
-      findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'payment_methods' ? { data: { methods: [{ id: 'cash-nio', name: 'Efectivo', type: 'CASH', currency: 'NIO', requiresReference: false, commissionRate: 0, isActive: true }, { id: 'card-generic', name: 'Tarjeta', type: 'CARD_POS', currency: 'NIO', requiresReference: true, commissionRate: 0, isActive: true }] } } : where.id === 'void_waste_policies' ? { data: { reasons: [{ id: 'error-comanda-mesero', label: 'Error de comanda', category: 'SERVICE', isActive: true, countsAsWaste: false, requiresSupervisor: false }] } } : null)),
+      findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'delivery_rules' ? { data: {
+        freeDeliveryEnabled: true,
+        freeDeliveryMinAmount: 200,
+        zones: [{ id: 'zona-1', name: 'Centro', price: 35, driverPayout: 25, isActive: true }],
+      } } : where.id === 'payment_methods' ? { data: { methods: [{ id: 'cash-nio', name: 'Efectivo', type: 'CASH', currency: 'NIO', requiresReference: false, commissionRate: 0, isActive: true }, { id: 'card-generic', name: 'Tarjeta', type: 'CARD_POS', currency: 'NIO', requiresReference: true, commissionRate: 0, isActive: true }] } } : where.id === 'void_waste_policies' ? { data: { reasons: [{ id: 'error-comanda-mesero', label: 'Error de comanda', category: 'SERVICE', isActive: true, countsAsWaste: false, requiresSupervisor: false }] } } : null)),
     },
     order: {
       count: jest.fn().mockResolvedValue(0),
@@ -410,6 +417,76 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
       expect(response.status).toBe(400);
     },
   );
+
+  function submitDelivery(role: string, charge?: number, overrideReason?: string) {
+    return request(app.getHttpServer())
+      .post('/orders')
+      .set('x-test-role', role)
+      .set('x-test-permissions', 'orders.read,orders.manage')
+      .send({
+        orderType: 'delivery',
+        customerAddress: 'Dirección de prueba',
+        customerPhone: '88880002',
+        deliveryZoneId: 'zona-1',
+        deliveryFeeOverrideReason: overrideReason,
+        total: 250 + (charge ?? 0),
+        items: [
+          { productId: 'prod-pizza-1', name: 'Pizza Margarita', size: 'Grande', price: 250, quantity: 1, extras: [] },
+          ...(charge === undefined ? [] : [{ name: 'Delivery', size: 'único', price: charge, quantity: 1, extras: [] }]),
+        ],
+      });
+  }
+
+  it('registra una entrega gratuita elegible y conserva el teléfono indicado', async () => {
+    const response = await submitDelivery('cajero', 0);
+    expect(response.status).toBe(201);
+    expect(response.body.customerPhone).toBe('88880002');
+    expect(response.body.items[1].note).toContain('Pago Motorizado: C$25.00');
+    expect(writeDeliveryAudit).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'Envío gratis por promoción',
+        entityId: response.body.id,
+        metadata: expect.objectContaining({ amount: 0, source: 'promotion' }),
+      }),
+    });
+  });
+
+  it('rechaza un pedido sin tarifa y una tarifa que difiere del precio aplicable', async () => {
+    expect((await submitDelivery('cajero')).status).toBe(400);
+    expect((await submitDelivery('cajero', 35)).status).toBe(400);
+    expect(repoMock.create).not.toHaveBeenCalled();
+  });
+
+  it('cobra la tarifa configurada cuando el consumo está debajo del mínimo promocional', async () => {
+    const rules = {
+      data: {
+        freeDeliveryEnabled: true,
+        freeDeliveryMinAmount: 300,
+        zones: [{ id: 'zona-1', name: 'Centro', price: 35, driverPayout: 25, isActive: true }],
+      },
+    };
+    prismaMock.appConfig.findUnique.mockResolvedValueOnce(rules);
+    expect((await submitDelivery('cajero', 0)).status).toBe(400);
+    prismaMock.appConfig.findUnique.mockResolvedValueOnce(rules);
+    const response = await submitDelivery('cajero', 35);
+    expect(response.status).toBe(201);
+    expect(response.body.items[1].price).toBe(35);
+    expect(writeDeliveryAudit).not.toHaveBeenCalled();
+  });
+
+  it('solo acepta una tarifa excepcional de un rol autorizado y registra el motivo', async () => {
+    expect((await submitDelivery('cajero', 10, 'Excepción de servicio')).status).toBe(403);
+    const response = await submitDelivery('cajero_principal', 10, 'Excepción de servicio');
+    expect(response.status).toBe(201);
+    expect(writeDeliveryAudit).toHaveBeenCalledTimes(1);
+    expect(writeDeliveryAudit).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        details: 'Excepción de servicio',
+        role: 'cajero_principal',
+        metadata: expect.objectContaining({ amount: 10, source: 'manual' }),
+      }),
+    });
+  });
 
   it('rechaza en HTTP (400) regalar productos con nota Vale: vacía sin certificado válido (H01)', async () => {
     const response = await request(app.getHttpServer())
@@ -767,6 +844,79 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
         .set('x-test-permissions', 'orders.read,orders.manage,orders.finalize')
         .send(forgedBody);
       expect(response.status).toBe(400);
+    }
+  });
+
+  it('lista solo entregas para despacho y mantiene al motorizado en su bandeja propia', async () => {
+    const dispatcher = await request(app.getHttpServer())
+      .get('/orders/deliveries')
+      .set('x-test-role', 'despachador')
+      .set('x-test-permissions', 'delivery.read')
+      .expect(200);
+    expect(dispatcher.body).toEqual([]);
+    expect(repoMock.listTodayOrActive).toHaveBeenCalledWith(
+      expect.any(Date),
+      { deliveryOnly: true },
+    );
+
+    await request(app.getHttpServer())
+      .get('/orders/deliveries')
+      .set('x-test-role', 'motorizado')
+      .set('x-test-permissions', 'delivery.read,delivery.own')
+      .expect(403);
+  });
+
+  it.each([
+    { requiresPreparation: true, expectedStatus: 400, name: 'Pizza sin enviar' },
+    { requiresPreparation: false, expectedStatus: 200, name: 'Gaseosa' },
+  ])('valida inicio y finalización de entrega para $name', async ({
+    requiresPreparation,
+    expectedStatus,
+    name,
+  }) => {
+    const orderId = 'ord-delivery-preparation';
+    ordersStore.set(orderId, {
+      id: orderId,
+      items: [{
+        id: 1,
+        name,
+        size: 'Unidad',
+        price: 220,
+        quantity: 1,
+        extras: [],
+        giftQuantity: 0,
+        requiresPreparation,
+        isSentToKitchen: false,
+      }],
+      total: 220,
+      status: OrderStatusDto.ready,
+      timestamp: new Date('2026-11-04T12:00:00.000Z'),
+      orderType: OrderTypeDto.delivery,
+      driverId: 'driver-42',
+      payments: [],
+    });
+
+    const started = await request(app.getHttpServer())
+      .patch(`/orders/${orderId}/start-delivery`)
+      .set('x-test-role', 'motorizado')
+      .set('x-test-user-id', 'driver-42')
+      .set('x-test-permissions', 'delivery.read')
+      .expect(expectedStatus);
+    const delivered = await request(app.getHttpServer())
+      .patch(`/orders/${orderId}/status`)
+      .set('x-test-role', 'motorizado')
+      .set('x-test-user-id', 'driver-42')
+      .set('x-test-permissions', 'delivery.read,orders.status')
+      .send({ status: 'delivered' })
+      .expect(expectedStatus);
+
+    if (requiresPreparation) {
+      expect(started.body.message).toMatch(/no está listo en cocina/);
+      expect(delivered.body.message).toMatch(/no está listo en cocina/);
+      expect(repoMock.update).not.toHaveBeenCalled();
+    } else {
+      expect(started.body.deliveryStartedAt).toEqual(expect.any(String));
+      expect(delivered.body.deliveredAt).toEqual(expect.any(String));
     }
   });
 

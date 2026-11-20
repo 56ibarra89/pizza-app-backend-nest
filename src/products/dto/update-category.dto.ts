@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString, ValidateIf } from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsOptional, IsString, ValidateIf } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class UpdateCategoryDto {
@@ -16,4 +16,8 @@ export class UpdateCategoryDto {
   @IsOptional()
   @IsString()
   kitchenId?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  requiresPreparation?: boolean;
 }

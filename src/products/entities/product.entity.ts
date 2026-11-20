@@ -32,6 +32,7 @@ export interface ProductEntity {
   id: string;
   categoryId: string;
   kitchenId?: string;
+  requiresPreparation?: boolean;
   name: string;
   description?: string;
   isActive: boolean;

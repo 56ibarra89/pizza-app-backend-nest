@@ -1,5 +1,6 @@
 interface NamedOrderItem {
   name: string;
+  requiresPreparation?: boolean;
 }
 
 function normalizeItemName(item: NamedOrderItem): string {
@@ -34,6 +35,7 @@ export function isSplitBillOrderItem(item: NamedOrderItem): boolean {
 
 export function requiresKitchenPreparation(item: NamedOrderItem): boolean {
   return (
+    item.requiresPreparation !== false &&
     !isPackagingOrderItem(item) &&
     !isDeliveryChargeOrderItem(item) &&
     !isSplitBillOrderItem(item)

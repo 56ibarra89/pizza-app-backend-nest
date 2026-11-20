@@ -6,6 +6,7 @@ export interface CategoryEntity {
   totalRevenue: number;
   icon?: string;
   kitchenId?: string;
+  requiresPreparation?: boolean;
   extras: ExtraIngredientEntity[];
   items: ProductEntity[];
 }

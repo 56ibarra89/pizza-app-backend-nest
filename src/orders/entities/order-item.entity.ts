@@ -27,6 +27,7 @@ export interface SelectedComboOptionEntity {
   extraPrice: number;
   extras?: SelectedExtraEntity[];
   kitchenId?: string;
+  requiresPreparation?: boolean;
   categoryId?: string;
   categoryName?: string;
   kitchenStatus?: KitchenStatusDto;
@@ -49,6 +50,7 @@ export interface CartItemEntity {
   sentAt?: number;
   kitchenStatus?: KitchenStatusDto;
   kitchenId?: string;
+  requiresPreparation?: boolean;
   isCombo?: boolean;
   comboSelections?: SelectedComboOptionEntity[];
 }

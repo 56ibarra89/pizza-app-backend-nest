@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   getBusinessDateParts,
@@ -9,6 +10,20 @@ import type {
   WaiterPerformanceDto,
   LiveKpisDto,
 } from '../dto/admin-dashboard.dto';
+
+interface CashierSalesRow {
+  shiftId: string;
+  cashierId: string | null;
+  cashierSnapshotName: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  username: string | null;
+  role: string | null;
+  transactions: bigint;
+  cash: Prisma.Decimal;
+  card: Prisma.Decimal;
+  app: Prisma.Decimal;
+}
 
 const AVATAR_COLORS = [
   '#d32f2f',
@@ -28,18 +43,28 @@ export class AdminDashboardService {
   async getActiveCashRegisters(): Promise<ActiveCashRegisterDto[]> {
     const shifts = await this.prisma.shift.findMany({
       where: { status: 'OPEN' },
-      include: {
-        cashier: true,
-        orders: {
-          where: { status: 'PAID' },
-          include: {
-            cashier: true,
-            payments: true,
-          },
+      select: {
+        id: true,
+        cashierId: true,
+        cashierSnapshotName: true,
+        cashRegisterSnapshotName: true,
+        startTime: true,
+        openingAmount: true,
+        cashier: {
+          select: { firstName: true, lastName: true, username: true, role: true },
         },
       },
       orderBy: { startTime: 'asc' },
     });
+
+    if (shifts.length === 0) return [];
+    const sales = await this.getCashierSales(shifts.map(({ id }) => id));
+    const salesByShift = new Map<string, CashierSalesRow[]>();
+    for (const row of sales) {
+      const rows = salesByShift.get(row.shiftId);
+      if (rows) rows.push(row);
+      else salesByShift.set(row.shiftId, [row]);
+    }
 
     const result: ActiveCashRegisterDto[] = [];
 
@@ -75,18 +100,8 @@ export class AdminDashboardService {
         transactionsCompleted: 0,
       });
 
-      // 2. Procesar cada orden cobrada y asignarla al colaborador correspondiente
-      for (const order of shift.orders) {
-        const orderTotal = Number(order.total) || 0;
-        const hasPayments = Boolean(
-          order.payments && order.payments.length > 0,
-        );
-        // Omitir órdenes padre contenedoras de splitCheckout ya liquidadas
-        if (order.invoiceNumber === null && orderTotal === 0 && !hasPayments) {
-          continue;
-        }
-
-        const rawCashierRole = (order.cashier?.role || '').toUpperCase();
+      for (const order of salesByShift.get(shift.id) ?? []) {
+        const rawCashierRole = order.role ?? '';
         const isDriverCashier = rawCashierRole === 'MOTORIZADO';
         let orderKey: string;
         if (isDriverCashier) {
@@ -103,11 +118,11 @@ export class AdminDashboardService {
           let collaboratorName = 'Cajero';
           let collaboratorRole = 'CAJERO';
 
-          if (order.cashier) {
+          if (order.username) {
             collaboratorName =
-              `${order.cashier.firstName} ${order.cashier.lastName}`.trim() ||
-              order.cashier.username;
-            collaboratorRole = (order.cashier.role || 'CAJERO').toUpperCase();
+              `${order.firstName ?? ''} ${order.lastName ?? ''}`.trim() ||
+              order.username;
+            collaboratorRole = order.role ?? 'CAJERO';
           } else if (order.cashierSnapshotName) {
             collaboratorName = order.cashierSnapshotName;
           }
@@ -135,20 +150,10 @@ export class AdminDashboardService {
         }
 
         const entry = collaboratorMap.get(orderKey)!;
-        entry.transactionsCompleted += 1;
-
-        if (order.payments && order.payments.length > 0) {
-          order.payments.forEach((payment) => {
-            const amount = Number(payment.amount) || 0;
-            const method = (payment.method || '').toUpperCase();
-            if (method === 'EFECTIVO') entry.revenueCash += amount;
-            else if (method === 'TARJETA') entry.revenueCard += amount;
-            else if (method === 'APP') entry.revenueApp += amount;
-            else entry.revenueCash += amount;
-          });
-        } else {
-          entry.revenueCash += orderTotal;
-        }
+        entry.transactionsCompleted += Number(order.transactions);
+        entry.revenueCash += order.cash.toNumber();
+        entry.revenueCard += order.card.toNumber();
+        entry.revenueApp += order.app.toNumber();
       }
 
       // 3. Calcular totales y ordenar (Cajero Principal primero, luego por recaudación)
@@ -166,6 +171,36 @@ export class AdminDashboardService {
     }
 
     return result;
+  }
+
+  private getCashierSales(shiftIds: string[]): Promise<CashierSalesRow[]> {
+    return this.prisma.$queryRaw<CashierSalesRow[]>`
+      WITH totals AS (
+        SELECT o."shiftId", o."cashierId",
+               MIN(o."cashierSnapshotName") AS "cashierSnapshotName",
+               COUNT(*) AS transactions,
+               SUM(CASE WHEN payments.count = 0 THEN o.total ELSE COALESCE(payments.cash, 0) END) AS cash,
+               SUM(COALESCE(payments.card, 0)) AS card,
+               SUM(COALESCE(payments.app, 0)) AS app
+        FROM "Order" o
+        CROSS JOIN LATERAL (
+          SELECT COUNT(*) AS count,
+                 SUM(p.amount) FILTER (WHERE p.method = 'EFECTIVO') AS cash,
+                 SUM(p.amount) FILTER (WHERE p.method = 'TARJETA') AS card,
+                 SUM(p.amount) FILTER (WHERE p.method = 'APP') AS app
+          FROM "Payment" p
+          WHERE p."orderId" = o.id
+        ) payments
+        WHERE o."shiftId" IN (${Prisma.join(shiftIds)})
+          AND o.status = 'PAID'
+          AND (o."invoiceNumber" IS NOT NULL OR o.total <> 0 OR payments.count > 0)
+        GROUP BY o."shiftId", o."cashierId",
+          CASE WHEN o."cashierId" IS NULL THEN lower(NULLIF(o."cashierSnapshotName", '')) END
+      )
+      SELECT totals.*, u."firstName", u."lastName", u.username, u.role::text AS role
+      FROM totals
+      LEFT JOIN "User" u ON u.id = totals."cashierId"
+    `;
   }
 
   async getWaiterPerformance(): Promise<WaiterPerformanceDto[]> {
@@ -321,8 +356,17 @@ export class AdminDashboardService {
       this.prisma.order.count({
         where: {
           isSentToKitchen: true,
-          status: { in: ['PENDING', 'PREPARING'] },
-          items: { some: { isSentToKitchen: true } },
+          status: { not: 'CANCELLED' },
+          items: {
+            some: {
+              isSentToKitchen: true,
+              requiresPreparation: true,
+              OR: [
+                { kitchenStatus: { in: ['PENDING', 'PREPARING'] } },
+                { kitchenStatus: null },
+              ],
+            },
+          },
         },
       }),
       this.prisma.order.count({

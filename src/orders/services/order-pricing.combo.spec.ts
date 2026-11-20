@@ -46,11 +46,11 @@ describe('OrderPricingService combo extras', () => {
     ],
   };
 
-  const createService = () => {
+  const createService = (component: ProductEntity = pizza) => {
     const products = {
       getProductById: jest.fn((id: string) => {
         if (id === combo.id) return Promise.resolve(combo);
-        if (id === pizza.id) return Promise.resolve(pizza);
+        if (id === pizza.id) return Promise.resolve(component);
         return Promise.reject(new Error('not found'));
       }),
     };
@@ -127,6 +127,39 @@ describe('OrderPricingService combo extras', () => {
     ]);
 
     expect(normalized[0].kitchenId).toBe('kitchen-pizza');
+  });
+
+  it('keeps ready-to-serve products in the order without routing them to the kitchen', async () => {
+    const beverage = {
+      ...pizza,
+      name: 'Agua 12 oz',
+      requiresPreparation: false,
+    };
+    const service = createService(beverage);
+    const comboItem = createItem();
+    const drinkItem = {
+      ...comboItem,
+      productId: beverage.id,
+      name: beverage.name,
+      isCombo: false,
+      comboSelections: undefined,
+    };
+    const [drink, comboWithDrink] = await service.normalizeComboItems([
+      { ...drinkItem, isSentToKitchen: true },
+      { ...comboItem, isSentToKitchen: true },
+    ]);
+    expect(drink).toMatchObject({
+      name: beverage.name,
+      requiresPreparation: false,
+      isSentToKitchen: false,
+    });
+    expect(drink.kitchenId).toBeUndefined();
+    expect(comboWithDrink.requiresPreparation).toBe(false);
+    expect(comboWithDrink.comboSelections?.[0]).toMatchObject({
+      productName: beverage.name,
+      requiresPreparation: false,
+    });
+    expect(comboWithDrink.comboSelections?.[0].kitchenId).toBeUndefined();
   });
 
   it('returns the authoritative unit price to persist with the order item', async () => {

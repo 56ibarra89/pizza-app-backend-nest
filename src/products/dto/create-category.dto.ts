@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString, ValidateIf } from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsOptional, IsString, ValidateIf } from 'class-validator';
 
 export class CreateCategoryDto {
   @IsString()
@@ -13,4 +13,8 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsString()
   kitchenId?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  requiresPreparation?: boolean;
 }

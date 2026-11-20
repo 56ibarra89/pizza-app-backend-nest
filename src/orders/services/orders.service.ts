@@ -80,6 +80,7 @@ import {
 } from '../../common/payment-methods.config';
 import type { OrderPaymentDto } from '../dto/order-payment.dto';
 import { collectOrderKitchenIds } from '../mappers/orders.mapper';
+import { resolveDeliveryCharge } from '../validators/order-delivery.validator';
 
 @Injectable()
 export class OrdersService {
@@ -100,7 +101,7 @@ export class OrdersService {
 
   listTodayOrActive(
     now = new Date(),
-    filters?: { driverId?: string; kitchenId?: string; limit?: number },
+    filters?: { driverId?: string; kitchenId?: string; limit?: number; deliveryOnly?: boolean },
   ) {
     return this.repo.listTodayOrActive(now, filters);
   }
@@ -173,6 +174,12 @@ export class OrdersService {
     }
     const resolvedPayments = await this.resolvePayments(dto.payments, user);
     const isDelivery = dto.orderType === OrderTypeDto.delivery;
+    if (
+      !isDelivery &&
+      (dto.items.some(isDeliveryChargeOrderItem) || dto.deliveryZoneId || dto.deliveryFeeOverrideReason !== undefined)
+    ) {
+      throw new BadRequestException('Solo los pedidos a domicilio pueden incluir tarifa de envío.');
+    }
     if (dto.driverId) {
       if (!isDelivery) {
         throw new BadRequestException(
@@ -200,7 +207,7 @@ export class OrdersService {
       });
     }
     const timestamp = new Date();
-    const isSentToKitchen =
+    const sendToKitchen =
       dto.isSentToKitchen ?? !(dto.linkedTables && dto.linkedTables.length > 0);
 
     const cashierSnapshotName = user?.username;
@@ -209,15 +216,6 @@ export class OrdersService {
       user,
       isTableOrder: Boolean(dto.linkedTables?.length),
     });
-    const { customerId, cashierId, shiftId } =
-      await this.referenceResolver.resolve({
-        customerId: dto.customerId,
-        customerSnapshotName: dto.customerSnapshotName,
-        customerPhone: dto.customerPhone,
-        customerAddress: dto.customerAddress,
-        cashierId: user?.id,
-        cashierSnapshotName,
-      });
     const rawItems = dto.items.map((item) => {
       const mappedItem = {
         ...item,
@@ -235,8 +233,21 @@ export class OrdersService {
     });
     const items = await this.pricing.normalizeComboItems(rawItems);
     const promotion = await this.pricing.resolvePromotion(dto);
-    const { items: pricedItems, totals } =
+    const { items: calculatedItems, totals } =
       await this.pricing.calculateWithPrices(items, promotion);
+    const delivery = isDelivery
+      ? await this.validateNewDelivery(dto, calculatedItems, totals.discountAmount, user)
+      : undefined;
+    const pricedItems = delivery?.items ?? calculatedItems;
+    const { customerId, cashierId, shiftId } =
+      await this.referenceResolver.resolve({
+        customerId: dto.customerId,
+        customerSnapshotName: dto.customerSnapshotName,
+        customerPhone: dto.customerPhone,
+        customerAddress: dto.customerAddress,
+        cashierId: user?.id,
+        cashierSnapshotName,
+      });
     const certificateSerials = this.extractCertificateSerials(
       pricedItems,
       dto.certificateSerials,
@@ -278,8 +289,9 @@ export class OrdersService {
             waiterSnapshotName: waiter?.snapshotName,
             orderType: dto.orderType,
             customerAddress: dto.customerAddress,
+            customerPhoneSnapshot: dto.customerPhone?.trim() || undefined,
             linkedTables: dto.linkedTables,
-            isSentToKitchen,
+            isSentToKitchen: sendToKitchen && pricedItems.some(requiresKitchenPreparation),
             cuponId,
             discountId:
               promotion.source === 'discount'
@@ -298,6 +310,24 @@ export class OrdersService {
           tx,
         );
 
+        if (delivery && delivery.source !== 'configured' && user) {
+          if (!tx) throw new Error('La auditoría de envío requiere una transacción.');
+          const { items: _items, ...metadata } = delivery;
+          await tx.systemLog.create({
+            data: {
+              user: user.username,
+              userId: user.id,
+              role: user.role,
+              action: delivery.source === 'promotion' ? 'Envío gratis por promoción' : 'Tarifa manual de envío autorizada',
+              details: delivery.overrideReason ?? 'Pedido elegible por consumo mínimo',
+              module: 'orders',
+              operation: 'delivery_fee',
+              entity: 'Order',
+              entityId: created.id,
+              metadata,
+            },
+          });
+        }
         if (status !== OrderStatusDto.paid) {
           return created;
         }
@@ -342,6 +372,34 @@ export class OrdersService {
 
     this.publishOrder(savedOrder, 'created');
     return savedOrder;
+  }
+
+  private async validateNewDelivery(
+    dto: CreateOrderDto,
+    items: CartItemEntity[],
+    discount: number,
+    user?: AuthenticatedUser,
+  ) {
+    if (!dto.customerAddress?.trim()) {
+      throw new BadRequestException('Indica una dirección de entrega.');
+    }
+    const [rules, prices] = await Promise.all([
+      this.prisma.appConfig.findUnique({ where: { id: 'delivery_rules' } }),
+      this.prisma.appConfig.findUnique({ where: { id: 'delivery_prices' } }),
+    ]);
+    const productsTotal = items.reduce((sum, item) => {
+      if (isPackagingOrderItem(item) || isDeliveryChargeOrderItem(item) || isSplitBillOrderItem(item)) return sum;
+      return sum + item.price * Math.max(0, item.quantity - item.giftQuantity);
+    }, 0);
+    return resolveDeliveryCharge({
+      items,
+      merchandiseTotal: Math.max(0, productsTotal - discount),
+      rules: rules?.data,
+      legacyPrices: prices?.data,
+      zoneId: dto.deliveryZoneId,
+      overrideReason: dto.deliveryFeeOverrideReason,
+      user,
+    });
   }
 
   async assignWaiter(
@@ -699,23 +757,11 @@ export class OrdersService {
       nextStatus = OrderStatusDto.ready;
     }
 
-    if (
+    const isDeliveryCompletion =
       existing.orderType === OrderTypeDto.delivery &&
-      dto.status === OrderStatusDto.delivered &&
-      user?.role === UserRoleDto.motorizado
-    ) {
-      const hasKitchenItems = existing.items.some(
-        (item) => requiresKitchenPreparation(item) && item.isSentToKitchen,
-      );
-      if (
-        hasKitchenItems &&
-        !this.isReadyForPickup(existing.items) &&
-        existing.status !== OrderStatusDto.ready
-      ) {
-        throw new BadRequestException(
-          'El pedido aún no está listo en cocina para ser entregado.',
-        );
-      }
+      nextStatus === OrderStatusDto.delivered;
+    if (isDeliveryCompletion) {
+      this.assertDeliveryPrepared(existing.items);
     }
 
     if (
@@ -953,7 +999,20 @@ export class OrdersService {
                 'La orden fue anulada desde otra estación.',
               );
             }
-            if (
+            if (isDeliveryCompletion) {
+              const latest = await this.repo.findById(id, tx);
+              if (!latest) throw new NotFoundException('Orden no encontrada');
+              this.assertDeliveryPrepared(latest.items);
+              if (
+                user?.role === UserRoleDto.motorizado &&
+                latest.driverId !== user.id
+              ) {
+                throw new ForbiddenException(
+                  'La entrega ya no está asignada a tu usuario.',
+                );
+              }
+              updateData.items = latest.items;
+            } else if (
               tx &&
               locked.updatedAt instanceof Date &&
               existing.updatedAt instanceof Date &&
@@ -1021,18 +1080,7 @@ export class OrdersService {
         );
       }
       if (existing.deliveryStartedAt) return existing;
-      const hasKitchenItems = existing.items.some(
-        (item) => requiresKitchenPreparation(item) && item.isSentToKitchen,
-      );
-      if (
-        hasKitchenItems &&
-        existing.status !== OrderStatusDto.ready &&
-        !this.isReadyForPickup(existing.items)
-      ) {
-        throw new BadRequestException(
-          'El pedido aún no está listo para iniciar la ruta.',
-        );
-      }
+      this.assertDeliveryPrepared(existing.items);
 
       return this.repo.update(
         id,
@@ -1414,6 +1462,18 @@ export class OrdersService {
           };
     });
     this.assertSplitBillCreditsUnchanged(existing.items, rawItems);
+    const existingDeliveryCharges = existing.items.filter(isDeliveryChargeOrderItem);
+    const incomingDeliveryCharges = rawItems.filter(isDeliveryChargeOrderItem);
+    if (
+      existingDeliveryCharges.length !== incomingDeliveryCharges.length ||
+      existingDeliveryCharges.some((charge, index) => {
+        const incoming = incomingDeliveryCharges[index];
+        return Math.round(charge.price * 100) !== Math.round(incoming.price * 100) ||
+          !this.isCommerciallySameOrderItem(charge, incoming);
+      })
+    ) {
+      throw new BadRequestException('La tarifa ya registrada no se puede modificar desde la edición de productos.');
+    }
 
     if (isFinal) {
       if (!dto.expectedUpdatedAt) {
@@ -1453,7 +1513,7 @@ export class OrdersService {
               discountId: current.discountId ?? null,
               happyHourId: current.happyHourId ?? null,
               status: current.status,
-              isSentToKitchen: dto.isSentToKitchen ?? current.isSentToKitchen,
+              isSentToKitchen: (dto.isSentToKitchen ?? current.isSentToKitchen) && lockedItems.some(requiresKitchenPreparation),
               certificateSerials: null,
             },
             tx,
@@ -1609,7 +1669,9 @@ export class OrdersService {
           happyHourId:
             promotion.source === 'happy-hour' ? promotion.happyHourId : null,
           status: nextStatus,
-          isSentToKitchen: dto.isSentToKitchen,
+          isSentToKitchen: dto.isSentToKitchen === undefined
+            ? undefined
+            : dto.isSentToKitchen && pricedItems.some(requiresKitchenPreparation),
           certificateSerials,
         },
         tx,
@@ -1669,6 +1731,10 @@ export class OrdersService {
   ) {
     const existing = await this.getById(id);
     this.assertCanFinalizeOrder(user, existing);
+    if (dto.orderType && dto.orderType !== existing.orderType &&
+      (dto.orderType === OrderTypeDto.delivery || existing.orderType === OrderTypeDto.delivery)) {
+      throw new BadRequestException('El tipo de pedido a domicilio se define al crear la orden.');
+    }
     if (
       dto.expectedUpdatedAt &&
       existing.updatedAt?.getTime() !==
@@ -1760,6 +1826,10 @@ export class OrdersService {
 
     const existing = await this.getById(id);
     this.assertCanFinalizeOrder(user, existing);
+    if (dto.orderType && dto.orderType !== existing.orderType &&
+      (dto.orderType === OrderTypeDto.delivery || existing.orderType === OrderTypeDto.delivery)) {
+      throw new BadRequestException('El tipo de pedido a domicilio se define al crear la orden.');
+    }
     if (
       dto.expectedUpdatedAt &&
       existing.updatedAt?.getTime() !==
@@ -2272,6 +2342,7 @@ export class OrdersService {
             waiterSnapshotName: existing.waiterSnapshotName,
             orderType: dto.orderType ?? existing.orderType,
             customerAddress: dto.customerAddress ?? existing.customerAddress,
+            customerPhoneSnapshot: dto.customerPhone?.trim() || undefined,
             linkedTables: existing.linkedTables,
             isSentToKitchen: pricedChildItems.some(
               (item) =>
@@ -2733,6 +2804,7 @@ export class OrdersService {
       const mergedComboSelections =
         prev.comboSelections && incoming.comboSelections
           ? prev.comboSelections.map((prevSel, selIdx) => {
+              if (prevSel.requiresPreparation === false) return prevSel;
               const incSel = incoming.comboSelections?.[selIdx];
               return incSel
                 ? {
@@ -3152,6 +3224,21 @@ export class OrdersService {
         ? { previousKitchenIds: previous.previousKitchenIds }
         : {}),
     });
+  }
+
+  private assertDeliveryPrepared(items: CartItemEntity[]): void {
+    const hasPendingPreparation = items.some(
+      (item) =>
+        requiresKitchenPreparation(item) &&
+        (!item.isSentToKitchen ||
+          (item.kitchenStatus !== KitchenStatusDto.ready &&
+            item.kitchenStatus !== KitchenStatusDto.delivered)),
+    );
+    if (hasPendingPreparation) {
+      throw new BadRequestException(
+        'El pedido aún no está listo en cocina para ser entregado.',
+      );
+    }
   }
 
   private isReadyForPickup(items: CartItemEntity[]): boolean {

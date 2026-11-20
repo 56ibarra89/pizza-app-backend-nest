@@ -78,7 +78,7 @@ describe('OrdersGateway authorization', () => {
     middleware(socket, next);
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    return { gateway, next, socket, emit };
+    return { gateway, next, socket, emit, to: server.to };
   };
 
   beforeEach(() => {
@@ -117,6 +117,36 @@ describe('OrdersGateway authorization', () => {
       'authenticated-full-orders-clients',
     );
     expect(next).toHaveBeenCalledWith();
+  });
+
+  it('envía únicamente entregas al canal de despacho con delivery.read', async () => {
+    findById.mockResolvedValue({ ...activeUser, role: UserRoleDto.despachador });
+    authorizationForUser.mockResolvedValue({ permissions: ['delivery.read'] });
+
+    const { gateway, next, socket, to } = await connect();
+    expect(next).toHaveBeenCalledWith();
+    expect(socket.join).toHaveBeenCalledTimes(1);
+    expect(socket.join).toHaveBeenCalledWith('authenticated-delivery-clients');
+
+    const order = {
+      id: 'order-1',
+      status: 'pending' as never,
+      timestamp: new Date('2026-11-04T12:00:00.000Z'),
+      total: 100,
+      items: [],
+      payments: [],
+    };
+    await gateway.handleOrderSynchronized({
+      mutation: 'updated',
+      order: { ...order, orderType: 'local' as never },
+    });
+    expect(to).not.toHaveBeenCalledWith('authenticated-delivery-clients');
+
+    await gateway.handleOrderSynchronized({
+      mutation: 'updated',
+      order: { ...order, orderType: 'delivery' as never },
+    });
+    expect(to).toHaveBeenCalledWith('authenticated-delivery-clients');
   });
 
   it('desconecta y retira del canal un socket cuando llega evento de revalidación de seguridad (H10)', async () => {

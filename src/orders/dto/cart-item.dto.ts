@@ -83,6 +83,10 @@ export class ComboSelectionDto {
   kitchenId?: string;
 
   @IsOptional()
+  @IsBoolean()
+  requiresPreparation?: boolean;
+
+  @IsOptional()
   @IsString()
   categoryId?: string;
 

@@ -1,10 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Prisma } from '@prisma/client';
 import { AdminDashboardService } from './admin-dashboard.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
 describe('AdminDashboardService', () => {
   let service: AdminDashboardService;
   let prisma: {
+    $queryRaw: jest.Mock;
     shift: { findMany: jest.Mock };
     user: { findMany: jest.Mock };
     order: { findMany: jest.Mock; aggregate: jest.Mock; count: jest.Mock };
@@ -14,6 +16,7 @@ describe('AdminDashboardService', () => {
 
   beforeEach(async () => {
     prisma = {
+      $queryRaw: jest.fn(),
       shift: { findMany: jest.fn() },
       user: { findMany: jest.fn() },
       order: {
@@ -54,31 +57,38 @@ describe('AdminDashboardService', () => {
         },
         startTime: new Date('2026-08-25T10:00:00Z'),
         openingAmount: 500,
-        orders: [
-          {
-            id: 'ord-1',
-            cashierId: 'user-1',
-            status: 'PAID',
-            total: 1000,
-            payments: [
-              { method: 'EFECTIVO', amount: 600 },
-              { method: 'TARJETA', amount: 400 },
-            ],
-          },
-          {
-            id: 'ord-2',
-            cashierId: 'user-2',
-            cashier: {
-              firstName: 'Sidney',
-              lastName: 'Barquero',
-              username: 'sidneyb',
-              role: 'CAJERO',
-            },
-            status: 'PAID',
-            total: 300,
-            payments: [{ method: 'APP', amount: 300 }],
-          },
-        ],
+      },
+    ]);
+    prisma.$queryRaw.mockResolvedValue([
+      {
+        shiftId: 'shift-1',
+        cashierId: 'user-1',
+        role: 'CAJERO_PRINCIPAL',
+        cash: new Prisma.Decimal(600),
+        card: new Prisma.Decimal(400),
+        app: new Prisma.Decimal(0),
+        transactions: 1n,
+      },
+      {
+        shiftId: 'shift-1',
+        cashierId: 'driver-1',
+        role: 'MOTORIZADO',
+        cash: new Prisma.Decimal(50),
+        card: new Prisma.Decimal(0),
+        app: new Prisma.Decimal(0),
+        transactions: 1n,
+      },
+      {
+        shiftId: 'shift-1',
+        cashierId: 'user-2',
+        firstName: 'Sidney',
+        lastName: 'Barquero',
+        username: 'sidneyb',
+        role: 'CAJERO',
+        cash: new Prisma.Decimal(0),
+        card: new Prisma.Decimal(0),
+        app: new Prisma.Decimal(300),
+        transactions: 1n,
       },
     ]);
 
@@ -90,11 +100,11 @@ describe('AdminDashboardService', () => {
     expect(result[0].cashier).toBe('Juan Perez');
     expect(result[0].cashierRole).toBe('CAJERO_PRINCIPAL');
     expect(result[0].openingAmount).toBe(500);
-    expect(result[0].revenueCash).toBe(600);
+    expect(result[0].revenueCash).toBe(650);
     expect(result[0].revenueCard).toBe(400);
     expect(result[0].revenueApp).toBe(0);
-    expect(result[0].revenueTotal).toBe(1000);
-    expect(result[0].transactionsCompleted).toBe(1);
+    expect(result[0].revenueTotal).toBe(1050);
+    expect(result[0].transactionsCompleted).toBe(2);
 
     // 2. Colaborador Secundario (Sidney) sin fondo inicial
     expect(result[1].cashier).toBe('Sidney Barquero');
@@ -127,6 +137,22 @@ describe('AdminDashboardService', () => {
     expect(kpis.activeOccupiedTables).toBe(3); // F3-M1, F2-M6, F2-M8
     expect(kpis.pendingKitchenOrders).toBe(3);
     expect(kpis.activeDeliveryOrders).toBe(2);
+    expect(prisma.order.count).toHaveBeenCalledWith({
+      where: {
+        isSentToKitchen: true,
+        status: { not: 'CANCELLED' },
+        items: {
+          some: {
+            isSentToKitchen: true,
+            requiresPreparation: true,
+            OR: [
+              { kitchenStatus: { in: ['PENDING', 'PREPARING'] } },
+              { kitchenStatus: null },
+            ],
+          },
+        },
+      },
+    });
   });
 
   it('atribuye cada venta liquidada a un único mesero y excluye padres de subcuentas', async () => {
