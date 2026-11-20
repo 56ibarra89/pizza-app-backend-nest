@@ -8,6 +8,14 @@ export type PasswordResetMail = {
 
 @Injectable()
 export class PasswordResetEmailService {
+  buildChangedMail(): PasswordResetMail {
+    return {
+      subject: 'Tu contraseña fue restablecida - Pizza To Go',
+      text: 'La contraseña de tu cuenta fue restablecida. Si no realizaste este cambio, contacta inmediatamente al responsable del sistema.',
+      html: '<p>La contraseña de tu cuenta fue restablecida.</p><p>Si no realizaste este cambio, contacta inmediatamente al responsable del sistema.</p>',
+    };
+  }
+
   buildResetMail(firstName: string, resetLink: string): PasswordResetMail {
     return {
       subject: 'Recuperación de Contraseña - Pizza To Go',

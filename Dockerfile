@@ -1,7 +1,7 @@
 # ==============================================================================
 # Etapa 1: Construcción (Builder) — pizza-app-backend-nest
 # ==============================================================================
-FROM node:20-bookworm-slim AS builder
+FROM node:22-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -26,7 +26,7 @@ RUN npm run prisma:generate && npm run build
 # ==============================================================================
 # Etapa 2: Ejecución (Runner) — pizza-app-backend-nest
 # ==============================================================================
-FROM node:20-bookworm-slim AS runner
+FROM node:22-bookworm-slim AS runner
 
 WORKDIR /app
 

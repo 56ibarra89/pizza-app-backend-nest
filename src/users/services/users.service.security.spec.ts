@@ -2,6 +2,7 @@ import { UnauthorizedException } from '@nestjs/common';
 import { UserRoleDto } from '../dto/user-role.dto';
 import type { UserEntity } from '../entities/user.entity';
 import { UsersService } from './users.service';
+import { PasswordResetEmailService } from './password-reset-email.service';
 
 describe('UsersService security boundaries', () => {
   const user: UserEntity = {
@@ -63,12 +64,13 @@ describe('UsersService security boundaries', () => {
     const lockoutService = {
       assertCanAuthenticate: jest.fn(),
     };
+    const mailer = { sendMail: jest.fn(() => Promise.resolve()) };
     const service = new UsersService(
       repo as any,
       hasher,
       lockoutService,
-      {} as any,
-      {} as any,
+      new PasswordResetEmailService(),
+      mailer as any,
       jwtService as any,
       prisma as any,
       pinHasher as any,
@@ -84,6 +86,7 @@ describe('UsersService security boundaries', () => {
       prisma,
       authAttempts,
       lockoutService,
+      mailer,
     };
   };
 
@@ -174,6 +177,74 @@ describe('UsersService security boundaries', () => {
         }),
       }),
     );
+  });
+
+  it('keeps the generic response and avoids reserving a reset when SMTP is missing', async () => {
+    const original = process.env.SMTP_HOST;
+    delete process.env.SMTP_HOST;
+    try {
+      const { service, prisma, mailer } = createHarness();
+      const result = await service.requestPasswordReset('admin@example.com');
+      expect(result.success).toBe(true);
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
+      expect(mailer.sendMail).not.toHaveBeenCalled();
+    } finally {
+      if (original === undefined) delete process.env.SMTP_HOST;
+      else process.env.SMTP_HOST = original;
+    }
+  });
+
+  it('sends a security notice after a successful password reset', async () => {
+    const { service, mailer } = createHarness();
+    await service.resetPassword('valid-token', 'NewPassword1!');
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(mailer.sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: user.email,
+        subject: expect.stringContaining('restablecida'),
+      }),
+    );
+  });
+
+  it('releases the reservation if delivery fails and never returns the delivery error', async () => {
+    const original = { ...process.env };
+    Object.assign(process.env, {
+      NODE_ENV: 'production', FRONTEND_URL: 'https://pos.example.com',
+      SMTP_HOST: 'smtp.example.com', SMTP_PORT: '587',
+      SMTP_USER: 'user', SMTP_PASS: 'password',
+    });
+    try {
+      const { service, repo, prisma, mailer } = createHarness();
+      repo.findByIdentifier.mockResolvedValueOnce({ ...user, role: UserRoleDto.admin });
+      mailer.sendMail.mockRejectedValueOnce(new Error('SMTP unavailable'));
+      const result = await service.requestPasswordReset(user.email!);
+      expect(result.success).toBe(true);
+      expect(mailer.sendMail).toHaveBeenCalledTimes(1);
+      expect(prisma.user.updateMany).toHaveBeenCalledTimes(2);
+      expect(prisma.user.updateMany.mock.calls[1][0]).toEqual(expect.objectContaining({
+        data: { passwordResetRequestedAt: null },
+      }));
+    } finally {
+      process.env = original;
+    }
+  });
+
+  it('does not issue a recovery link over HTTP in production', async () => {
+    const original = { ...process.env };
+    Object.assign(process.env, {
+      NODE_ENV: 'production', FRONTEND_URL: 'http://pos.example.com',
+      SMTP_HOST: 'smtp.example.com', SMTP_PORT: '587',
+      SMTP_USER: 'user', SMTP_PASS: 'password',
+    });
+    try {
+      const { service, prisma, mailer } = createHarness();
+      const result = await service.requestPasswordReset('admin@example.com');
+      expect(result.success).toBe(true);
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
+      expect(mailer.sendMail).not.toHaveBeenCalled();
+    } finally {
+      process.env = original;
+    }
   });
 
   it('renews a session from a recently expired access token or valid refresh token (H09)', async () => {

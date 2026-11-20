@@ -7,6 +7,7 @@ import {
   Optional,
   UnauthorizedException,
   HttpException,
+  Logger,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MailerService } from '@nestjs-modules/mailer';
@@ -94,6 +95,8 @@ async function waitForMinimumDuration(startedAt: number, minimumMs = 300) {
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @Inject(USERS_REPOSITORY) private readonly repo: IUsersRepository,
     private readonly hasher: PasswordHasherService,
@@ -626,6 +629,13 @@ export class UsersService {
     await this.authAttempts.assertAllowed(sourceScope);
     await this.authAttempts.registerFailure(sourceScope);
 
+    const frontendUrl = this.getPasswordResetFrontendUrl();
+    if (!frontendUrl) {
+      this.logger.error('Recuperación de contraseña no disponible: revisa FRONTEND_URL y la configuración SMTP.');
+      await waitForMinimumDuration(startedAt);
+      return genericResponse;
+    }
+
     const idLower = identifier.toLowerCase();
     const user = await this.repo.findByIdentifier(idLower);
 
@@ -640,6 +650,7 @@ export class UsersService {
     }
 
     const resetWindowStart = new Date(Date.now() - 15 * 60_000);
+    const reservedAt = new Date();
     const reservation = await this.prisma.user.updateMany({
       where: {
         id: user.id,
@@ -648,7 +659,7 @@ export class UsersService {
           { passwordResetRequestedAt: { lte: resetWindowStart } },
         ],
       },
-      data: { passwordResetRequestedAt: new Date() },
+      data: { passwordResetRequestedAt: reservedAt },
     });
     if (reservation.count !== 1) {
       await waitForMinimumDuration(startedAt);
@@ -659,7 +670,6 @@ export class UsersService {
       { sub: user.id, tokenVersion: user.tokenVersion, type: 'password_reset' },
       { expiresIn: '15m' },
     );
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     const resetLink = `${frontendUrl}/#/reset-password?token=${token}`;
 
     const email = this.passwordResetEmailService.buildResetMail(
@@ -674,8 +684,16 @@ export class UsersService {
         text: email.text,
         html: email.html,
       })
-      .catch((error: unknown) => {
-        console.error('Error enviando correo de recuperación:', error);
+      .catch(async () => {
+        this.logger.error('No se pudo enviar un correo de recuperación; revisa el proveedor SMTP.');
+        try {
+          await this.prisma.user.updateMany({
+            where: { id: user.id, passwordResetRequestedAt: reservedAt },
+            data: { passwordResetRequestedAt: null },
+          });
+        } catch {
+          this.logger.error('No se pudo liberar el plazo de solicitud de recuperación.');
+        }
       });
     await waitForMinimumDuration(startedAt);
     return genericResponse;
@@ -714,12 +732,41 @@ export class UsersService {
       }
 
       this.emitSocketRevalidation({ userId });
+      void this.notifyPasswordChanged(userId);
       return { success: true, message: 'Contraseña actualizada exitosamente' };
     } catch (error: unknown) {
       if (error instanceof HttpException) throw error;
       throw new UnauthorizedException(
         'Enlace inválido o expirado. Solicita uno nuevo.',
       );
+    }
+  }
+
+  private getPasswordResetFrontendUrl(): string | null {
+    const required = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS'];
+    if (required.some((name) => !process.env[name]?.trim())) return null;
+    const port = Number(process.env.SMTP_PORT);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+    const configured = process.env.FRONTEND_URL?.trim() ||
+      (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5173');
+    try {
+      const url = new URL(configured);
+      if (url.username || url.password || url.search || url.hash) return null;
+      if (url.protocol !== 'https:' && !(process.env.NODE_ENV !== 'production' && url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname))) return null;
+      return url.toString().replace(/\/$/, '');
+    } catch {
+      return null;
+    }
+  }
+
+  private async notifyPasswordChanged(userId: string): Promise<void> {
+    try {
+      const user = await this.repo.findById(userId);
+      if (!user?.email) return;
+      const email = this.passwordResetEmailService.buildChangedMail();
+      await this.mailerService.sendMail({ to: user.email, ...email });
+    } catch {
+      this.logger.error('No se pudo enviar la notificación de cambio de contraseña.');
     }
   }
 
