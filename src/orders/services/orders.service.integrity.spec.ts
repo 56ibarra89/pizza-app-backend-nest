@@ -25,6 +25,7 @@ import { PrismaOrdersRepository } from '../repositories/prisma-orders.repository
 import { InvoiceIssuingService } from './invoice-issuing.service';
 import { OrderPricingService } from './order-pricing.service';
 import { OrdersService } from './orders.service';
+import { assertPaymentsMatchTotal } from '../validators/order-payments.validator';
 
 describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
   describe('H01 — Certificate and gift quantity validation', () => {
@@ -601,7 +602,55 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
     it('rejects creating an immediately paid order when user lacks orders.finalize (H07)', async () => {
       const repo = { create: jest.fn() };
       const prisma = {
-        appConfig: { findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'payment_methods' ? { data: { methods: [{ id: 'cash-nio', name: 'Efectivo', type: 'CASH', currency: 'NIO', requiresReference: false, commissionRate: 0, isActive: true }, { id: 'card-generic', name: 'Tarjeta', type: 'CARD_POS', currency: 'NIO', requiresReference: true, commissionRate: 0, isActive: true }] } } : where.id === 'void_waste_policies' ? { data: { reasons: [{ id: 'error-comanda-mesero', label: 'Error de comanda', category: 'SERVICE', isActive: true, countsAsWaste: false, requiresSupervisor: false }] } } : null)) },
+        appConfig: {
+          findUnique: jest
+            .fn()
+            .mockImplementation(({ where }: { where: { id: string } }) =>
+              Promise.resolve(
+                where.id === 'payment_methods'
+                  ? {
+                      data: {
+                        methods: [
+                          {
+                            id: 'cash-nio',
+                            name: 'Efectivo',
+                            type: 'CASH',
+                            currency: 'NIO',
+                            requiresReference: false,
+                            commissionRate: 0,
+                            isActive: true,
+                          },
+                          {
+                            id: 'card-generic',
+                            name: 'Tarjeta',
+                            type: 'CARD_POS',
+                            currency: 'NIO',
+                            requiresReference: true,
+                            commissionRate: 0,
+                            isActive: true,
+                          },
+                        ],
+                      },
+                    }
+                  : where.id === 'void_waste_policies'
+                    ? {
+                        data: {
+                          reasons: [
+                            {
+                              id: 'error-comanda-mesero',
+                              label: 'Error de comanda',
+                              category: 'SERVICE',
+                              isActive: true,
+                              countsAsWaste: false,
+                              requiresSupervisor: false,
+                            },
+                          ],
+                        },
+                      }
+                    : null,
+              ),
+            ),
+        },
       };
       const service = new OrdersService(
         repo as never,
@@ -1020,15 +1069,113 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
     });
 
     it('resuelve efectivo USD con tasa y multimoneda guardadas', async () => {
-      const prisma = { appConfig: { findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'general_config' ? { data: { enableSecondaryCurrency: true, secondaryCurrencyCode: 'USD', exchangeRate: 36.5 } } : null)) } };
-      const service = new OrdersService({} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, prisma as never);
-      const resolve = (service as unknown as { resolvePayments: (payments: unknown[]) => Promise<unknown> }).resolvePayments.bind(service);
-      await expect(resolve([{ method: PaymentMethodDto.EFECTIVO, methodConfigId: 'cash-usd', amount: 365, originalAmount: 10, exchangeRate: 36.5 }])).resolves.toEqual([expect.objectContaining({ currency: 'USD', originalAmount: 10, amount: 365, exchangeRate: 36.5 })]);
+      const prisma = {
+        appConfig: {
+          findUnique: jest
+            .fn()
+            .mockImplementation(({ where }: { where: { id: string } }) =>
+              Promise.resolve(
+                where.id === 'general_config'
+                  ? {
+                      data: {
+                        enableSecondaryCurrency: true,
+                        secondaryCurrencyCode: 'USD',
+                        exchangeRate: 36.5,
+                      },
+                    }
+                  : null,
+              ),
+            ),
+        },
+      };
+      const service = new OrdersService(
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        prisma as never,
+      );
+      const resolve = (
+        service as unknown as {
+          resolvePayments: (payments: unknown[]) => Promise<unknown>;
+        }
+      ).resolvePayments.bind(service);
+      await expect(
+        resolve([
+          {
+            method: PaymentMethodDto.EFECTIVO,
+            methodConfigId: 'cash-usd',
+            amount: 365,
+            originalAmount: 10,
+            exchangeRate: 36.5,
+          },
+        ]),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          currency: 'USD',
+          originalAmount: 10,
+          amount: 365,
+          exchangeRate: 36.5,
+        }),
+      ]);
     });
 
     it('rejects inconsistent originalAmount/exchangeRate and prevents altering non-cash payments in split reconciliation (H15)', async () => {
       const prisma = {
-        appConfig: { findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'payment_methods' ? { data: { methods: [{ id: 'cash-nio', name: 'Efectivo', type: 'CASH', currency: 'NIO', requiresReference: false, commissionRate: 0, isActive: true }, { id: 'card-generic', name: 'Tarjeta', type: 'CARD_POS', currency: 'NIO', requiresReference: true, commissionRate: 0, isActive: true }] } } : where.id === 'void_waste_policies' ? { data: { reasons: [{ id: 'error-comanda-mesero', label: 'Error de comanda', category: 'SERVICE', isActive: true, countsAsWaste: false, requiresSupervisor: false }] } } : null)) },
+        appConfig: {
+          findUnique: jest
+            .fn()
+            .mockImplementation(({ where }: { where: { id: string } }) =>
+              Promise.resolve(
+                where.id === 'payment_methods'
+                  ? {
+                      data: {
+                        methods: [
+                          {
+                            id: 'cash-nio',
+                            name: 'Efectivo',
+                            type: 'CASH',
+                            currency: 'NIO',
+                            requiresReference: false,
+                            commissionRate: 0,
+                            isActive: true,
+                          },
+                          {
+                            id: 'card-generic',
+                            name: 'Tarjeta',
+                            type: 'CARD_POS',
+                            currency: 'NIO',
+                            requiresReference: true,
+                            commissionRate: 0,
+                            isActive: true,
+                          },
+                        ],
+                      },
+                    }
+                  : where.id === 'void_waste_policies'
+                    ? {
+                        data: {
+                          reasons: [
+                            {
+                              id: 'error-comanda-mesero',
+                              label: 'Error de comanda',
+                              category: 'SERVICE',
+                              isActive: true,
+                              countsAsWaste: false,
+                              requiresSupervisor: false,
+                            },
+                          ],
+                        },
+                      }
+                    : null,
+              ),
+            ),
+        },
       };
       const service = new OrdersService(
         {} as never,
@@ -1315,7 +1462,55 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
         }),
       };
       const prisma = {
-        appConfig: { findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'payment_methods' ? { data: { methods: [{ id: 'cash-nio', name: 'Efectivo', type: 'CASH', currency: 'NIO', requiresReference: false, commissionRate: 0, isActive: true }, { id: 'card-generic', name: 'Tarjeta', type: 'CARD_POS', currency: 'NIO', requiresReference: true, commissionRate: 0, isActive: true }] } } : where.id === 'void_waste_policies' ? { data: { reasons: [{ id: 'error-comanda-mesero', label: 'Error de comanda', category: 'SERVICE', isActive: true, countsAsWaste: false, requiresSupervisor: false }] } } : null)) },
+        appConfig: {
+          findUnique: jest
+            .fn()
+            .mockImplementation(({ where }: { where: { id: string } }) =>
+              Promise.resolve(
+                where.id === 'payment_methods'
+                  ? {
+                      data: {
+                        methods: [
+                          {
+                            id: 'cash-nio',
+                            name: 'Efectivo',
+                            type: 'CASH',
+                            currency: 'NIO',
+                            requiresReference: false,
+                            commissionRate: 0,
+                            isActive: true,
+                          },
+                          {
+                            id: 'card-generic',
+                            name: 'Tarjeta',
+                            type: 'CARD_POS',
+                            currency: 'NIO',
+                            requiresReference: true,
+                            commissionRate: 0,
+                            isActive: true,
+                          },
+                        ],
+                      },
+                    }
+                  : where.id === 'void_waste_policies'
+                    ? {
+                        data: {
+                          reasons: [
+                            {
+                              id: 'error-comanda-mesero',
+                              label: 'Error de comanda',
+                              category: 'SERVICE',
+                              isActive: true,
+                              countsAsWaste: false,
+                              requiresSupervisor: false,
+                            },
+                          ],
+                        },
+                      }
+                    : null,
+              ),
+            ),
+        },
         $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
           fn(sharedTx),
         ),
@@ -1407,7 +1602,53 @@ describe('Phase 1 critical integrity safeguards (H01 & H02)', () => {
       };
       const prisma = {
         appConfig: {
-          findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'payment_methods' ? { data: { methods: [{ id: 'cash-nio', name: 'Efectivo', type: 'CASH', currency: 'NIO', requiresReference: false, commissionRate: 0, isActive: true }, { id: 'card-generic', name: 'Tarjeta', type: 'CARD_POS', currency: 'NIO', requiresReference: true, commissionRate: 0, isActive: true }] } } : where.id === 'void_waste_policies' ? { data: { reasons: [{ id: 'error-comanda-mesero', label: 'Error de comanda', category: 'SERVICE', isActive: true, countsAsWaste: false, requiresSupervisor: false }] } } : null)),
+          findUnique: jest
+            .fn()
+            .mockImplementation(({ where }: { where: { id: string } }) =>
+              Promise.resolve(
+                where.id === 'payment_methods'
+                  ? {
+                      data: {
+                        methods: [
+                          {
+                            id: 'cash-nio',
+                            name: 'Efectivo',
+                            type: 'CASH',
+                            currency: 'NIO',
+                            requiresReference: false,
+                            commissionRate: 0,
+                            isActive: true,
+                          },
+                          {
+                            id: 'card-generic',
+                            name: 'Tarjeta',
+                            type: 'CARD_POS',
+                            currency: 'NIO',
+                            requiresReference: true,
+                            commissionRate: 0,
+                            isActive: true,
+                          },
+                        ],
+                      },
+                    }
+                  : where.id === 'void_waste_policies'
+                    ? {
+                        data: {
+                          reasons: [
+                            {
+                              id: 'error-comanda-mesero',
+                              label: 'Error de comanda',
+                              category: 'SERVICE',
+                              isActive: true,
+                              countsAsWaste: false,
+                              requiresSupervisor: false,
+                            },
+                          ],
+                        },
+                      }
+                    : null,
+              ),
+            ),
         },
         $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
           fn({}),
@@ -1727,7 +1968,55 @@ describe('Pass-5 remaining integrity safeguards (B54 & B59)', () => {
       order: { update: jest.fn() },
     };
     const prisma = {
-      appConfig: { findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'payment_methods' ? { data: { methods: [{ id: 'cash-nio', name: 'Efectivo', type: 'CASH', currency: 'NIO', requiresReference: false, commissionRate: 0, isActive: true }, { id: 'card-generic', name: 'Tarjeta', type: 'CARD_POS', currency: 'NIO', requiresReference: true, commissionRate: 0, isActive: true }] } } : where.id === 'void_waste_policies' ? { data: { reasons: [{ id: 'error-comanda-mesero', label: 'Error de comanda', category: 'SERVICE', isActive: true, countsAsWaste: false, requiresSupervisor: false }] } } : null)) },
+      appConfig: {
+        findUnique: jest
+          .fn()
+          .mockImplementation(({ where }: { where: { id: string } }) =>
+            Promise.resolve(
+              where.id === 'payment_methods'
+                ? {
+                    data: {
+                      methods: [
+                        {
+                          id: 'cash-nio',
+                          name: 'Efectivo',
+                          type: 'CASH',
+                          currency: 'NIO',
+                          requiresReference: false,
+                          commissionRate: 0,
+                          isActive: true,
+                        },
+                        {
+                          id: 'card-generic',
+                          name: 'Tarjeta',
+                          type: 'CARD_POS',
+                          currency: 'NIO',
+                          requiresReference: true,
+                          commissionRate: 0,
+                          isActive: true,
+                        },
+                      ],
+                    },
+                  }
+                : where.id === 'void_waste_policies'
+                  ? {
+                      data: {
+                        reasons: [
+                          {
+                            id: 'error-comanda-mesero',
+                            label: 'Error de comanda',
+                            category: 'SERVICE',
+                            isActive: true,
+                            countsAsWaste: false,
+                            requiresSupervisor: false,
+                          },
+                        ],
+                      },
+                    }
+                  : null,
+            ),
+          ),
+      },
       $transaction: jest.fn(async (cb: (client: unknown) => Promise<unknown>) =>
         cb(tx),
       ),
@@ -1850,5 +2139,477 @@ describe('Pass-5 remaining integrity safeguards (B54 & B59)', () => {
       }),
       tx,
     );
+  });
+
+  it('D02, D03, D04, D06, D14, D17 — idempotencia en reintento de cobro, precios congelados en splitCheckout, bloqueo de retroceso en correlativo, hito DELIVERED ante KDS, centavos enteros y autoría de cobro', async () => {
+    // 1. D02: Reintentar OrdersService.create con un dto.id ya cobrado devuelve la orden existente sin duplicar venta ni correlativo
+    const alreadyPaidOrder: OrderEntity = {
+      id: 'ORD-IDEMPOTENT-1',
+      status: OrderStatusDto.paid,
+      orderType: OrderTypeDto.local,
+      cashierId: 'cashier-1',
+      cashierSnapshotName: 'cajero1',
+      invoiceNumber: 'NOV26-00042',
+      total: 120,
+      subTotal: 120,
+      discountAmount: 0,
+      taxAmount: 0,
+      timestamp: new Date('2026-11-19T18:00:00.000Z'),
+      items: [],
+      payments: [{ method: PaymentMethodDto.EFECTIVO, amount: 120 } as never],
+    };
+    const idempotentRepo = {
+      findById: jest.fn().mockResolvedValue(alreadyPaidOrder),
+      create: jest.fn(),
+    };
+    const idempotentService = new OrdersService(
+      idempotentRepo as never,
+      { emit: jest.fn() } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const retriedResult = await idempotentService.create(
+      {
+        id: 'ORD-IDEMPOTENT-1',
+        items: [],
+        total: 120,
+        orderType: OrderTypeDto.local,
+        status: OrderStatusDto.paid,
+        payments: [{ method: PaymentMethodDto.EFECTIVO, amount: 120 }],
+      },
+      { id: 'cashier-1', username: 'cajero1', role: UserRoleDto.cajero },
+    );
+    expect(retriedResult.id).toBe('ORD-IDEMPOTENT-1');
+    expect(retriedResult.invoiceNumber).toBe('NOV26-00042');
+    expect(idempotentRepo.create).not.toHaveBeenCalled();
+
+    // 2. D03: splitCheckout por productos respeta el precio snapshot (C$120) aunque el catálogo haya subido a C$135
+    const catalogChangedProductsService = {
+      getProductById: jest.fn().mockResolvedValue({
+        id: 'prod-snap-1',
+        name: 'Pizza Clásica',
+        categoryId: 'cat-1',
+        isCombo: false,
+        prices: [{ size: 'mediana', price: 135 }],
+        extras: [],
+      }),
+    };
+    const exoneratedTaxConfigService = {
+      getByIdOrDefault: jest
+        .fn()
+        .mockImplementation((key: string) =>
+          key === 'packaging_sizes'
+            ? Promise.resolve({ data: { sizes: [] } })
+            : Promise.resolve({ data: { isExonerated: true, taxes: [] } }),
+        ),
+    };
+    const realPricing = new OrderPricingService(
+      catalogChangedProductsService as never,
+      exoneratedTaxConfigService as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const parentWithSnapshot120: OrderEntity = {
+      id: 'ord-parent-d03',
+      customerPhone: '88881111',
+      customerAddress: 'Dirección de la orden',
+      status: OrderStatusDto.pending,
+      orderType: OrderTypeDto.local,
+      total: 240,
+      subTotal: 240,
+      discountAmount: 0,
+      taxAmount: 0,
+      timestamp: new Date('2026-11-19T18:00:00.000Z'),
+      updatedAt: new Date('2026-11-19T18:00:00.000Z'),
+      items: [
+        {
+          id: 99,
+          productId: 'prod-snap-1',
+          name: 'Pizza Clásica',
+          price: 120,
+          size: 'mediana',
+          quantity: 2,
+          giftQuantity: 0,
+          extras: [],
+        },
+      ],
+      payments: [],
+    };
+    let savedParentData: any;
+    let savedChildData: any;
+    const splitRepo = {
+      findById: jest.fn().mockImplementation(async (orderId: string) => {
+        if (orderId === 'ord-parent-d03') return parentWithSnapshot120;
+        return {
+          ...savedChildData,
+          id: 'ord-child-d03',
+          status: OrderStatusDto.paid,
+          invoice: { invoiceNumber: 'NOV26-00050' },
+        };
+      }),
+      update: jest.fn().mockImplementation(async (_id, data) => {
+        savedParentData = data;
+        return { ...parentWithSnapshot120, ...data };
+      }),
+      create: jest.fn().mockImplementation(async (data) => {
+        savedChildData = data;
+        return { id: 'ord-child-d03', ...data };
+      }),
+    };
+    const splitTx = {
+      $queryRaw: jest.fn().mockResolvedValue([
+        {
+          id: 'ord-parent-d03',
+          status: 'PENDING',
+          updatedAt: new Date('2026-11-19T18:00:00.000Z'),
+          invoiceNumber: null,
+        },
+      ]),
+      order: {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      },
+    };
+    const splitPrisma = {
+      order: {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      appConfig: {
+        findUnique: jest.fn().mockResolvedValue({
+          data: {
+            methods: [
+              {
+                id: 'cash-nio',
+                name: 'Efectivo',
+                type: 'CASH',
+                currency: 'NIO',
+                requiresReference: false,
+                commissionRate: 0,
+                isActive: true,
+              },
+            ],
+          },
+        }),
+      },
+      $transaction: jest.fn(async (cb: (client: unknown) => Promise<unknown>) =>
+        cb(splitTx),
+      ),
+    };
+    const splitService = new OrdersService(
+      splitRepo as never,
+      { emit: jest.fn() } as never,
+      realPricing,
+      {
+        issueInTransaction: jest.fn().mockResolvedValue(undefined),
+        persistTerminalCorrelativoStatusIfNeeded: jest.fn(),
+      } as never,
+      {} as never,
+      {
+        resolve: jest.fn().mockResolvedValue({
+          customerId: undefined,
+          cashierId: 'cashier-1',
+          shiftId: 'shift-1',
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      splitPrisma as never,
+    );
+
+    await splitService.splitCheckout(
+      'ord-parent-d03',
+      {
+        mode: 'items',
+        accountName: 'Persona 1',
+        items: [
+          {
+            id: 99,
+            productId: 'prod-snap-1',
+            name: 'Pizza Clásica',
+            price: 120,
+            size: 'mediana',
+            quantity: 1,
+            giftQuantity: 0,
+            extras: [],
+          },
+        ],
+        payments: [{ method: PaymentMethodDto.EFECTIVO, amount: 120 }],
+        expectedUpdatedAt: '2026-11-19T18:00:00.000Z',
+      } as never,
+      { id: 'cashier-1', username: 'cajero1', role: UserRoleDto.cajero },
+    );
+
+    expect(savedChildData.total).toBe(120);
+    expect(savedChildData.customerPhoneSnapshot).toBe('88881111');
+    expect(savedChildData.customerAddress).toBe('Dirección de la orden');
+    expect(savedChildData.items[0].price).toBe(120);
+    expect(savedChildData.items[0].id).toBeUndefined();
+    expect(savedParentData.total).toBe(120);
+    expect(savedParentData.items[0].price).toBe(120);
+
+    // Un combo y su empaque histórico siguen siendo cobrables si el catálogo cambió.
+    catalogChangedProductsService.getProductById.mockClear();
+    catalogChangedProductsService.getProductById.mockRejectedValue(
+      new Error('Combo retirado del catálogo'),
+    );
+    const comboSelection = {
+      groupId: 'grupo-histórico',
+      groupName: 'Bebida',
+      productId: 'bebida-histórica',
+      productName: 'Té frío',
+      quantity: 1,
+      extraPrice: 0,
+      requiresPreparation: false,
+    };
+    parentWithSnapshot120.total = 140;
+    parentWithSnapshot120.subTotal = 140;
+    parentWithSnapshot120.items = [
+      {
+        ...parentWithSnapshot120.items[0],
+        productId: 'combo-histórico',
+        categoryId: 'combos',
+        name: 'Combo histórico',
+        isCombo: true,
+        comboSelections: [comboSelection],
+        quantity: 1,
+      },
+      {
+        id: 100,
+        name: 'Empaque mediano',
+        price: 20,
+        size: 'mediano',
+        quantity: 1,
+        giftQuantity: 0,
+        extras: [],
+      },
+    ];
+    // Si caja ya seleccionó el empaque del padre, debe cobrarse la misma línea
+    // congelada una sola vez, igual que al trasladarla por el saldo final.
+    for (const selectedPackaging of [false, true]) {
+      await splitService.splitCheckout(
+        'ord-parent-d03',
+        {
+          mode: 'items',
+          accountName: 'Última subcuenta',
+          items: [
+            { ...parentWithSnapshot120.items[0], comboSelections: [] },
+            ...(selectedPackaging
+              ? [{ ...parentWithSnapshot120.items[1], price: 0.01 }]
+              : []),
+          ],
+          payments: [{ method: PaymentMethodDto.EFECTIVO, amount: 140 }],
+          expectedUpdatedAt: '2026-11-19T18:00:00.000Z',
+        } as never,
+        { id: 'cashier-1', username: 'cajero1', role: UserRoleDto.cajero },
+      );
+      expect(savedChildData.total).toBe(140);
+      expect(savedChildData.items).toMatchObject([
+        { price: 120, comboSelections: [comboSelection] },
+        { price: 20, name: 'Empaque mediano', splitTransferredFromParent: true },
+      ]);
+      expect(savedParentData.items).toEqual([]);
+    }
+    expect(catalogChangedProductsService.getProductById).not.toHaveBeenCalled();
+
+    // 3. D04: PrismaCorrelativosRepository.update rechaza retroceso de currentNumber (ej. 32 -> 31)
+    const correlativoTx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'corr-1' }]),
+      correlativo: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'corr-1',
+          documentType: DocumentType.FACTURA,
+          resolutionNumber: 'RES-1',
+          prefix: 'NOV26-',
+          startNumber: 1,
+          endNumber: 1000,
+          currentNumber: 32,
+          issueDate: new Date('2026-11-01T00:00:00.000Z'),
+          expirationDate: new Date('2026-11-30T23:59:59.000Z'),
+          status: CorrelativoStatus.ACTIVO,
+          createdAt: new Date('2026-11-01T00:00:00.000Z'),
+        }),
+        update: jest.fn(),
+        updateMany: jest.fn(),
+      },
+      order: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+    };
+    const correlativosRepo = new PrismaCorrelativosRepository({
+      $transaction: jest.fn((cb: (tx: unknown) => unknown) =>
+        cb(correlativoTx),
+      ),
+    } as never);
+    await expect(
+      correlativosRepo.update('corr-1', { currentNumber: 31 }),
+    ).rejects.toThrow(/no puede retroceder/i);
+
+    // 4. D06: Orden delivery confirmada como DELIVERED no retrocede a READY cuando cocina marca Entregar después
+    const deliveredDeliveryOrder: OrderEntity = {
+      id: 'ord-del-d06',
+      status: OrderStatusDto.delivered,
+      orderType: OrderTypeDto.delivery,
+      driverId: 'driver-1',
+      deliveredAt: new Date('2026-11-19T18:30:00.000Z'),
+      total: 200,
+      subTotal: 200,
+      discountAmount: 0,
+      taxAmount: 0,
+      timestamp: new Date('2026-11-19T18:00:00.000Z'),
+      updatedAt: new Date('2026-11-19T18:30:00.000Z'),
+      items: [
+        {
+          id: 501,
+          productId: 'prod-1',
+          name: 'Pizza',
+          price: 200,
+          size: 'grande',
+          quantity: 1,
+          giftQuantity: 0,
+          kitchenId: 'kitchen-1',
+          requiresPreparation: true,
+          isSentToKitchen: true,
+          sentAt: new Date('2026-11-19T18:01:00.000Z'),
+          kitchenStatus: KitchenStatusDto.delivered,
+          extras: [],
+        },
+      ],
+      payments: [],
+    };
+    const d06Tx = {
+      $queryRaw: jest.fn().mockResolvedValue([
+        {
+          status: 'DELIVERED',
+          updatedAt: new Date('2026-11-19T18:30:00.000Z'),
+        },
+      ]),
+    };
+    const d06Repo = {
+      findById: jest.fn().mockResolvedValue(deliveredDeliveryOrder),
+      updateItemsKitchenStatus: jest.fn().mockResolvedValue(undefined),
+      updateOperationalStatus: jest
+        .fn()
+        .mockResolvedValue(new Date('2026-11-19T18:31:00.000Z')),
+    };
+    const d06Service = new OrdersService(
+      d06Repo as never,
+      { emit: jest.fn() } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        getAssignedKitchenIdForDate: jest.fn().mockResolvedValue('kitchen-1'),
+      } as never,
+      {
+        $transaction: jest.fn((cb: (tx: unknown) => unknown) => cb(d06Tx)),
+      } as never,
+    );
+    const afterKitchenDeliver = await d06Service.updateStatus(
+      'ord-del-d06',
+      {
+        status: OrderStatusDto.delivered,
+        sentAt: new Date('2026-11-19T18:01:00.000Z').getTime(),
+        kitchenId: 'kitchen-1',
+      },
+      { id: 'cook-1', username: 'cocinero1', role: UserRoleDto.cocinero },
+    );
+    expect(afterKitchenDeliver.status).toBe(OrderStatusDto.delivered);
+    expect(d06Repo.updateOperationalStatus).toHaveBeenCalledWith(
+      'ord-del-d06',
+      expect.objectContaining({ status: OrderStatusDto.delivered }),
+      d06Tx,
+    );
+
+    // 5. D14: assertPaymentsMatchTotal aplica la misma tolerancia de 1 centavo tanto en C$10 como en C$100
+    expect(() =>
+      assertPaymentsMatchTotal(10, [{ amount: 10.01 }]),
+    ).not.toThrow();
+    expect(() =>
+      assertPaymentsMatchTotal(100, [{ amount: 100.01 }]),
+    ).not.toThrow();
+    expect(() => assertPaymentsMatchTotal(100, [{ amount: 100.02 }])).toThrow(
+      BadRequestException,
+    );
+
+    // 6. D17: InvoiceIssuingService registra en ORDER_FINALIZED al operador que ejecuta el cobro y no al creador previo
+    const systemLogCreate = jest.fn().mockResolvedValue({ id: 1 });
+    const d17Tx = {
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValueOnce([{ id: 'ord-d17', updatedAt: new Date() }])
+        .mockResolvedValueOnce([{ id: 'corr-d17' }]),
+      $executeRaw: jest.fn().mockResolvedValue(1),
+      order: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'ord-d17',
+          parentOrderId: null,
+          status: 'PENDING',
+          cashierId: 'waiter-creator-1',
+          cashierSnapshotName: 'mesero_creador',
+          shiftId: 'shift-1',
+          invoiceNumber: null,
+          pendingCertificateSerials: [],
+        }),
+        update: jest.fn().mockResolvedValue({}),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      shift: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'shift-1' }),
+      },
+      correlativo: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'corr-d17',
+          documentType: DocumentType.FACTURA,
+          resolutionNumber: 'RES-D17',
+          prefix: '',
+          startNumber: 1,
+          endNumber: 100,
+          currentNumber: 5,
+          expirationDate: new Date('2099-12-31T00:00:00.000Z'),
+          status: CorrelativoStatus.ACTIVO,
+        }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      orderItem: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      systemLog: {
+        create: systemLogCreate,
+      },
+    };
+    const issuingService = new InvoiceIssuingService();
+    await issuingService.issue(d17Tx as never, {
+      orderId: 'ord-d17',
+      dto: {
+        payments: [{ method: PaymentMethodDto.EFECTIVO, amount: 150 }],
+      },
+      totals: { subTotal: 150, discountAmount: 0, taxAmount: 0, total: 150 },
+      promotion: { source: 'none' },
+      cashierId: 'cashier-executor-2',
+      cashierSnapshotName: 'cajero_cobrador',
+      actorUserId: 'cashier-executor-2',
+      actorUsername: 'cajero_cobrador',
+    });
+    expect(systemLogCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: 'cashier-executor-2',
+        user: 'cajero_cobrador',
+        action: 'ORDER_FINALIZED',
+      }),
+    });
   });
 });

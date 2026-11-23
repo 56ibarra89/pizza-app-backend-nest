@@ -63,7 +63,7 @@ describe('PrismaShiftsRepository.close', () => {
           (input.data.authorizedBySnapshotName as string | undefined) ?? null,
         authorizedByRole:
           (input.data.authorizedByRole as string | undefined) ?? null,
-        denominationBreakdown: null,
+        denominationBreakdown: input.data.denominationBreakdown,
         status: ShiftStatus.CLOSED,
         updatedAt: new Date('2026-08-22T18:00:00.000Z'),
       }),
@@ -72,29 +72,25 @@ describe('PrismaShiftsRepository.close', () => {
       (input: { data: Record<string, unknown> }) => Promise.resolve(input),
     );
     const orderFindMany = jest.fn(() => Promise.resolve([]));
+    const paymentGroupBy = jest.fn().mockResolvedValue([
+      {
+        method: PaymentMethod.EFECTIVO,
+        methodConfigId: null,
+        methodSnapshotName: null,
+        methodType: null,
+        currency: 'NIO',
+        _sum: { amount: new Prisma.Decimal(100), commissionAmount: null },
+        _count: { _all: 1 },
+      },
+    ]);
+    const queryRaw = jest.fn().mockResolvedValue([]);
     const tx = {
+      $queryRaw: queryRaw,
       shift: {
         findUnique: jest.fn(() => Promise.resolve(existingShift)),
         update: shiftUpdate,
       },
-      payment: {
-        groupBy: jest.fn(() =>
-          Promise.resolve([
-            {
-              method: PaymentMethod.EFECTIVO,
-              methodConfigId: null,
-              methodSnapshotName: null,
-              methodType: null,
-              currency: 'NIO',
-              _sum: {
-                amount: new Prisma.Decimal(100),
-                commissionAmount: null,
-              },
-              _count: { _all: 1 },
-            },
-          ]),
-        ),
-      },
+      payment: { groupBy: paymentGroupBy },
       order: { findMany: orderFindMany },
       systemLog: { create: systemLogCreate },
     };
@@ -110,7 +106,14 @@ describe('PrismaShiftsRepository.close', () => {
       } as any,
     );
 
-    return { repository, shiftUpdate, systemLogCreate, orderFindMany };
+    return {
+      repository,
+      shiftUpdate,
+      systemLogCreate,
+      orderFindMany,
+      paymentGroupBy,
+      queryRaw,
+    };
   };
 
   const closeParams = {
@@ -122,6 +125,114 @@ describe('PrismaShiftsRepository.close', () => {
       role: 'cajero_principal',
     },
   };
+
+  it('RD-18 cierra con denominaciones físicas separadas y guarda el equivalente en córdobas', async () => {
+    const { repository, paymentGroupBy, queryRaw, shiftUpdate } =
+      createHarness();
+    paymentGroupBy.mockResolvedValue([
+      {
+        method: PaymentMethod.EFECTIVO,
+        currency: 'USD',
+        _sum: { amount: new Prisma.Decimal(365), commissionAmount: null },
+        _count: { _all: 1 },
+      },
+    ]);
+    queryRaw
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { original: new Prisma.Decimal(10), incomplete: false },
+      ]);
+
+    const closed = await repository.close({
+      ...closeParams,
+      closingAmount: 1000,
+      countedUsd: 10,
+      denominationBreakdown: [{ denomination: 1000, quantity: 1 }],
+      usdDenominationBreakdown: [{ denomination: 5, quantity: 2 }],
+    });
+
+    expect(closed).toMatchObject({
+      closingAmount: 1365,
+      expectedCash: 1365,
+      cashDifference: 0,
+      denominationBreakdown: [{ denomination: 1000, quantity: 1 }],
+      usdDenominationBreakdown: [{ denomination: 5, quantity: 2 }],
+      cashByCurrency: {
+        expectedNio: 1000,
+        countedNio: 1000,
+        expectedUsd: 10,
+        countedUsd: 10,
+        countedUsdEquivalentNio: 365,
+      },
+    });
+    expect(shiftUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('RD-18 conserva el conteo por moneda cuando el vuelto en córdobas deja un total cuadrado', async () => {
+    const { repository, paymentGroupBy, queryRaw, shiftUpdate } =
+      createHarness();
+    paymentGroupBy.mockResolvedValue([
+      {
+        method: PaymentMethod.EFECTIVO,
+        currency: 'USD',
+        _sum: { amount: new Prisma.Decimal(365), commissionAmount: null },
+        _count: { _all: 1 },
+      },
+    ]);
+    queryRaw
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { original: new Prisma.Decimal(10), incomplete: false },
+      ]);
+
+    const closed = await repository.close({
+      ...closeParams,
+      closingAmount: 635,
+      countedUsd: 20,
+    });
+    expect(closed).toMatchObject({
+      closingAmount: 1365,
+      cashDifference: 0,
+      cashByCurrency: {
+        expectedNio: 1000,
+        countedNio: 635,
+        expectedUsd: 10,
+        countedUsd: 20,
+        countedUsdEquivalentNio: 730,
+      },
+    });
+    expect(shiftUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('RD-18 convierte los dólares contados sin redondear antes el importe original', async () => {
+    const { repository, paymentGroupBy, queryRaw } = createHarness();
+    paymentGroupBy.mockResolvedValue([
+      {
+        method: PaymentMethod.EFECTIVO,
+        currency: 'USD',
+        _sum: { amount: new Prisma.Decimal(18), commissionAmount: null },
+        _count: { _all: 1 },
+      },
+    ]);
+    queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      { original: new Prisma.Decimal('0.4932'), incomplete: false },
+    ]);
+
+    const closed = await repository.close({
+      ...closeParams,
+      closingAmount: 999.75,
+      countedUsd: 0.5,
+    });
+    expect(closed).toMatchObject({
+      closingAmount: 1018,
+      cashDifference: 0,
+      cashByCurrency: {
+        expectedUsd: 0.4932,
+        countedUsd: 0.5,
+        countedUsdEquivalentNio: 18.25,
+      },
+    });
+  });
 
   it('lee ventas de un turno abierto sin consultar órdenes ni mesas para cierre', async () => {
     const orderFindMany = jest.fn();

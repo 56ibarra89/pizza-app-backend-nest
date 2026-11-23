@@ -299,4 +299,84 @@ describe('ReportsService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(findMany).not.toHaveBeenCalled();
   });
+
+  it('separa los pagos de un método por moneda y por tipo histórico', async () => {
+    const payment = {
+      method: 'APP',
+      methodConfigId: 'metodo-compartido',
+      methodSnapshotName: 'Cuenta principal',
+      methodType: 'BANK_TRANSFER',
+      currency: 'USD',
+      exchangeRate: new Prisma.Decimal('36.50'),
+    };
+    findMany.mockResolvedValue([
+      {
+        id: 'ord-multidivisa',
+        total: new Prisma.Decimal(588),
+        timestamp: new Date('2026-10-12T12:00:00Z'),
+        orderType: 'LOCAL',
+        linkedTables: [],
+        items: [],
+        payments: [
+          {
+            ...payment,
+            amount: new Prisma.Decimal(365),
+            originalAmount: new Prisma.Decimal(10),
+          },
+          { ...payment, amount: new Prisma.Decimal(73), originalAmount: null },
+          {
+            ...payment,
+            currency: 'NIO',
+            amount: new Prisma.Decimal(100),
+            originalAmount: null,
+          },
+          {
+            ...payment,
+            currency: 'NIO',
+            methodType: 'CARD_POS',
+            amount: new Prisma.Decimal(50),
+            originalAmount: null,
+          },
+        ],
+      },
+    ]);
+
+    const report = await service.getSalesReport({
+      startDate: new Date('2026-10-12T06:00:00.000Z'),
+      endDate: new Date('2026-10-13T05:59:59.999Z'),
+      timezoneOffsetMinutes: 360,
+    });
+
+    expect(report).toMatchObject({
+      totalSales: 588,
+      cardSales: 50,
+      appSales: 538,
+    });
+    expect(report.paymentBreakdown).toEqual([
+      expect.objectContaining({
+        id: payment.methodConfigId,
+        type: 'BANK_TRANSFER',
+        currency: 'USD',
+        amount: 438,
+        originalAmount: 12,
+        transactionCount: 2,
+      }),
+      expect.objectContaining({
+        id: payment.methodConfigId,
+        type: 'BANK_TRANSFER',
+        currency: 'NIO',
+        amount: 100,
+        originalAmount: 100,
+        transactionCount: 1,
+      }),
+      expect.objectContaining({
+        id: payment.methodConfigId,
+        type: 'CARD_POS',
+        currency: 'NIO',
+        amount: 50,
+        originalAmount: 50,
+        transactionCount: 1,
+      }),
+    ]);
+  });
 });

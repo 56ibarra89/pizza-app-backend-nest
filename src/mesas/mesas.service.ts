@@ -269,6 +269,15 @@ export class MesasService implements OnModuleInit {
   }
 
   async reserveMesa(id: string, dto: ReserveMesaDto) {
+    const reservationTime = dto.reservationTime ? new Date(dto.reservationTime) : null;
+    const expirationTime = dto.expirationTime ? new Date(dto.expirationTime) : null;
+    if (expirationTime && expirationTime.getTime() <= Date.now()) {
+      throw new BadRequestException('El vencimiento de la reserva debe ser posterior a la hora actual.');
+    }
+    if (reservationTime && expirationTime && expirationTime <= reservationTime) {
+      throw new BadRequestException('El vencimiento debe ser posterior al inicio de la reserva.');
+    }
+
     await this.assertNoActiveOrdersOnMesa(id);
     const reserved = await this.prisma.mesa.updateMany({
       where: { id, estado: 'DISPONIBLE', isActive: true },
@@ -276,12 +285,8 @@ export class MesasService implements OnModuleInit {
         estado: 'RESERVADO',
         reservationName: dto.reservationName,
         reservationAmount: dto.reservationAmount,
-        reservationTime: dto.reservationTime
-          ? new Date(dto.reservationTime)
-          : null,
-        expirationTime: dto.expirationTime
-          ? new Date(dto.expirationTime)
-          : null,
+        reservationTime,
+        expirationTime,
       },
     });
 

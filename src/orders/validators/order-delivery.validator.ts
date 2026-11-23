@@ -3,45 +3,12 @@ import { UserRoleDto } from '../../common';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import type { CartItemEntity } from '../entities/order-item.entity';
 import { isDeliveryChargeOrderItem } from './order-item-kind';
-
-interface DeliveryZone {
-  id: string;
-  name: string;
-  price: number;
-  driverPayout: number;
-}
-
-function readRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function readActiveZones(config: Record<string, unknown>): DeliveryZone[] {
-  if (!Array.isArray(config.zones)) return [];
-  return config.zones.map(readRecord).flatMap((zone) => {
-    if (
-      zone.isActive !== true ||
-      typeof zone.id !== 'string' ||
-      typeof zone.name !== 'string' ||
-      typeof zone.price !== 'number' ||
-      !Number.isFinite(zone.price) ||
-      zone.price < 0 ||
-      typeof zone.driverPayout !== 'number' ||
-      !Number.isFinite(zone.driverPayout) ||
-      zone.driverPayout < 0
-    )
-      return [];
-    return [
-      {
-        id: zone.id,
-        name: zone.name,
-        price: zone.price,
-        driverPayout: zone.driverPayout,
-      },
-    ];
-  });
-}
+import {
+  readActiveDeliveryZones,
+  readConfiguredDeliveryZones,
+  readDeliveryConfigRecord,
+  usesDeliveryZonePricing,
+} from '../../app-config/delivery-rules.config';
 
 const toCents = (amount: number) => Math.round(amount * 100);
 
@@ -55,9 +22,10 @@ export function resolveDeliveryCharge(input: {
   user?: AuthenticatedUser;
 }) {
   const { items, merchandiseTotal, zoneId, user } = input;
-  const rules = readRecord(input.rules);
-  const zones = readActiveZones(rules);
-  const hasConfiguredZones = Array.isArray(rules.zones) && rules.zones.length > 0;
+  const rules = readDeliveryConfigRecord(input.rules);
+  const configuredZones = readConfiguredDeliveryZones(rules);
+  const zones = readActiveDeliveryZones(configuredZones);
+  const hasConfiguredZones = usesDeliveryZonePricing(rules);
   const lines = items.filter(isDeliveryChargeOrderItem);
   const line = lines[0];
   if (
@@ -95,7 +63,7 @@ export function resolveDeliveryCharge(input: {
     typeof rules.freeDeliveryMinAmount === 'number' &&
     rules.freeDeliveryMinAmount > 0 &&
     toCents(merchandiseTotal) >= toCents(rules.freeDeliveryMinAmount);
-  const legacy = readRecord(input.legacyPrices).prices;
+  const legacy = readDeliveryConfigRecord(input.legacyPrices).prices;
   const legacyPrices = Array.isArray(legacy)
     ? legacy
         .filter(
@@ -128,7 +96,10 @@ export function resolveDeliveryCharge(input: {
     expected === undefined
       ? legacyPrices.some((price) => toCents(price) === toCents(amount))
       : toCents(expected) === toCents(amount) && (expected > 0 || qualifies);
-  if (!overrideReason && (!configured || (!zone && legacyPrices.length === 0))) {
+  if (
+    !overrideReason &&
+    (!configured || (!zone && legacyPrices.length === 0))
+  ) {
     throw new BadRequestException(
       'La tarifa de envío cambió o falta configurarla. Revisa el importe antes de confirmar.',
     );

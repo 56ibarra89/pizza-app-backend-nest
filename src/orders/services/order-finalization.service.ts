@@ -112,6 +112,13 @@ export class OrderFinalizationService {
 
     const isDriverActor =
       typeof user !== 'string' && user?.role === UserRoleDto.motorizado;
+    const actorUserId = typeof user === 'string' ? undefined : user?.id;
+    const actorUsername =
+      typeof user === 'string'
+        ? user === 'system'
+          ? undefined
+          : user
+        : user?.username;
     const resolvedCashierId =
       typeof user === 'string'
         ? undefined
@@ -140,6 +147,8 @@ export class OrderFinalizationService {
         skipCouponConsumption: splitFamily.couponAlreadyConsumedBySplit,
         cashierId: resolvedCashierId,
         cashierSnapshotName: resolvedCashierSnapshotName,
+        actorUserId,
+        actorUsername,
       });
 
     if (externalTx) {
@@ -165,6 +174,8 @@ export class OrderFinalizationService {
       skipCouponConsumption?: boolean;
       cashierId?: string;
       cashierSnapshotName?: string;
+      actorUserId?: string;
+      actorUsername?: string;
     },
   ): Promise<void> {
     await this.invoiceIssuing.issue(tx, params);

@@ -17,6 +17,10 @@ export function isDeliveryChargeOrderItem(item: NamedOrderItem): boolean {
   return name === 'delivery' || name.startsWith('delivery ');
 }
 
+export function isSplitSupplementalItem(item: NamedOrderItem): boolean {
+  return isPackagingOrderItem(item) || isDeliveryChargeOrderItem(item);
+}
+
 export function isSplitBillCreditOrderItem(item: NamedOrderItem): boolean {
   const name = normalizeItemName(item);
   return name === 'abono subcuenta' || name.startsWith('abono subcuenta ');

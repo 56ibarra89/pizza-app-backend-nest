@@ -46,6 +46,8 @@ export interface CartItemEntity {
   kitchenModifiers?: KitchenModifierSelectionEntity[];
   giftQuantity: number;
   giftReason?: string;
+  /** Ausente en subcuentas creadas antes de registrar el origen de sus cargos. */
+  splitTransferredFromParent?: boolean;
   isSentToKitchen?: boolean;
   sentAt?: number;
   kitchenStatus?: KitchenStatusDto;

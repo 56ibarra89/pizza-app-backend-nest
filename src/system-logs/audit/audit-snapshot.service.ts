@@ -94,7 +94,13 @@ export class AuditSnapshotService {
           return {
             entity,
             entityId: id,
-            before: await this.prisma.order.findUnique({ where: { id } }),
+            before: await this.prisma.order.findUnique({
+              where: { id },
+              include:
+                segments[2] === 'tables'
+                  ? { linkedTables: { select: { tableId: true } } }
+                  : undefined,
+            }),
           };
         case 'config':
           entity = 'app-config';

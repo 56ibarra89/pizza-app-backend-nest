@@ -20,8 +20,10 @@ import { CashExpenseCategoryDto } from '../../cash-expenses/dto/cash-expense-cat
 import { PrismaService } from '../../prisma/prisma.service';
 import type {
   CashDenominationCount,
+  ShiftCashByCurrency,
   ShiftClosePreview,
   ShiftEntity,
+  ShiftUsdCash,
 } from '../entities/shift.entity';
 import type {
   IShiftsRepository,
@@ -32,6 +34,7 @@ import {
   type IUsersRepository,
 } from '../../users/interfaces/users.repository';
 import { toDbRole } from '../../users/mappers/user-role.mapper';
+import { reconcileShiftCash } from '../validators/shift-cash-count';
 
 type ShiftWithExpenses = Prisma.ShiftGetPayload<{
   include: { expenses: true };
@@ -106,14 +109,17 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     id: string;
     closeType?: 'HANDOVER' | 'END_OF_DAY';
   }): Promise<ShiftClosePreview> {
-    return this.prisma.$transaction(async (tx) => {
-      const shift = await tx.shift.findUnique({
-        where: { id: params.id },
-        include: { expenses: true },
-      });
-      if (!shift) throw new NotFoundException('Turno no encontrado');
-      return this.buildClosePreview(tx, shift, params.closeType);
-    });
+    return this.prisma.$transaction(
+      async (tx) => {
+        const shift = await tx.shift.findUnique({
+          where: { id: params.id },
+          include: { expenses: true },
+        });
+        if (!shift) throw new NotFoundException('Turno no encontrado');
+        return this.buildClosePreview(tx, shift, params.closeType);
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
   }
 
   async list(params: {
@@ -194,12 +200,14 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     id: string;
     endTime: Date;
     closingAmount: number;
+    countedUsd?: number;
     declaredCardAmount?: number;
     declaredAppAmount?: number;
     notes?: string;
     discrepancyReason?: string;
     authorizationPin?: string;
     denominationBreakdown?: CashDenominationCount[];
+    usdDenominationBreakdown?: CashDenominationCount[];
     closeType?: 'HANDOVER' | 'END_OF_DAY';
     actor: { id: string; username: string; role: string };
   }): Promise<ShiftEntity> {
@@ -241,8 +249,29 @@ export class PrismaShiftsRepository implements IShiftsRepository {
           params.closingAmount,
           params.denominationBreakdown,
         );
+        if (params.usdDenominationBreakdown) {
+          if (params.countedUsd === undefined) {
+            throw new BadRequestException(
+              'Indica el total contado en dólares para validar sus denominaciones.',
+            );
+          }
+          this.assertDenominationTotal(
+            params.countedUsd,
+            params.usdDenominationBreakdown,
+          );
+        }
 
-        const closingCash = new Prisma.Decimal(params.closingAmount);
+        const {
+          closingCash,
+          cashByCurrency,
+          cashDifference,
+          hasCashDifference,
+        } = reconcileShiftCash(
+          preview.expectedCash,
+          preview.cashUsd,
+          params.closingAmount,
+          params.countedUsd,
+        );
         const declaredCard = new Prisma.Decimal(params.declaredCardAmount ?? 0);
         const declaredApp = new Prisma.Decimal(params.declaredAppAmount ?? 0);
 
@@ -250,7 +279,6 @@ export class PrismaShiftsRepository implements IShiftsRepository {
         const expectedCard = new Prisma.Decimal(preview.sales.card);
         const expectedApp = new Prisma.Decimal(preview.sales.app);
 
-        const cashDifference = closingCash.sub(expectedCash);
         const cardDifference = declaredCard.sub(expectedCard);
         const appDifference = declaredApp.sub(expectedApp);
 
@@ -262,7 +290,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
           .add(appDifference);
 
         const requiresAuthorization =
-          cashDifference.abs().greaterThan(DEFAULT_DISCREPANCY_THRESHOLD) ||
+          hasCashDifference ||
           cardDifference.abs().greaterThan(DEFAULT_DISCREPANCY_THRESHOLD) ||
           appDifference.abs().greaterThan(DEFAULT_DISCREPANCY_THRESHOLD);
         let authorizer:
@@ -272,7 +300,18 @@ export class PrismaShiftsRepository implements IShiftsRepository {
         if (requiresAuthorization) {
           const reason = params.discrepancyReason?.trim();
           const reasons: string[] = [];
-          if (!cashDifference.isZero()) {
+          if (cashByCurrency && hasCashDifference) {
+            const differenceNio = new Prisma.Decimal(
+              cashByCurrency.countedNio,
+            ).sub(cashByCurrency.expectedNio);
+            const differenceUsd = new Prisma.Decimal(
+              cashByCurrency.countedUsd,
+            ).sub(cashByCurrency.expectedUsd);
+            if (!differenceNio.isZero())
+              reasons.push(`Efectivo C$: ${differenceNio.toFixed(2)}`);
+            if (!differenceUsd.isZero())
+              reasons.push(`Efectivo US$: ${differenceUsd.toFixed(2)}`);
+          } else if (!cashDifference.isZero()) {
             reasons.push(
               `Efectivo: ${cashDifference.greaterThan(0) ? '+' : ''}C$ ${cashDifference.toFixed(2)}`,
             );
@@ -316,7 +355,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
           where: { id: existing.id },
           data: {
             endTime: params.endTime,
-            closingAmount: params.closingAmount,
+            closingAmount: closingCash,
             cashSales: preview.sales.cash,
             cardSales: preview.sales.card,
             appSales: preview.sales.app,
@@ -336,9 +375,13 @@ export class PrismaShiftsRepository implements IShiftsRepository {
             authorizedById: authorizer?.id,
             authorizedBySnapshotName: authorizer?.username,
             authorizedByRole: authorizer?.role,
-            denominationBreakdown: params.denominationBreakdown
-              ? (params.denominationBreakdown as Prisma.InputJsonValue)
-              : Prisma.JsonNull,
+            denominationBreakdown: cashByCurrency
+              ? {
+                  nio: params.denominationBreakdown ?? [],
+                  usd: params.usdDenominationBreakdown ?? [],
+                  cashByCurrency,
+                }
+              : (params.denominationBreakdown ?? Prisma.JsonNull),
             paymentBreakdown: preview.sales.breakdown,
             totalPaymentCommission: preview.sales.totalCommission,
             netSales: preview.sales.net,
@@ -382,7 +425,8 @@ export class PrismaShiftsRepository implements IShiftsRepository {
               netSales: preview.sales.net,
               totalExpenses: preview.totalExpenses,
               expectedCash: preview.expectedCash,
-              countedCash: params.closingAmount,
+              countedCash: closingCash.toNumber(),
+              cashByCurrency,
               declaredCard: declaredCard.toNumber(),
               declaredApp: declaredApp.toNumber(),
               cashDifference: cashDifference.toNumber(),
@@ -450,6 +494,9 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       new Prisma.Decimal(0),
     );
     const expectedCash = shift.openingAmount.add(sales.cash).sub(totalExpenses);
+    const cashUsd = sales.cashUsdNio.greaterThan(0)
+      ? await this.getUsdCash(tx, shift.id, sales.cashUsdNio)
+      : undefined;
     const occupiedTables = new Map<
       string,
       { id: string; label: string; orderIds: Set<string> }
@@ -502,6 +549,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       expenses,
       totalExpenses: totalExpenses.toNumber(),
       expectedCash: expectedCash.toNumber(),
+      cashUsd,
       discrepancyThreshold: DEFAULT_DISCREPANCY_THRESHOLD,
       blockingOrders,
       blockingTables,
@@ -614,6 +662,39 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     );
   }
 
+  private async getUsdCash(
+    tx: Prisma.TransactionClient,
+    shiftId: string,
+    equivalentNio: Prisma.Decimal,
+  ): Promise<ShiftUsdCash> {
+    const [snapshot] = await tx.$queryRaw<
+      Array<{ original: Prisma.Decimal; incomplete: boolean }>
+    >`
+      SELECT COALESCE(SUM(
+        CASE
+          WHEN p."originalAmount" > 0 THEN p."originalAmount"
+          WHEN p."exchangeRate" > 0 THEN p.amount / p."exchangeRate"
+        END
+      ), 0) AS original,
+      COALESCE(BOOL_OR(
+        COALESCE(p."originalAmount", 0) <= 0 AND COALESCE(p."exchangeRate", 0) <= 0
+      ), false) AS incomplete
+      FROM "Payment" p
+      JOIN "Order" o ON o.id = p."orderId"
+      WHERE o."shiftId" = ${shiftId}
+        AND o.status = 'PAID' AND p.method = 'EFECTIVO'
+        AND p.currency = 'USD' AND p.amount > 0
+    `;
+    const original = snapshot?.original;
+    return {
+      equivalentNio: equivalentNio.toNumber(),
+      expectedUsd:
+        !snapshot?.incomplete && original?.greaterThan(0)
+          ? original.toNumber()
+          : undefined,
+    };
+  }
+
   private summarizeSales(
     entries: Array<{
       method: PaymentMethod;
@@ -627,6 +708,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
     }>,
   ) {
     let cash = new Prisma.Decimal(0);
+    let cashUsdNio = new Prisma.Decimal(0);
     let card = new Prisma.Decimal(0);
     let app = new Prisma.Decimal(0);
     let total = new Prisma.Decimal(0);
@@ -648,6 +730,9 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       total = total.add(payment.gross);
       if (payment.method === PaymentMethod.EFECTIVO) {
         cash = cash.add(payment.gross);
+        if (payment.currency === 'USD') {
+          cashUsdNio = cashUsdNio.add(payment.gross);
+        }
       }
       if (payment.method === PaymentMethod.TARJETA) {
         card = card.add(payment.gross);
@@ -678,6 +763,7 @@ export class PrismaShiftsRepository implements IShiftsRepository {
 
     return {
       cash,
+      cashUsdNio,
       card,
       app,
       total,
@@ -780,6 +866,13 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       (row.closingAmount
         ? row.closingAmount.toNumber() - expectedCash
         : undefined);
+    const denominationSnapshot = row.denominationBreakdown;
+    const multiCurrency =
+      denominationSnapshot &&
+      typeof denominationSnapshot === 'object' &&
+      !Array.isArray(denominationSnapshot)
+        ? denominationSnapshot
+        : undefined;
 
     return {
       id: row.id,
@@ -808,7 +901,13 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       authorizedById: row.authorizedById ?? undefined,
       authorizedBySnapshotName: row.authorizedBySnapshotName ?? undefined,
       authorizedByRole: row.authorizedByRole ?? undefined,
-      denominationBreakdown: this.mapDenominations(row.denominationBreakdown),
+      denominationBreakdown: this.mapDenominations(
+        multiCurrency?.nio ?? denominationSnapshot,
+      ),
+      usdDenominationBreakdown: this.mapDenominations(
+        multiCurrency?.usd ?? null,
+      ),
+      cashByCurrency: this.mapCashByCurrency(multiCurrency?.cashByCurrency),
       paymentBreakdown: this.mapPaymentBreakdown(row.paymentBreakdown),
       totalPaymentCommission:
         row.totalPaymentCommission?.toNumber() ?? undefined,
@@ -820,6 +919,35 @@ export class PrismaShiftsRepository implements IShiftsRepository {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
+  }
+
+  private mapCashByCurrency(
+    value: Prisma.JsonValue | undefined,
+  ): ShiftCashByCurrency | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      return undefined;
+    const {
+      expectedNio,
+      countedNio,
+      expectedUsd,
+      countedUsd,
+      countedUsdEquivalentNio,
+    } = value;
+    if (
+      typeof expectedNio === 'number' &&
+      typeof countedNio === 'number' &&
+      typeof expectedUsd === 'number' &&
+      typeof countedUsd === 'number' &&
+      typeof countedUsdEquivalentNio === 'number'
+    ) {
+      return {
+        expectedNio,
+        countedNio,
+        expectedUsd,
+        countedUsd,
+        countedUsdEquivalentNio,
+      };
+    }
   }
 
   private mapDenominations(

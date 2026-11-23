@@ -43,12 +43,14 @@ export interface IShiftsRepository {
     id: string;
     endTime: Date;
     closingAmount: number;
+    countedUsd?: number;
     declaredCardAmount?: number;
     declaredAppAmount?: number;
     notes?: string;
     discrepancyReason?: string;
     authorizationPin?: string;
     denominationBreakdown?: CashDenominationCount[];
+    usdDenominationBreakdown?: CashDenominationCount[];
     closeType?: 'HANDOVER' | 'END_OF_DAY';
     actor: {
       id: string;

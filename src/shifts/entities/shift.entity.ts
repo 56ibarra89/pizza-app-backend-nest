@@ -29,6 +29,8 @@ export type ShiftEntity = {
   authorizedBySnapshotName?: string;
   authorizedByRole?: string;
   denominationBreakdown?: CashDenominationCount[];
+  usdDenominationBreakdown?: CashDenominationCount[];
+  cashByCurrency?: ShiftCashByCurrency;
   paymentBreakdown?: ShiftPaymentBreakdown[];
   totalPaymentCommission?: number;
   netSales?: number;
@@ -54,6 +56,19 @@ export type ShiftPaymentBreakdown = {
 export type CashDenominationCount = {
   denomination: number;
   quantity: number;
+};
+
+export type ShiftUsdCash = {
+  equivalentNio: number;
+  expectedUsd?: number;
+};
+
+export type ShiftCashByCurrency = {
+  expectedNio: number;
+  countedNio: number;
+  expectedUsd: number;
+  countedUsd: number;
+  countedUsdEquivalentNio: number;
 };
 
 export type ShiftCloseBlockingOrder = {
@@ -84,6 +99,7 @@ export type ShiftClosePreview = {
   expenses: CashExpenseEntity[];
   totalExpenses: number;
   expectedCash: number;
+  cashUsd?: ShiftUsdCash;
   discrepancyThreshold: number;
   blockingOrders: ShiftCloseBlockingOrder[];
   blockingTables: ShiftCloseBlockingTable[];

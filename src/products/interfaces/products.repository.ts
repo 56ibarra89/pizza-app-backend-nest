@@ -15,6 +15,7 @@ export const PRODUCTS_REPOSITORY = Symbol('PRODUCTS_REPOSITORY');
 export interface IProductsRepository {
   getCategories(params?: {
     includeMetrics?: boolean;
+    includeProductExtras?: boolean;
   }): Promise<CategoryEntity[]>;
   createCategory(dto: CreateCategoryDto): Promise<CategoryEntity>;
   updateCategory(id: string, dto: UpdateCategoryDto): Promise<CategoryEntity>;

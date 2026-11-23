@@ -1,10 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import {
-  getBusinessDateParts,
-  getBusinessDayBounds,
-} from '../../common/time/business-time.util';
+import { getBusinessDayBounds } from '../../common/time/business-time.util';
 import type {
   ActiveCashRegisterDto,
   WaiterPerformanceDto,
@@ -51,7 +48,12 @@ export class AdminDashboardService {
         startTime: true,
         openingAmount: true,
         cashier: {
-          select: { firstName: true, lastName: true, username: true, role: true },
+          select: {
+            firstName: true,
+            lastName: true,
+            username: true,
+            role: true,
+          },
         },
       },
       orderBy: { startTime: 'asc' },
@@ -204,18 +206,13 @@ export class AdminDashboardService {
   }
 
   async getWaiterPerformance(): Promise<WaiterPerformanceDto[]> {
-    const now = new Date();
-    const { startOfDay, endOfDay } = getBusinessDayBounds(now);
-    const { weekday: currentDayEnum } = getBusinessDateParts(now);
+    const { startOfDay, endOfDay } = getBusinessDayBounds(new Date());
 
     const waiters = await this.prisma.user.findMany({
       where: { role: 'MESERO', isActive: true },
-      include: {
-        waiterZoneAssignments: {
-          where: { day: currentDayEnum },
-        },
-      },
+      select: { id: true, username: true, firstName: true, lastName: true },
     });
+    if (waiters.length === 0) return [];
 
     const todayOrders = await this.prisma.order.findMany({
       where: {
@@ -232,83 +229,50 @@ export class AdminDashboardService {
         // cobrado por separado.
         status: 'PAID',
       },
-      include: {
-        linkedTables: {
-          include: { mesa: true },
-        },
+      select: {
+        id: true,
+        parentOrderId: true,
+        waiterId: true,
+        waiterSnapshotName: true,
+        invoiceNumber: true,
+        total: true,
       },
     });
 
-    const ordersByWaiter = new Map<string, (typeof todayOrders)[number][]>();
-    const waitersByFloor = new Map<number, Set<string>>();
+    const salesByWaiter = new Map(
+      waiters.map(({ id }) => [
+        id,
+        { orderFamilies: new Set<string>(), revenueTotal: 0 },
+      ]),
+    );
     const waiterUsernames = new Map(
       waiters.map((waiter) => [waiter.username.toLowerCase(), waiter.id]),
     );
 
-    for (const waiter of waiters) {
-      ordersByWaiter.set(waiter.id, []);
-      for (const assignment of waiter.waiterZoneAssignments) {
-        const assigned = waitersByFloor.get(assignment.floor) ?? new Set();
-        assigned.add(waiter.id);
-        waitersByFloor.set(assignment.floor, assigned);
-      }
-    }
-
     for (const order of todayOrders) {
-      if (order.invoiceNumber === null && (Number(order.total) || 0) === 0) {
-        continue;
-      }
+      const total = Number(order.total);
+      if (order.invoiceNumber === null && total === 0) continue;
 
-      const directWaiterId =
-        (order.waiterId && ordersByWaiter.has(order.waiterId)
-          ? order.waiterId
-          : undefined) ??
-        (order.waiterSnapshotName
-          ? waiterUsernames.get(order.waiterSnapshotName.toLowerCase())
-          : undefined);
-      const legacyWaiterId =
-        directWaiterId ??
-        (order.cashierId && ordersByWaiter.has(order.cashierId)
-          ? order.cashierId
-          : undefined) ??
-        (order.cashierSnapshotName
-          ? waiterUsernames.get(order.cashierSnapshotName.toLowerCase())
-          : undefined);
-      if (legacyWaiterId) {
-        ordersByWaiter.get(legacyWaiterId)?.push(order);
-        continue;
-      }
+      // El snapshot identifica al mesero solo si la orden no tiene su ID (ADR-008).
+      const waiterId =
+        order.waiterId ??
+        waiterUsernames.get(order.waiterSnapshotName?.trim().toLowerCase() ?? '');
+      const sales = waiterId ? salesByWaiter.get(waiterId) : undefined;
+      if (!sales) continue;
 
-      const candidates = new Set<string>();
-      for (const table of order.linkedTables) {
-        for (const waiterId of waitersByFloor.get(table.mesa.floor) ?? []) {
-          candidates.add(waiterId);
-        }
-      }
-
-      // Una zona puede compartirse. Sin un mesero responsable almacenado en
-      // la orden no se inventa una atribución ni se duplica la venta.
-      if (candidates.size === 1) {
-        const [waiterId] = candidates;
-        ordersByWaiter.get(waiterId)?.push(order);
-      }
+      sales.orderFamilies.add(order.parentOrderId ?? order.id);
+      sales.revenueTotal += total;
     }
 
     const result: WaiterPerformanceDto[] = waiters.map((waiter, index) => {
-      const waiterOrders = ordersByWaiter.get(waiter.id) ?? [];
-
-      const ordersServed = waiterOrders.length;
-      const revenueTotal = waiterOrders.reduce(
-        (acc, curr) => acc + (Number(curr.total) || 0),
-        0,
-      );
+      const sales = salesByWaiter.get(waiter.id)!;
 
       return {
         id: waiter.id,
         name:
           `${waiter.firstName} ${waiter.lastName}`.trim() || waiter.username,
-        ordersServed,
-        revenueTotal,
+        ordersServed: sales.orderFamilies.size,
+        revenueTotal: sales.revenueTotal,
         avatarColor: AVATAR_COLORS[index % AVATAR_COLORS.length],
       };
     });

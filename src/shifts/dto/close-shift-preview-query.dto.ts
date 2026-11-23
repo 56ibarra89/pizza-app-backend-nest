@@ -1,5 +1,12 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 
 export class CloseShiftPreviewQueryDto {
   @IsOptional()
@@ -7,6 +14,12 @@ export class CloseShiftPreviewQueryDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   countedCash?: number;
+
+  @ValidateIf((_object, value) => value !== undefined)
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  countedUsd?: number;
 
   @IsOptional()
   @Type(() => Number)

@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
 const SENSITIVE_TOKEN_KEYS = new Set([
   'authorization',
@@ -55,6 +55,10 @@ function sanitize(value: unknown, depth: number): unknown {
   if (typeof value === 'number' || typeof value === 'boolean') return value;
   if (typeof value === 'bigint') return value.toString();
   if (value instanceof Date) return value.toISOString();
+  if (Prisma.Decimal.isDecimal(value)) {
+    const numericValue = value.toNumber();
+    return Number.isFinite(numericValue) ? numericValue : value.toString();
+  }
   if (depth >= MAX_DEPTH) return '[PROFUNDIDAD_LIMITADA]';
 
   if (Array.isArray(value)) {

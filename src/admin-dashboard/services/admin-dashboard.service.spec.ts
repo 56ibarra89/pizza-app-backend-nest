@@ -155,7 +155,7 @@ describe('AdminDashboardService', () => {
     });
   });
 
-  it('atribuye cada venta liquidada a un único mesero y excluye padres de subcuentas', async () => {
+  it('cuenta una atención por familia y suma todos los cobros atribuidos al mesero', async () => {
     prisma.user.findMany.mockResolvedValue([
       {
         id: 'waiter-1',
@@ -181,7 +181,6 @@ describe('AdminDashboardService', () => {
         cashierSnapshotName: null,
         invoiceNumber: '001-001-01-0001',
         total: 100,
-        linkedTables: [{ mesa: { floor: 1 } }],
       },
       {
         id: 'ambiguous-order',
@@ -202,6 +201,21 @@ describe('AdminDashboardService', () => {
         linkedTables: [{ mesa: { floor: 1 } }],
       },
       {
+        id: 'first-split',
+        parentOrderId: 'parent-zero-aggregate',
+        waiterId: 'waiter-2',
+        invoiceNumber: '001-001-01-0004',
+        total: 20,
+      },
+      {
+        id: 'second-split',
+        parentOrderId: 'parent-zero-aggregate',
+        waiterId: null,
+        waiterSnapshotName: 'BEA',
+        invoiceNumber: '001-001-01-0005',
+        total: 55,
+      },
+      {
         id: 'parent-remaining-balance',
         waiterId: 'waiter-2',
         waiterSnapshotName: 'bea',
@@ -211,6 +225,13 @@ describe('AdminDashboardService', () => {
         total: 150,
         linkedTables: [{ mesa: { floor: 1 } }],
       },
+      {
+        id: 'split-before-final-payment',
+        parentOrderId: 'parent-remaining-balance',
+        waiterId: 'waiter-2',
+        invoiceNumber: '001-001-01-0006',
+        total: 25,
+      },
     ]);
 
     const result = await service.getWaiterPerformance();
@@ -219,8 +240,12 @@ describe('AdminDashboardService', () => {
       expect.objectContaining({ ordersServed: 1, revenueTotal: 100 }),
     );
     expect(result.find((waiter) => waiter.id === 'waiter-2')).toEqual(
-      expect.objectContaining({ ordersServed: 1, revenueTotal: 150 }),
+      expect.objectContaining({ ordersServed: 2, revenueTotal: 250 }),
     );
+    expect(prisma.user.findMany).toHaveBeenCalledWith({
+      where: { role: 'MESERO', isActive: true },
+      select: { id: true, username: true, firstName: true, lastName: true },
+    });
     expect(prisma.order.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -233,6 +258,58 @@ describe('AdminDashboardService', () => {
             }),
           ]),
         }),
+        select: {
+          id: true,
+          parentOrderId: true,
+          waiterId: true,
+          waiterSnapshotName: true,
+          invoiceNumber: true,
+          total: true,
+        },
+      }),
+    );
+  });
+
+  it('D15 — no transfiere la venta de un mesero desactivado ni atribuye órdenes sin responsable por inferencia de planta', async () => {
+    prisma.user.findMany.mockResolvedValue([
+      {
+        id: 'waiter-active',
+        username: 'maria',
+        firstName: 'María',
+        lastName: 'Activa',
+        waiterZoneAssignments: [{ floor: 1 }],
+      },
+    ]);
+    prisma.order.findMany.mockResolvedValue([
+      {
+        id: 'deactivated-waiter-order',
+        waiterId: 'waiter-deactivated',
+        waiterSnapshotName: 'maria',
+        cashierId: 'cashier-1',
+        cashierSnapshotName: 'cajero1',
+        invoiceNumber: 'NOV26-00101',
+        total: 250,
+        linkedTables: [{ mesa: { floor: 1 } }],
+      },
+      {
+        id: 'unattributed-historical-order',
+        waiterId: null,
+        waiterSnapshotName: null,
+        cashierId: null,
+        cashierSnapshotName: null,
+        invoiceNumber: 'NOV26-00102',
+        total: 180,
+        linkedTables: [{ mesa: { floor: 1 } }],
+      },
+    ]);
+
+    const result = await service.getWaiterPerformance();
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual(
+      expect.objectContaining({
+        id: 'waiter-active',
+        ordersServed: 0,
+        revenueTotal: 0,
       }),
     );
   });

@@ -1,4 +1,5 @@
 import type { CallHandler, ExecutionContext } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { lastValueFrom, of, throwError } from 'rxjs';
 import { AutomaticAuditInterceptor } from './automatic-audit.interceptor';
 import type { AuditSnapshotService } from './audit-snapshot.service';
@@ -103,5 +104,125 @@ describe('AutomaticAuditInterceptor', () => {
     await lastValueFrom(interceptor.intercept(context, next));
 
     expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('resume avances de cocina y compara los importes como números', async () => {
+    const { context } = createContext({
+      originalUrl: '/orders/ord-1/status',
+      params: { id: 'ord-1' },
+      body: { status: 'ready', itemId: 12, kitchenId: 'kitchen-a' },
+    });
+    capture.mockResolvedValueOnce({
+      entity: 'order',
+      entityId: 'ord-1',
+      before: {
+        id: 'ord-1',
+        total: new Prisma.Decimal('120.50'),
+        status: 'PREPARING',
+        customerAddress: 'Dirección',
+      },
+    });
+    const response = {
+      id: 'ord-1',
+      total: 120.5,
+      status: 'ready',
+      customerAddress: 'Dirección',
+      payments: [],
+      items: [
+        {
+          id: 12,
+          kitchenStatus: 'preparing',
+          isSentToKitchen: true,
+          sentAt: 123,
+          extras: [{ name: 'Queso' }],
+          comboSelections: [
+            {
+              groupId: 'main',
+              productId: 'pizza',
+              kitchenId: 'kitchen-a',
+              kitchenStatus: 'ready',
+              extraPrice: 20,
+            },
+            {
+              groupId: 'side',
+              productId: 'papas',
+              kitchenId: 'kitchen-b',
+              kitchenStatus: 'preparing',
+            },
+          ],
+        },
+        { id: 13, kitchenStatus: 'preparing' },
+      ],
+    };
+    await expect(
+      lastValueFrom(
+        interceptor.intercept(context, { handle: () => of(response) }),
+      ),
+    ).resolves.toEqual(response);
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        before: { id: 'ord-1', total: 120.5, status: 'preparing' },
+        after: {
+          id: 'ord-1',
+          total: 120.5,
+          status: 'ready',
+          items: [
+            {
+              id: 12,
+              kitchenStatus: 'preparing',
+              isSentToKitchen: true,
+              sentAt: 123,
+              comboSelections: [
+                {
+                  groupId: 'main',
+                  productId: 'pizza',
+                  kitchenId: 'kitchen-a',
+                  kitchenStatus: 'ready',
+                },
+              ],
+            },
+          ],
+        },
+        metadata: {
+          requestedChanges: {
+            status: 'ready',
+            itemId: 12,
+            kitchenId: 'kitchen-a',
+          },
+        },
+      }),
+    );
+  });
+
+  it('conserva la evidencia de pago y de factura al marcar una orden cobrada', async () => {
+    const body = { status: 'paid' };
+    const { context } = createContext({
+      originalUrl: '/orders/ord-1/status',
+      params: { id: 'ord-1' },
+      body,
+    });
+    const paid = {
+      id: 'ord-1',
+      total: 365,
+      status: 'paid',
+      invoice: { invoiceNumber: 'F-123' },
+      payments: [
+        {
+          currency: 'USD',
+          originalAmount: 10,
+          exchangeRate: 36.5,
+          amount: 365,
+        },
+      ],
+    };
+    await lastValueFrom(
+      interceptor.intercept(context, { handle: () => of(paid) }),
+    );
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        after: paid,
+        metadata: { requestedChanges: body },
+      }),
+    );
   });
 });

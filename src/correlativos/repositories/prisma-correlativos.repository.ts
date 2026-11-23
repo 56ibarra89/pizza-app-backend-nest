@@ -9,6 +9,7 @@ import { isBusinessDateExpired } from '../../common/time/business-time.util';
 import { acquireCorrelativoLock } from '../../common/database/correlativo-lock.util';
 import type { ICorrelativosRepository } from '../interfaces/correlativos.repository';
 import type { CorrelativoEntity } from '../entities/correlativo.entity';
+import { formatInvoiceNumber } from '../validators/invoice-number';
 
 @Injectable()
 export class PrismaCorrelativosRepository implements ICorrelativosRepository {
@@ -50,8 +51,23 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
     status: CorrelativoStatus;
   }): Promise<CorrelativoEntity> {
     const executeCreate = async (tx: typeof this.prisma) => {
+      await acquireCorrelativoLock(tx, params.documentType);
+      if (
+        params.currentNumber < params.startNumber ||
+        params.currentNumber > params.endNumber + 1
+      ) {
+        throw new BadRequestException('currentNumber fuera de rango');
+      }
+      if (params.documentType === DocumentType.FACTURA) {
+        await this.assertInvoiceRangeAvailable(
+          tx,
+          params.prefix,
+          params.currentNumber,
+          params.endNumber,
+          params.issueDate,
+        );
+      }
       if (params.status === CorrelativoStatus.ACTIVO) {
-        await acquireCorrelativoLock(tx, params.documentType);
         await tx.correlativo.updateMany({
           where: {
             documentType: params.documentType,
@@ -89,9 +105,22 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
     },
   ): Promise<CorrelativoEntity> {
     const executeUpdate = async (tx: typeof this.prisma) => {
-      const existing = tx.correlativo.findUnique
+      const initialExisting = tx.correlativo.findUnique
         ? await tx.correlativo.findUnique({ where: { id } })
         : null;
+      const lockDocType =
+        params.documentType ??
+        initialExisting?.documentType ??
+        DocumentType.FACTURA;
+      await acquireCorrelativoLock(tx, lockDocType);
+      if (typeof (tx as any).$queryRaw === 'function') {
+        await (tx as any).$queryRaw`
+          SELECT id FROM "Correlativo" WHERE id = ${id} FOR UPDATE
+        `;
+      }
+      const existing = tx.correlativo.findUnique
+        ? await tx.correlativo.findUnique({ where: { id } })
+        : initialExisting;
       if (existing) {
         const nextStart = params.startNumber ?? existing.startNumber;
         const nextEnd = params.endNumber ?? existing.endNumber;
@@ -103,6 +132,14 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
         }
         if (nextCurrent < nextStart || nextCurrent > nextEnd + 1) {
           throw new BadRequestException('currentNumber fuera de rango');
+        }
+        if (
+          params.currentNumber !== undefined &&
+          params.currentNumber < existing.currentNumber
+        ) {
+          throw new BadRequestException(
+            'El número actual del correlativo no puede retroceder respecto al consecutivo actual.',
+          );
         }
         const nextIssueDate = params.issueDate ?? existing.issueDate;
         const nextExpirationDate =
@@ -116,31 +153,42 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
             'expirationDate no puede ser anterior a issueDate',
           );
         }
+        if (
+          (params.documentType ?? existing.documentType) === DocumentType.FACTURA &&
+          (params.currentNumber !== undefined ||
+            params.prefix !== undefined ||
+            params.endNumber !== undefined ||
+            params.issueDate !== undefined ||
+            params.documentType !== undefined ||
+            params.status === CorrelativoStatus.ACTIVO)
+        ) {
+          await this.assertInvoiceRangeAvailable(
+            tx,
+            params.prefix ?? existing.prefix,
+            nextCurrent,
+            nextEnd,
+            nextIssueDate,
+          );
+        }
       }
       const touchesActive =
         params.status === CorrelativoStatus.ACTIVO ||
         existing?.status === CorrelativoStatus.ACTIVO;
       if (touchesActive) {
-        let docType = params.documentType ?? existing?.documentType;
-        if (!docType && tx.correlativo.findUnique) {
-          const found = await tx.correlativo.findUnique({
-            where: { id },
-            select: { documentType: true },
-          });
-          docType = found?.documentType;
-        }
-        if (docType) {
+        const docType =
+          params.documentType ?? existing?.documentType ?? lockDocType;
+        if (docType && docType !== lockDocType) {
           await acquireCorrelativoLock(tx, docType);
-          if (params.status === CorrelativoStatus.ACTIVO) {
-            await tx.correlativo.updateMany({
-              where: {
-                documentType: docType,
-                status: CorrelativoStatus.ACTIVO,
-                id: { not: id },
-              },
-              data: { status: CorrelativoStatus.VENCIDO },
-            });
-          }
+        }
+        if (docType && params.status === CorrelativoStatus.ACTIVO) {
+          await tx.correlativo.updateMany({
+            where: {
+              documentType: docType,
+              status: CorrelativoStatus.ACTIVO,
+              id: { not: id },
+            },
+            data: { status: CorrelativoStatus.VENCIDO },
+          });
         }
       }
       const updated = await tx.correlativo.update({
@@ -156,6 +204,37 @@ export class PrismaCorrelativosRepository implements ICorrelativosRepository {
       );
     }
     return executeUpdate(this.prisma);
+  }
+
+  private async assertInvoiceRangeAvailable(
+    tx: PrismaService,
+    prefix: string | null,
+    currentNumber: number,
+    endNumber: number,
+    issueDate: Date,
+  ): Promise<void> {
+    if (currentNumber > endNumber || typeof tx.order?.findMany !== 'function') {
+      return;
+    }
+    const now = new Date();
+    const month = issueDate > now ? issueDate : now;
+    const first = formatInvoiceNumber(month, prefix, currentNumber, endNumber);
+    const last = formatInvoiceNumber(month, prefix, endNumber, endNumber);
+    const width = String(endNumber).length;
+    const numberPrefix = first.slice(0, -width);
+    const rows = await tx.order.findMany({
+      where: { invoiceNumber: { startsWith: numberPrefix, gte: first, lte: last } },
+      select: { invoiceNumber: true },
+    });
+    const collision = rows.some(({ invoiceNumber }) => {
+      const sequence = invoiceNumber?.slice(numberPrefix.length) ?? '';
+      return sequence.length === width && /^\d+$/.test(sequence);
+    });
+    if (collision) {
+      throw new BadRequestException(
+        'El rango del correlativo colisiona con una factura ya emitida.',
+      );
+    }
   }
 
   async consumeNext(documentType: DocumentType): Promise<{

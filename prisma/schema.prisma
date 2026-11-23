@@ -382,6 +382,7 @@ model OrderItem {
   updatedAt        DateTime         @updatedAt
   productId        String?
   giftReason       String?
+  splitTransferredFromParent Boolean?
   kitchenId        String?
   kitchen          Kitchen?         @relation(fields: [kitchenId], references: [id])
   order            Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -593,7 +594,6 @@ model Cupon {
   orders        Order[]
 
   @@index([manualStatus])
-  @@index([code])
   @@index([deletedAt])
   @@index([createdById])
   @@index([updatedById])

@@ -26,6 +26,11 @@ import {
 } from '../mappers/status.mapper';
 import type { OrderHistoryPage } from '../interfaces/orders.repository';
 import { getBusinessDayBounds } from '../../common/time/business-time.util';
+import {
+  assertOrderTableDestinations,
+  lockOrderTables,
+  occupyOrderTables,
+} from './order-table-occupancy';
 
 const MAX_TODAY_OR_ACTIVE_ORDERS = 500;
 
@@ -33,33 +38,60 @@ const MAX_TODAY_OR_ACTIVE_ORDERS = 500;
 export class PrismaOrdersRepository implements IOrdersRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  private paidInRange(startDate: Date, endDate: Date): Prisma.OrderWhereInput {
+    const dateRange = { gte: startDate, lte: endDate };
+    return {
+      status: 'PAID',
+      OR: [{ paidAt: dateRange }, { paidAt: null, timestamp: dateRange }],
+    };
+  }
+
   async listTodayOrActive(
     now: Date,
-    filters?: { driverId?: string; kitchenId?: string; limit?: number; deliveryOnly?: boolean },
+    filters?: {
+      driverId?: string;
+      kitchenId?: string;
+      limit?: number;
+      deliveryOnly?: boolean;
+    },
   ): Promise<OrderEntity[]> {
-    const { startOfDay } = getBusinessDayBounds(now);
+    const { startOfDay, endOfDay } = getBusinessDayBounds(now);
     const take = Math.min(
       Math.max(1, filters?.limit ?? MAX_TODAY_OR_ACTIVE_ORDERS),
       MAX_TODAY_OR_ACTIVE_ORDERS,
     );
 
-    const conditions: Prisma.OrderWhereInput[] = [
+    const deliveryOnly = Boolean(filters?.deliveryOnly || filters?.driverId);
+    const conditions: Prisma.OrderWhereInput[] = deliveryOnly ? [{
+      orderType: 'DELIVERY',
+      driverId: filters?.driverId,
+      OR: [
+        { status: { notIn: ['PAID', 'CANCELLED'] } },
+        this.paidInRange(startOfDay, endOfDay),
+      ],
+    }] : [
       {
         OR: [
           { timestamp: { gte: startOfDay } },
           { paidAt: { gte: startOfDay } },
           { status: { notIn: ['PAID', 'CANCELLED'] satisfies OrderStatus[] } },
+          {
+            status: 'PAID',
+            isSentToKitchen: true,
+            items: {
+              some: {
+                isSentToKitchen: true,
+                requiresPreparation: true,
+                OR: [
+                  { kitchenStatus: null },
+                  { kitchenStatus: { not: 'DELIVERED' } },
+                ],
+              },
+            },
+          },
         ],
       },
     ];
-
-    const deliveryOnly = Boolean(filters?.deliveryOnly || filters?.driverId);
-    if (deliveryOnly) {
-      conditions.push({
-        orderType: 'DELIVERY',
-        driverId: filters?.driverId,
-      });
-    }
 
     if (filters?.kitchenId) {
       conditions.push({
@@ -317,8 +349,11 @@ export class PrismaOrdersRepository implements IOrdersRepository {
         orderType: 'DELIVERY',
         status: { not: 'CANCELLED' },
         OR: [
-          { createdAt: { gte: startDate, lte: endDate } },
-          { paidAt: { gte: startDate, lte: endDate } },
+          this.paidInRange(startDate, endDate),
+          {
+            status: { not: 'PAID' },
+            timestamp: { gte: startDate, lte: endDate },
+          },
           ...(includeActive
             ? [
                 {
@@ -417,6 +452,19 @@ export class PrismaOrdersRepository implements IOrdersRepository {
     const uniqueLinkedTables = Array.from(
       new Set((data.linkedTables ?? []).filter(Boolean)),
     );
+    const opensTables = uniqueLinkedTables.length > 0 && !data.parentOrderId;
+    if (opensTables && !tx) {
+      return this.prisma.$transaction((transaction) => this.create(data, transaction));
+    }
+    if (opensTables && tx) {
+      await lockOrderTables(tx, uniqueLinkedTables);
+      // Abrir una cuenta desde su mesa principal también permite atender su reserva.
+      await assertOrderTableDestinations(
+        tx,
+        uniqueLinkedTables,
+        new Set([uniqueLinkedTables[0]]),
+      );
+    }
 
     const created = await (tx ?? this.prisma).order.create({
       data: {
@@ -493,6 +541,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
               : undefined,
             giftQuantity: i.giftQuantity ?? 0,
             giftReason: i.giftReason,
+            splitTransferredFromParent: i.splitTransferredFromParent,
             isSentToKitchen: i.isSentToKitchen ?? false,
             requiresPreparation: i.requiresPreparation ?? true,
             sentAt: i.sentAt ? new Date(i.sentAt) : undefined,
@@ -520,6 +569,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       },
     });
 
+    if (opensTables && tx) {
+      await occupyOrderTables(tx, uniqueLinkedTables);
+    }
     return this.mapOrder(created);
   }
 
@@ -813,6 +865,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           : Prisma.DbNull,
         giftQuantity: i.giftQuantity ?? 0,
         giftReason: i.giftReason ?? null,
+        splitTransferredFromParent: i.splitTransferredFromParent,
         isSentToKitchen: i.isSentToKitchen ?? false,
         requiresPreparation: i.requiresPreparation ?? true,
         sentAt: i.sentAt ? new Date(i.sentAt) : null,
@@ -946,7 +999,9 @@ export class PrismaOrdersRepository implements IOrdersRepository {
             ? { ...sel, kitchenStatus: params.kitchenStatus }
             : sel,
         );
-        const preparedSelections = updatedSelections.filter((s) => s.requiresPreparation !== false);
+        const preparedSelections = updatedSelections.filter(
+          (s) => s.requiresPreparation !== false,
+        );
         if (preparedSelections.length === 0) continue;
         const allDelivered = preparedSelections.every(
           (s) => s.kitchenStatus === KitchenStatusDto.delivered,
@@ -1085,6 +1140,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
       kitchenModifiers: Prisma.JsonValue | null;
       giftQuantity: number;
       giftReason: string | null;
+      splitTransferredFromParent?: boolean | null;
       isSentToKitchen: boolean;
       requiresPreparation?: boolean;
       sentAt: Date | null;
@@ -1139,6 +1195,7 @@ export class PrismaOrdersRepository implements IOrdersRepository {
           : undefined,
         giftQuantity: i.giftQuantity,
         giftReason: i.giftReason ?? undefined,
+        splitTransferredFromParent: i.splitTransferredFromParent ?? undefined,
         isSentToKitchen: i.isSentToKitchen,
         requiresPreparation: i.requiresPreparation,
         sentAt: i.sentAt ? i.sentAt.getTime() : undefined,

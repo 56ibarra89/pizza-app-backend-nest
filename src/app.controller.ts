@@ -18,4 +18,13 @@ export class AppController {
   getHealth(): { status: string; timestamp: string } {
     return { status: 'ok', timestamp: new Date().toISOString() };
   }
+
+  @Get('health/ready')
+  getReadiness(): Promise<{
+    status: 'ok';
+    database: 'up';
+    timestamp: string;
+  }> {
+    return this.appService.getReadiness();
+  }
 }

@@ -77,6 +77,7 @@ export class PrismaCashExpensesRepository implements ICashExpensesRepository {
 
       const created = await tx.cashExpense.create({
         data: {
+          id: data.id,
           shiftId: data.shiftId,
           amount: new Prisma.Decimal(data.amount),
           category: data.category,

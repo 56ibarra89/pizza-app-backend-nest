@@ -431,7 +431,7 @@ export class AccessControlService implements OnModuleInit {
       'tables.assign_zones': ['tables.read', 'users.directory'],
       'kitchen.update': ['kitchen.read'],
       'kitchen.configure': ['kitchen.read'],
-      'delivery.manage': ['delivery.read'],
+      'delivery.manage': ['delivery.read', 'users.directory'],
       'delivery.own': ['delivery.read'],
       'cash.open': ['cash.status', 'cash.read'],
       'cash.close': ['cash.status', 'cash.read'],

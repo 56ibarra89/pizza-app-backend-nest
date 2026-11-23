@@ -5,12 +5,17 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
 } from 'class-validator';
 import { CashExpenseCategoryDto } from './cash-expense-category.dto';
 
 export class CreateCashExpenseDto {
+  @IsOptional()
+  @IsUUID('4')
+  id?: string;
+
   @IsNumber()
   @IsPositive({ message: 'El monto del gasto debe ser mayor que 0' })
   amount!: number;

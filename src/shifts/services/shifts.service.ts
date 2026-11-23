@@ -17,6 +17,7 @@ import type { AuthenticatedUser } from '../../common/interfaces/authenticated-us
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { UserRoleDto } from '../../common';
 import { parseBusinessDateInput } from '../../common/time/business-time.util';
+import { reconcileShiftCash } from '../validators/shift-cash-count';
 
 const DEFAULT_DISCREPANCY_THRESHOLD = 0;
 
@@ -91,12 +92,14 @@ export class ShiftsService {
       id,
       endTime: new Date(),
       closingAmount: dto.closingAmount,
+      countedUsd: dto.countedUsd,
       declaredCardAmount: dto.declaredCardAmount,
       declaredAppAmount: dto.declaredAppAmount,
       notes: dto.notes?.trim() || undefined,
       discrepancyReason: dto.discrepancyReason?.trim() || undefined,
       authorizationPin: dto.authorizationPin,
       denominationBreakdown: dto.denominationBreakdown,
+      usdDenominationBreakdown: dto.usdDenominationBreakdown,
       closeType: dto.closeType,
       actor: {
         id: user.id,
@@ -119,6 +122,7 @@ export class ShiftsService {
     user: AuthenticatedUser,
     query?: {
       countedCash?: number;
+      countedUsd?: number;
       countedCard?: number;
       countedApp?: number;
       closeType?: 'HANDOVER' | 'END_OF_DAY';
@@ -131,16 +135,33 @@ export class ShiftsService {
       closeType: query?.closeType,
     });
 
+    const requiresUsdCount = preview.cashUsd?.expectedUsd !== undefined;
     let requiresAuthorization: boolean | undefined = undefined;
+    if (query?.countedUsd !== undefined && query.countedCash === undefined) {
+      throw new BadRequestException(
+        'Indica ambos totales del conteo de efectivo.',
+      );
+    }
     if (
       query?.countedCash !== undefined ||
       query?.countedCard !== undefined ||
       query?.countedApp !== undefined
     ) {
-      const cashDiff =
-        query.countedCash !== undefined
-          ? Math.round(Math.abs(query.countedCash - preview.expectedCash) * 100)
-          : 0;
+      const cashHasDifference =
+        query.countedCash === undefined
+          ? false
+          : requiresUsdCount && query.countedUsd !== undefined
+            ? reconcileShiftCash(
+                preview.expectedCash,
+                preview.cashUsd,
+                query.countedCash,
+                query.countedUsd,
+              ).hasCashDifference
+            : !requiresUsdCount &&
+              query.countedUsd === undefined &&
+              Math.round(
+                Math.abs(query.countedCash - preview.expectedCash) * 100,
+              ) > 0;
       const cardDiff =
         query.countedCard !== undefined
           ? Math.round(Math.abs(query.countedCard - preview.sales.card) * 100)
@@ -150,7 +171,7 @@ export class ShiftsService {
           ? Math.round(Math.abs(query.countedApp - preview.sales.app) * 100)
           : 0;
 
-      requiresAuthorization = cashDiff > 0 || cardDiff > 0 || appDiff > 0;
+      requiresAuthorization = cashHasDifference || cardDiff > 0 || appDiff > 0;
     }
 
     return {
@@ -159,6 +180,8 @@ export class ShiftsService {
       blockingOrders: preview.blockingOrders,
       blockingTables: preview.blockingTables,
       canClose: preview.canClose,
+      requiresUsdCount,
+      incompleteUsdHistory: Boolean(preview.cashUsd && !requiresUsdCount),
       requiresAuthorization,
     };
   }

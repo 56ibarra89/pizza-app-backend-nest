@@ -4,6 +4,7 @@ import { CashExpenseEntity } from '../entities/cash-expense.entity';
 export const CASH_EXPENSES_REPOSITORY = 'CASH_EXPENSES_REPOSITORY';
 
 export interface CreateCashExpenseParams {
+  id?: string;
   shiftId: string;
   amount: number;
   category: CashExpenseCategoryDto;

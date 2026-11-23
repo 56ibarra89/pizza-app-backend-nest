@@ -114,6 +114,7 @@ export class ReportsService {
           methodType: true,
           currency: true,
           originalAmount: true,
+          exchangeRate: true,
         },
       },
       items: {
@@ -250,6 +251,7 @@ export class ReportsService {
                       methodType: null,
                       currency: null,
                       originalAmount: null,
+                      exchangeRate: null,
                     },
                   ];
               for (const payment of orderPayments) {
@@ -271,23 +273,36 @@ export class ReportsService {
                 }
 
                 const id = payment.methodConfigId || `legacy:${payment.method}`;
-                const row = payments.get(id) ?? {
+                const currency = payment.currency || 'NIO';
+                const key = JSON.stringify([id, currency, type]);
+                const row = payments.get(key) ?? {
                   id,
                   name:
                     payment.methodSnapshotName?.trim() ||
                     legacyPaymentName(payment.method),
                   type,
-                  currency: payment.currency || 'NIO',
+                  currency,
                   amount: 0,
+                  originalAmount: 0,
                   transactionCount: 0,
                 };
                 row.amount += amount;
                 row.transactionCount += 1;
-                if (payment.originalAmount !== null) {
-                  row.originalAmount =
-                    (row.originalAmount ?? 0) + Number(payment.originalAmount);
-                }
-                payments.set(id, row);
+                const exchangeRate = Number(payment.exchangeRate);
+                const originalAmount =
+                  payment.originalAmount != null
+                    ? Number(payment.originalAmount)
+                    : currency === 'NIO'
+                      ? amount
+                      : exchangeRate > 0
+                        ? amount / exchangeRate
+                        : undefined;
+                row.originalAmount =
+                  row.originalAmount === undefined ||
+                  originalAmount === undefined
+                    ? undefined
+                    : row.originalAmount + originalAmount;
+                payments.set(key, row);
               }
             }
 

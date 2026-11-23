@@ -49,7 +49,7 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/src/common/security/credential-hasher.ts ./src/common/security/credential-hasher.ts
 
 # Crear directorios persistentes para respaldos y spool de auditoría
-RUN mkdir -p /app/storage/backups /app/storage/audit \
+RUN mkdir -p /app/storage/backups /app/storage/backups-external /app/storage/audit-spool \
   && chown -R node:node /app
 
 USER node
@@ -57,5 +57,5 @@ USER node
 EXPOSE 3000
 
 # Por defecto inicia la API compilada.
-# (Para aplicar esquema antes de iniciar: npx prisma db push && node dist/main)
+# (Para aplicar migraciones antes de iniciar: npx prisma migrate deploy && node dist/main)
 CMD ["node", "dist/main"]

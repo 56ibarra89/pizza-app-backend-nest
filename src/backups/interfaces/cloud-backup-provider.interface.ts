@@ -1,3 +1,6 @@
+import * as fs from 'fs';
+import * as path from 'path';
+
 export interface CloudBackupResult {
   success: boolean;
   cloudUrl?: string;
@@ -25,36 +28,112 @@ export interface ICloudBackupProvider {
 export const CLOUD_BACKUP_PROVIDER = 'CLOUD_BACKUP_PROVIDER';
 
 /**
- * Proveedor base inicial: Maneja almacenamiento local como primera capa de verdad.
- * Facilita la inyección e intercambio por adaptadores de AWS S3, Google Drive, OneDrive o Cloudflare R2 sin modificar los servicios de negocio.
+ * Proveedor base inicial: Replica respaldos hacia un directorio externo o volumen
+ * duradero configurado mediante BACKUP_EXTERNAL_DIR. Si no existe un destino externo
+ * configurado, reporta explícitamente que no está configurado para no simular una
+ * carga externa exitosa en entornos con disco efímero (ej. dynos o contenedores sin volumen).
  */
 export class LocalFirstCloudBackupProvider implements ICloudBackupProvider {
   readonly name = 'LocalFirst';
 
-  isConfigured(): boolean {
-    return true;
+  private getExternalDir(): string | null {
+    const configured = process.env.BACKUP_EXTERNAL_DIR?.trim();
+    return configured && configured.length > 0
+      ? path.resolve(configured)
+      : null;
   }
 
-  async upload(
-    _filePath: string,
-    _filename: string,
-  ): Promise<CloudBackupResult> {
-    // Almacenamiento local principal garantizado. Listo para despachar a S3 / GDrive cuando se configuren credenciales.
-    return { success: true };
+  isConfigured(): boolean {
+    return this.getExternalDir() !== null;
+  }
+
+  async upload(filePath: string, filename: string): Promise<CloudBackupResult> {
+    const externalDir = this.getExternalDir();
+    if (!externalDir) {
+      return {
+        success: false,
+        error:
+          'Almacenamiento externo duradero no configurado (BACKUP_EXTERNAL_DIR). La copia sólo reside en el disco local.',
+      };
+    }
+
+    try {
+      await fs.promises.mkdir(externalDir, { recursive: true });
+      const sanitizedName = path.basename(filename);
+      const targetPath = path.join(externalDir, sanitizedName);
+      await fs.promises.copyFile(filePath, targetPath);
+      return {
+        success: true,
+        cloudUrl: targetPath,
+      };
+    } catch (error: unknown) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   async download(
-    _filename: string,
-    _destinationPath: string,
+    filename: string,
+    destinationPath: string,
   ): Promise<{ success: boolean; error?: string }> {
-    return { success: true };
+    const externalDir = this.getExternalDir();
+    if (!externalDir) {
+      return {
+        success: false,
+        error:
+          'Almacenamiento externo duradero no configurado (BACKUP_EXTERNAL_DIR).',
+      };
+    }
+    try {
+      const sourcePath = path.join(externalDir, path.basename(filename));
+      await fs.promises.copyFile(sourcePath, destinationPath);
+      return { success: true };
+    } catch (error: unknown) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   async list(): Promise<CloudBackupFileInfo[]> {
-    return [];
+    const externalDir = this.getExternalDir();
+    if (!externalDir || !fs.existsSync(externalDir)) {
+      return [];
+    }
+    const entries = await fs.promises.readdir(externalDir);
+    const items: CloudBackupFileInfo[] = [];
+    for (const entry of entries) {
+      if (!entry.endsWith('.sql')) continue;
+      try {
+        const stat = await fs.promises.stat(path.join(externalDir, entry));
+        if (stat.isFile()) {
+          items.push({
+            filename: entry,
+            sizeBytes: stat.size,
+            updatedAt: stat.mtime,
+          });
+        }
+      } catch {
+        // ignore unreadable entries
+      }
+    }
+    return items;
   }
 
-  async delete(_filename: string): Promise<boolean> {
-    return true;
+  async delete(filename: string): Promise<boolean> {
+    const externalDir = this.getExternalDir();
+    if (!externalDir) return false;
+    try {
+      const targetPath = path.join(externalDir, path.basename(filename));
+      if (fs.existsSync(targetPath)) {
+        await fs.promises.unlink(targetPath);
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 }

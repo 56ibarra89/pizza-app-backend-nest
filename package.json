@@ -29,7 +29,7 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "db:setup": "prisma db push && prisma db seed"
+    "db:setup": "prisma migrate deploy && prisma db seed"
   },
   "dependencies": {
     "@nestjs-modules/mailer": "^3.0.2",

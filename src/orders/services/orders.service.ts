@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -45,6 +46,7 @@ import {
   isSplitBillCreditOrderItem,
   isSplitBillOrderItem,
   isSplitBillPartialPaymentItem,
+  isSplitSupplementalItem,
   requiresKitchenPreparation,
 } from '../validators/order-item-kind';
 import {
@@ -81,6 +83,27 @@ import {
 import type { OrderPaymentDto } from '../dto/order-payment.dto';
 import { collectOrderKitchenIds } from '../mappers/orders.mapper';
 import { resolveDeliveryCharge } from '../validators/order-delivery.validator';
+import {
+  DELIVERY_PRICES_ID,
+  DELIVERY_RULES_ID,
+  usesDeliveryZonePricing,
+} from '../../app-config/delivery-rules.config';
+
+const CHECKOUT_ATTEMPT_ID = /^ORD-[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
+const CHECKOUT_ATTEMPT_ACTION = 'ORDER_CHECKOUT_ATTEMPT';
+const PAYMENT_METRICS_BATCH_SIZE = 2_500;
+
+function fingerprintCheckout(dto: CreateOrderDto): string {
+  const canonical = JSON.stringify(dto, (_key, value: unknown) => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      return value;
+    }
+    return Object.fromEntries(
+      Object.entries(value).sort(([left], [right]) => left.localeCompare(right)),
+    );
+  });
+  return createHash('sha256').update(canonical).digest('hex');
+}
 
 @Injectable()
 export class OrdersService {
@@ -101,7 +124,12 @@ export class OrdersService {
 
   listTodayOrActive(
     now = new Date(),
-    filters?: { driverId?: string; kitchenId?: string; limit?: number; deliveryOnly?: boolean },
+    filters?: {
+      driverId?: string;
+      kitchenId?: string;
+      limit?: number;
+      deliveryOnly?: boolean;
+    },
   ) {
     return this.repo.listTodayOrActive(now, filters);
   }
@@ -167,6 +195,63 @@ export class OrdersService {
   }
 
   async create(dto: CreateOrderDto, user?: AuthenticatedUser) {
+    const attemptId =
+      dto.id && CHECKOUT_ATTEMPT_ID.test(dto.id) ? dto.id : undefined;
+    const attemptFingerprint = attemptId ? fingerprintCheckout(dto) : undefined;
+    if (dto.id) {
+      const existingOrder = await this.repo.findById(dto.id);
+      if (existingOrder) {
+        if (attemptFingerprint) {
+          return this.recoverCheckoutAttempt(
+            existingOrder,
+            attemptFingerprint,
+            user,
+            this.prisma,
+          );
+        }
+        if (
+          user?.id &&
+          existingOrder.cashierId &&
+          existingOrder.cashierId !== user.id &&
+          user.role !== UserRoleDto.admin
+        ) {
+          throw new ConflictException(
+            'Ya existe una orden registrada con ese identificador.',
+          );
+        }
+        const targetStatus =
+          dto.orderType === OrderTypeDto.delivery
+            ? OrderStatusDto.pending
+            : (dto.status ??
+              (dto.payments?.length
+                ? OrderStatusDto.paid
+                : OrderStatusDto.pending));
+        if (
+          targetStatus === OrderStatusDto.paid &&
+          existingOrder.status !== OrderStatusDto.paid
+        ) {
+          return this.finalize(
+            existingOrder.id,
+            {
+              payments: dto.payments,
+              customerId: dto.customerId,
+              customerSnapshotName: dto.customerSnapshotName,
+              customerPhone: dto.customerPhone,
+              customerAddress: dto.customerAddress,
+              orderType: dto.orderType,
+              promotionSource: dto.promotionSource,
+              promotionCode: dto.promotionCode,
+              cuponId: dto.cuponId,
+              discountId: dto.discountId,
+              happyHourId: dto.happyHourId,
+              certificateSerials: dto.certificateSerials,
+            },
+            user,
+          );
+        }
+        return existingOrder;
+      }
+    }
     if (dto.items.some((item) => isSplitBillOrderItem(item))) {
       throw new BadRequestException(
         'Los ítems de subcuenta solo pueden ser generados por el flujo de división de cuenta.',
@@ -176,9 +261,13 @@ export class OrdersService {
     const isDelivery = dto.orderType === OrderTypeDto.delivery;
     if (
       !isDelivery &&
-      (dto.items.some(isDeliveryChargeOrderItem) || dto.deliveryZoneId || dto.deliveryFeeOverrideReason !== undefined)
+      (dto.items.some(isDeliveryChargeOrderItem) ||
+        dto.deliveryZoneId ||
+        dto.deliveryFeeOverrideReason !== undefined)
     ) {
-      throw new BadRequestException('Solo los pedidos a domicilio pueden incluir tarifa de envío.');
+      throw new BadRequestException(
+        'Solo los pedidos a domicilio pueden incluir tarifa de envío.',
+      );
     }
     if (dto.driverId) {
       if (!isDelivery) {
@@ -236,15 +325,18 @@ export class OrdersService {
     const { items: calculatedItems, totals } =
       await this.pricing.calculateWithPrices(items, promotion);
     const delivery = isDelivery
-      ? await this.validateNewDelivery(dto, calculatedItems, totals.discountAmount, user)
+      ? await this.validateNewDelivery(
+          dto,
+          calculatedItems,
+          totals.discountAmount,
+          user,
+        )
       : undefined;
     const pricedItems = delivery?.items ?? calculatedItems;
     const { customerId, cashierId, shiftId } =
       await this.referenceResolver.resolve({
         customerId: dto.customerId,
-        customerSnapshotName: dto.customerSnapshotName,
         customerPhone: dto.customerPhone,
-        customerAddress: dto.customerAddress,
         cashierId: user?.id,
         cashierSnapshotName,
       });
@@ -258,6 +350,71 @@ export class OrdersService {
     let savedOrder: OrderEntity;
     try {
       savedOrder = await this.runInTransactionIfAvailable(async (tx) => {
+        if (attemptId) {
+          if (!tx) throw new Error('El intento de cobro requiere una transacción.');
+          await tx.$queryRaw`
+            SELECT 1 FROM pg_advisory_xact_lock(hashtextextended(${attemptId}, 0))
+          `;
+        }
+        if (dto.id) {
+          const existingInTx = await this.repo.findById(dto.id, tx);
+          if (existingInTx) {
+            if (attemptFingerprint && tx) {
+              return this.recoverCheckoutAttempt(
+                existingInTx,
+                attemptFingerprint,
+                user,
+                tx,
+              );
+            }
+            if (
+              user?.id &&
+              existingInTx.cashierId &&
+              existingInTx.cashierId !== user.id &&
+              user.role !== UserRoleDto.admin
+            ) {
+              throw new ConflictException(
+                'Ya existe una orden registrada con ese identificador.',
+              );
+            }
+            if (
+              status === OrderStatusDto.paid &&
+              existingInTx.status !== OrderStatusDto.paid
+            ) {
+              await this.finalization.finalize(
+                existingInTx,
+                {
+                  payments: resolvedPayments,
+                  customerSnapshotName: dto.customerSnapshotName,
+                  customerAddress: dto.customerAddress,
+                  orderType: dto.orderType,
+                  subTotal: totals.subTotal,
+                  taxAmount: totals.taxAmount,
+                  discountAmount: totals.discountAmount,
+                  finalTotal: totals.total,
+                  cuponId,
+                  discountId:
+                    promotion.source === 'discount'
+                      ? promotion.discountId
+                      : undefined,
+                  happyHourId:
+                    promotion.source === 'happy-hour'
+                      ? promotion.happyHourId
+                      : undefined,
+                  promotionSource: dto.promotionSource,
+                  promotionCode: dto.promotionCode,
+                  certificateSerials,
+                },
+                user ?? 'system',
+                tx,
+              );
+              return (
+                (await this.repo.findById(existingInTx.id, tx)) ?? existingInTx
+              );
+            }
+            return existingInTx;
+          }
+        }
         await this.assertPendingBenefitsAvailable(
           {
             cuponId,
@@ -291,7 +448,8 @@ export class OrdersService {
             customerAddress: dto.customerAddress,
             customerPhoneSnapshot: dto.customerPhone?.trim() || undefined,
             linkedTables: dto.linkedTables,
-            isSentToKitchen: sendToKitchen && pricedItems.some(requiresKitchenPreparation),
+            isSentToKitchen:
+              sendToKitchen && pricedItems.some(requiresKitchenPreparation),
             cuponId,
             discountId:
               promotion.source === 'discount'
@@ -310,16 +468,35 @@ export class OrdersService {
           tx,
         );
 
+        if (attemptFingerprint && tx) {
+          await tx.systemLog.create({
+            data: {
+              action: CHECKOUT_ATTEMPT_ACTION,
+              user: user?.username ?? 'system',
+              userId: user?.id,
+              module: 'orders',
+              entity: 'Order',
+              entityId: created.id,
+              metadata: { fingerprint: attemptFingerprint },
+            },
+          });
+        }
+
         if (delivery && delivery.source !== 'configured' && user) {
-          if (!tx) throw new Error('La auditoría de envío requiere una transacción.');
+          if (!tx)
+            throw new Error('La auditoría de envío requiere una transacción.');
           const { items: _items, ...metadata } = delivery;
           await tx.systemLog.create({
             data: {
               user: user.username,
               userId: user.id,
               role: user.role,
-              action: delivery.source === 'promotion' ? 'Envío gratis por promoción' : 'Tarifa manual de envío autorizada',
-              details: delivery.overrideReason ?? 'Pedido elegible por consumo mínimo',
+              action:
+                delivery.source === 'promotion'
+                  ? 'Envío gratis por promoción'
+                  : 'Tarifa manual de envío autorizada',
+              details:
+                delivery.overrideReason ?? 'Pedido elegible por consumo mínimo',
               module: 'orders',
               operation: 'delivery_fee',
               entity: 'Order',
@@ -374,6 +551,39 @@ export class OrdersService {
     return savedOrder;
   }
 
+  private async recoverCheckoutAttempt(
+    order: OrderEntity,
+    fingerprint: string,
+    user: AuthenticatedUser | undefined,
+    database: Prisma.TransactionClient,
+  ): Promise<OrderEntity> {
+    const attempt = await database.systemLog.findFirst({
+      where: {
+        action: CHECKOUT_ATTEMPT_ACTION,
+        entity: 'Order',
+        entityId: order.id,
+      },
+      select: { userId: true, metadata: true },
+    });
+    if (!attempt || attempt.userId !== (user?.id ?? null)) {
+      throw new ConflictException('Ya existe una orden con ese identificador.');
+    }
+    const metadata = attempt.metadata;
+    const matches =
+      metadata !== null &&
+      typeof metadata === 'object' &&
+      !Array.isArray(metadata) &&
+      metadata.fingerprint === fingerprint;
+    if (!matches || order.status === OrderStatusDto.cancelled) {
+      const reference = order.invoice?.invoiceNumber ?? order.id;
+      throw new ConflictException({
+        code: 'CHECKOUT_ATTEMPT_ALREADY_RECORDED',
+        message: `La operación anterior ya está registrada (${reference}). Revisa el historial antes de confirmar el pedido actual.`,
+      });
+    }
+    return order;
+  }
+
   private async validateNewDelivery(
     dto: CreateOrderDto,
     items: CartItemEntity[],
@@ -383,12 +593,21 @@ export class OrdersService {
     if (!dto.customerAddress?.trim()) {
       throw new BadRequestException('Indica una dirección de entrega.');
     }
-    const [rules, prices] = await Promise.all([
-      this.prisma.appConfig.findUnique({ where: { id: 'delivery_rules' } }),
-      this.prisma.appConfig.findUnique({ where: { id: 'delivery_prices' } }),
-    ]);
+    const rules = await this.prisma.appConfig.findUnique({
+      where: { id: DELIVERY_RULES_ID },
+    });
+    const prices = usesDeliveryZonePricing(rules?.data)
+      ? null
+      : await this.prisma.appConfig.findUnique({
+          where: { id: DELIVERY_PRICES_ID },
+        });
     const productsTotal = items.reduce((sum, item) => {
-      if (isPackagingOrderItem(item) || isDeliveryChargeOrderItem(item) || isSplitBillOrderItem(item)) return sum;
+      if (
+        isPackagingOrderItem(item) ||
+        isDeliveryChargeOrderItem(item) ||
+        isSplitBillOrderItem(item)
+      )
+        return sum;
       return sum + item.price * Math.max(0, item.quantity - item.giftQuantity);
     }, 0);
     return resolveDeliveryCharge({
@@ -712,12 +931,20 @@ export class OrdersService {
             lockedStatus === 'CANCELLED' ||
             existing.status === OrderStatusDto.paid ||
             existing.status === OrderStatusDto.cancelled;
+          const isConfirmedDelivery =
+            reloaded.orderType === OrderTypeDto.delivery &&
+            (reloaded.status === OrderStatusDto.delivered ||
+              lockedStatus === 'DELIVERED' ||
+              existing.status === OrderStatusDto.delivered ||
+              Boolean(reloaded.deliveredAt || existing.deliveredAt));
           const nextGlobalStatus = isCurrentlyPaidOrCancelled
             ? reloaded.status === OrderStatusDto.cancelled ||
               lockedStatus === 'CANCELLED'
               ? OrderStatusDto.cancelled
               : OrderStatusDto.paid
-            : derived;
+            : isConfirmedDelivery
+              ? OrderStatusDto.delivered
+              : derived;
           this.logger.debug(`Estado global derivado: ${nextGlobalStatus}`);
           const becameReadyNow =
             !wasReadyForPickup && this.isReadyForPickup(reloaded.items);
@@ -754,7 +981,11 @@ export class OrdersService {
       nextStatus === OrderStatusDto.delivered &&
       user?.role === UserRoleDto.cocinero
     ) {
-      nextStatus = OrderStatusDto.ready;
+      nextStatus =
+        existing.status === OrderStatusDto.delivered ||
+        Boolean(existing.deliveredAt)
+          ? OrderStatusDto.delivered
+          : OrderStatusDto.ready;
     }
 
     const isDeliveryCompletion =
@@ -1293,34 +1524,6 @@ export class OrdersService {
     ) {
       throw new BadRequestException('El rango de fechas no es válido.');
     }
-    const payments = await this.prisma.payment.findMany({
-      where: {
-        order: {
-          status: 'PAID',
-          OR: [
-            { paidAt: { gte: startDate, lte: endDate } },
-            {
-              paidAt: null,
-              timestamp: { gte: startDate, lte: endDate },
-            },
-          ],
-        },
-      },
-      take: 5000,
-      select: {
-        method: true,
-        amount: true,
-        methodConfigId: true,
-        methodSnapshotName: true,
-        methodType: true,
-        currency: true,
-        commissionRate: true,
-        commissionAmount: true,
-        originalAmount: true,
-        exchangeRate: true,
-        reference: true,
-      },
-    });
     const groups = new Map<
       string,
       {
@@ -1330,80 +1533,129 @@ export class OrdersService {
         currency: string;
         transactionCount: number;
         referencedCount: number;
-        grossAmount: number;
-        commissionAmount: number;
-        netAmount: number;
-        grossAmountNio: number;
-        commissionAmountNio: number;
-        netAmountNio: number;
+        grossAmount: Prisma.Decimal;
+        commissionAmount: Prisma.Decimal;
+        grossAmountNio: Prisma.Decimal;
+        commissionAmountNio: Prisma.Decimal;
       }
     >();
-    for (const payment of payments) {
-      const methodId = payment.methodConfigId ?? `legacy-${payment.method}`;
-      const gross = payment.amount.toNumber();
-      const commission =
-        payment.commissionAmount?.toNumber() ??
-        Math.round(gross * (payment.commissionRate?.toNumber() ?? 0)) / 100;
-      const currency = payment.currency ?? 'NIO';
-      const exchangeRate = Math.max(
-        0.0001,
-        payment.exchangeRate?.toNumber() ?? 1,
-      );
-      const originalGross =
-        currency === 'USD'
-          ? (payment.originalAmount?.toNumber() ?? gross / exchangeRate)
-          : gross;
-      const originalCommission =
-        currency === 'USD' ? commission / exchangeRate : commission;
-      const current = groups.get(methodId) ?? {
-        methodId,
-        name: payment.methodSnapshotName ?? payment.method,
-        type: payment.methodType ?? payment.method,
-        currency,
-        transactionCount: 0,
-        referencedCount: 0,
-        grossAmount: 0,
-        commissionAmount: 0,
-        netAmount: 0,
-        grossAmountNio: 0,
-        commissionAmountNio: 0,
-        netAmountNio: 0,
-      };
-      current.transactionCount += 1;
-      if (payment.reference) current.referencedCount += 1;
-      current.grossAmount += originalGross;
-      current.commissionAmount += originalCommission;
-      current.netAmount += originalGross - originalCommission;
-      current.grossAmountNio += gross;
-      current.commissionAmountNio += commission;
-      current.netAmountNio += gross - commission;
-      groups.set(methodId, current);
-    }
-    const round = (value: number) => Math.round(value * 100) / 100;
+
+    const zero = new Prisma.Decimal(0);
+    let transactionCount = 0;
+    let totalGross = zero;
+    let totalCommission = zero;
+    await this.prisma.$transaction(
+      async (tx) => {
+        let lastPaymentId: number | undefined;
+        while (true) {
+          const payments = await tx.payment.findMany({
+            where: {
+              ...(lastPaymentId === undefined
+                ? {}
+                : { id: { gt: lastPaymentId } }),
+              order: {
+                status: 'PAID',
+                OR: [
+                  { paidAt: { gte: startDate, lte: endDate } },
+                  {
+                    paidAt: null,
+                    timestamp: { gte: startDate, lte: endDate },
+                  },
+                ],
+              },
+            },
+            orderBy: { id: 'asc' },
+            take: PAYMENT_METRICS_BATCH_SIZE,
+            select: {
+              id: true,
+              method: true,
+              amount: true,
+              methodConfigId: true,
+              methodSnapshotName: true,
+              methodType: true,
+              currency: true,
+              commissionRate: true,
+              commissionAmount: true,
+              originalAmount: true,
+              exchangeRate: true,
+              reference: true,
+            },
+          });
+
+          for (const payment of payments) {
+            const methodId = payment.methodConfigId || `legacy-${payment.method}`;
+            const type = payment.methodType || payment.method;
+            const currency = payment.currency || 'NIO';
+            const key = JSON.stringify([methodId, currency, type]);
+            const gross = payment.amount;
+            const commission =
+              payment.commissionAmount ??
+              gross
+                .mul(payment.commissionRate ?? 0)
+                .div(100)
+                .toDecimalPlaces(2);
+            const exchangeRate = Prisma.Decimal.max(
+              '0.0001',
+              payment.exchangeRate ?? 1,
+            );
+            const originalGross =
+              payment.originalAmount ??
+              (currency === 'USD' ? gross.div(exchangeRate) : gross);
+            const originalCommission =
+              currency === 'USD' ? commission.div(exchangeRate) : commission;
+            const group = groups.get(key) ?? {
+              methodId,
+              name: payment.methodSnapshotName ?? payment.method,
+              type,
+              currency,
+              transactionCount: 0,
+              referencedCount: 0,
+              grossAmount: zero,
+              commissionAmount: zero,
+              grossAmountNio: zero,
+              commissionAmountNio: zero,
+            };
+            group.transactionCount += 1;
+            if (payment.reference) group.referencedCount += 1;
+            group.grossAmount = group.grossAmount.add(originalGross);
+            group.commissionAmount =
+              group.commissionAmount.add(originalCommission);
+            group.grossAmountNio = group.grossAmountNio.add(gross);
+            group.commissionAmountNio =
+              group.commissionAmountNio.add(commission);
+            groups.set(key, group);
+
+            totalGross = totalGross.add(gross);
+            totalCommission = totalCommission.add(commission);
+            transactionCount += 1;
+          }
+
+          if (payments.length < PAYMENT_METRICS_BATCH_SIZE) break;
+          lastPaymentId = payments[payments.length - 1].id;
+        }
+      },
+      { isolationLevel: 'RepeatableRead', timeout: 60_000 },
+    );
+
+    const round = (value: Prisma.Decimal) => value.toDecimalPlaces(2).toNumber();
     const breakdown = [...groups.values()]
       .map((group) => ({
         ...group,
         grossAmount: round(group.grossAmount),
         commissionAmount: round(group.commissionAmount),
-        netAmount: round(group.netAmount),
+        netAmount: round(group.grossAmount.sub(group.commissionAmount)),
         grossAmountNio: round(group.grossAmountNio),
         commissionAmountNio: round(group.commissionAmountNio),
-        netAmountNio: round(group.netAmountNio),
+        netAmountNio: round(group.grossAmountNio.sub(group.commissionAmountNio)),
       }))
       .sort((a, b) => b.grossAmountNio - a.grossAmountNio);
     return {
       startDate: startDate.toISOString(),
       endDate: endDate.toISOString(),
-      transactionCount: payments.length,
-      grossAmount: round(
-        breakdown.reduce((sum, group) => sum + group.grossAmountNio, 0),
-      ),
-      commissionAmount: round(
-        breakdown.reduce((sum, group) => sum + group.commissionAmountNio, 0),
-      ),
-      netAmount: round(
-        breakdown.reduce((sum, group) => sum + group.netAmountNio, 0),
-      ),
+      transactionCount,
+      grossAmount: round(totalGross),
+      commissionAmount: round(totalCommission),
+      netAmount: round(totalGross.sub(totalCommission)),
       breakdown,
     };
   }
@@ -1462,17 +1714,23 @@ export class OrdersService {
           };
     });
     this.assertSplitBillCreditsUnchanged(existing.items, rawItems);
-    const existingDeliveryCharges = existing.items.filter(isDeliveryChargeOrderItem);
+    const existingDeliveryCharges = existing.items.filter(
+      isDeliveryChargeOrderItem,
+    );
     const incomingDeliveryCharges = rawItems.filter(isDeliveryChargeOrderItem);
     if (
       existingDeliveryCharges.length !== incomingDeliveryCharges.length ||
       existingDeliveryCharges.some((charge, index) => {
         const incoming = incomingDeliveryCharges[index];
-        return Math.round(charge.price * 100) !== Math.round(incoming.price * 100) ||
-          !this.isCommerciallySameOrderItem(charge, incoming);
+        return (
+          Math.round(charge.price * 100) !== Math.round(incoming.price * 100) ||
+          !this.isCommerciallySameOrderItem(charge, incoming)
+        );
       })
     ) {
-      throw new BadRequestException('La tarifa ya registrada no se puede modificar desde la edición de productos.');
+      throw new BadRequestException(
+        'La tarifa ya registrada no se puede modificar desde la edición de productos.',
+      );
     }
 
     if (isFinal) {
@@ -1513,7 +1771,9 @@ export class OrdersService {
               discountId: current.discountId ?? null,
               happyHourId: current.happyHourId ?? null,
               status: current.status,
-              isSentToKitchen: (dto.isSentToKitchen ?? current.isSentToKitchen) && lockedItems.some(requiresKitchenPreparation),
+              isSentToKitchen:
+                (dto.isSentToKitchen ?? current.isSentToKitchen) &&
+                lockedItems.some(requiresKitchenPreparation),
               certificateSerials: null,
             },
             tx,
@@ -1669,9 +1929,11 @@ export class OrdersService {
           happyHourId:
             promotion.source === 'happy-hour' ? promotion.happyHourId : null,
           status: nextStatus,
-          isSentToKitchen: dto.isSentToKitchen === undefined
-            ? undefined
-            : dto.isSentToKitchen && pricedItems.some(requiresKitchenPreparation),
+          isSentToKitchen:
+            dto.isSentToKitchen === undefined
+              ? undefined
+              : dto.isSentToKitchen &&
+                pricedItems.some(requiresKitchenPreparation),
           certificateSerials,
         },
         tx,
@@ -1731,9 +1993,15 @@ export class OrdersService {
   ) {
     const existing = await this.getById(id);
     this.assertCanFinalizeOrder(user, existing);
-    if (dto.orderType && dto.orderType !== existing.orderType &&
-      (dto.orderType === OrderTypeDto.delivery || existing.orderType === OrderTypeDto.delivery)) {
-      throw new BadRequestException('El tipo de pedido a domicilio se define al crear la orden.');
+    if (
+      dto.orderType &&
+      dto.orderType !== existing.orderType &&
+      (dto.orderType === OrderTypeDto.delivery ||
+        existing.orderType === OrderTypeDto.delivery)
+    ) {
+      throw new BadRequestException(
+        'El tipo de pedido a domicilio se define al crear la orden.',
+      );
     }
     if (
       dto.expectedUpdatedAt &&
@@ -1775,13 +2043,10 @@ export class OrdersService {
     });
 
     const { customerId } =
-      dto.customerId || dto.customerPhone || dto.customerSnapshotName
+      dto.customerId || dto.customerPhone
         ? await this.referenceResolver.resolve({
             customerId: dto.customerId ?? existing.customerId,
-            customerSnapshotName:
-              dto.customerSnapshotName ?? existing.customerSnapshotName,
             customerPhone: dto.customerPhone ?? existing.customerPhone,
-            customerAddress: dto.customerAddress ?? existing.customerAddress,
           })
         : { customerId: existing.customerId };
 
@@ -1826,9 +2091,15 @@ export class OrdersService {
 
     const existing = await this.getById(id);
     this.assertCanFinalizeOrder(user, existing);
-    if (dto.orderType && dto.orderType !== existing.orderType &&
-      (dto.orderType === OrderTypeDto.delivery || existing.orderType === OrderTypeDto.delivery)) {
-      throw new BadRequestException('El tipo de pedido a domicilio se define al crear la orden.');
+    if (
+      dto.orderType &&
+      dto.orderType !== existing.orderType &&
+      (dto.orderType === OrderTypeDto.delivery ||
+        existing.orderType === OrderTypeDto.delivery)
+    ) {
+      throw new BadRequestException(
+        'El tipo de pedido a domicilio se define al crear la orden.',
+      );
     }
     if (
       dto.expectedUpdatedAt &&
@@ -1861,16 +2132,22 @@ export class OrdersService {
     }
 
     const supplementalRawItems: CartItemEntity[] = [];
+    const parentSupplementalSelections: CartItemEntity[] = [];
     const coreSubRawItems: CartItemEntity[] = [];
     for (const rawItem of dto.items) {
       const mapped: CartItemEntity = {
         ...rawItem,
         giftQuantity: rawItem.giftQuantity ?? 0,
       };
-      if (isPackagingOrderItem(mapped) || isDeliveryChargeOrderItem(mapped)) {
+      if (isSplitSupplementalItem(mapped)) {
+        if (dto.mode === 'items' && mapped.id !== undefined) {
+          parentSupplementalSelections.push(mapped);
+          continue;
+        }
         supplementalRawItems.push({
           ...mapped,
           id: undefined,
+          splitTransferredFromParent: false,
           isSentToKitchen: false,
           sentAt: undefined,
           kitchenStatus: undefined,
@@ -1894,31 +2171,26 @@ export class OrdersService {
     if (dto.mode === 'items') {
       const subtracted = this.subtractSubAccountItems(
         existing.items,
-        coreSubRawItems,
+        [...coreSubRawItems, ...parentSupplementalSelections],
         nowMs,
       );
       remainingParentItems = subtracted.remainingParentItems;
       const hasRemainingProductItems = remainingParentItems.some(
         (item) =>
           !isSplitBillOrderItem(item) &&
-          !isPackagingOrderItem(item) &&
-          !isDeliveryChargeOrderItem(item) &&
+          !isSplitSupplementalItem(item) &&
           item.quantity > 0,
       );
       settlesSplit = !hasRemainingProductItems;
       const remainingSupplementalItems = settlesSplit
-        ? remainingParentItems.filter(
-            (item) =>
-              isPackagingOrderItem(item) || isDeliveryChargeOrderItem(item),
-          )
+        ? remainingParentItems.filter(isSplitSupplementalItem).map((item) => ({
+            ...item,
+            splitTransferredFromParent: true,
+          }))
         : [];
       childRawItems = [
         ...subtracted.matchedCoreItems,
-        ...remainingSupplementalItems.map((item) => ({
-          ...item,
-          id: undefined,
-        })),
-        ...supplementalRawItems,
+        ...remainingSupplementalItems,
       ];
       if (settlesSplit) remainingParentItems = [];
     } else {
@@ -1955,16 +2227,15 @@ export class OrdersService {
           'El monto de la subcuenta no coincide con el total calculado.',
         );
       }
-      if (authoritativeSubAccountAmount - existing.total > 0.01) {
+      const existingTotalCents = Math.round(existing.total * 100);
+      const subAccountCents = Math.round(authoritativeSubAccountAmount * 100);
+      if (subAccountCents - existingTotalCents > 1) {
         throw new BadRequestException(
           'El monto de la subcuenta supera el saldo pendiente de la mesa.',
         );
       }
-      const subAccountAmount = authoritativeSubAccountAmount;
-      const remainingBalanceAfter = Number(
-        (existing.total - subAccountAmount).toFixed(2),
-      );
-      settlesSplit = remainingBalanceAfter <= 0.05;
+      const remainingBalanceCents = existingTotalCents - subAccountCents;
+      settlesSplit = remainingBalanceCents <= 1;
 
       childRawItems = [
         ...coreSubRawItems.map((item) => ({
@@ -1974,7 +2245,6 @@ export class OrdersService {
           sentAt: undefined,
           kitchenStatus: undefined,
         })),
-        ...supplementalRawItems,
       ];
 
       const creditItem: CartItemEntity = {
@@ -1994,11 +2264,20 @@ export class OrdersService {
         extras: [],
         isSentToKitchen: false,
       };
-      remainingParentItems = [...existing.items, creditItem];
+      remainingParentItems = [
+        ...existing.items.map((item, idx) => ({
+          ...item,
+          id: item.id ?? -(idx + 1),
+        })),
+        creditItem,
+      ];
     }
 
-    const normalizedChildItems =
-      await this.pricing.normalizeComboItems(childRawItems);
+    // Las líneas que provienen de la orden ya tienen su catálogo y precio congelados.
+    const normalizedChildItems = [
+      ...childRawItems,
+      ...(await this.pricing.normalizeComboItems(supplementalRawItems)),
+    ];
     const hasExplicitChildPromotion =
       dto.promotionSource !== undefined ||
       dto.cuponId !== undefined ||
@@ -2070,7 +2349,7 @@ export class OrdersService {
         normalizedChildItems,
         childPromotion,
         dto.discountAmount ?? 0,
-        { allowConsumedCoupon: true },
+        { allowConsumedCoupon: true, useSnapshotPrices: true },
       );
       pricedChildItems = preservedChild.items;
       childTotals = preservedChild.totals;
@@ -2079,9 +2358,12 @@ export class OrdersService {
         normalizedChildItems,
         childPromotion,
         undefined,
-        childReusesConsumedParentCoupon
-          ? { allowConsumedCoupon: true }
-          : undefined,
+        {
+          useSnapshotPrices: true,
+          ...(childReusesConsumedParentCoupon
+            ? { allowConsumedCoupon: true }
+            : {}),
+        },
       );
       const maxParentDiscount =
         childReusesConsumedParentCoupon &&
@@ -2164,6 +2446,7 @@ export class OrdersService {
         remainingParentItems,
         parentPromotion,
         expectedRemainingDiscount,
+        { useSnapshotPrices: true },
       );
       pricedParentItems = preservedParent.items;
       parentTotals = preservedParent.totals;
@@ -2171,6 +2454,8 @@ export class OrdersService {
       const unadjustedParent = await this.pricing.calculateWithPrices(
         remainingParentItems,
         parentPromotion,
+        undefined,
+        { useSnapshotPrices: true },
       );
       const useParentDiscountOverride =
         typeof existing.discountAmount === 'number' &&
@@ -2188,9 +2473,18 @@ export class OrdersService {
       pricedParentItems = adjustedParent.items;
       parentTotals = adjustedParent.totals;
     }
-    const finalParentItems = settlesSplit
+    const rawFinalParentItems = settlesSplit
       ? this.ensureKitchenItemsSentOnSettlement(pricedParentItems, nowMs)
       : pricedParentItems;
+    const finalParentItems = rawFinalParentItems.map((item) =>
+      typeof item.id === 'number' && item.id < 0
+        ? { ...item, id: undefined }
+        : item,
+    );
+    pricedChildItems = pricedChildItems.map((item) => ({
+      ...item,
+      id: undefined,
+    }));
 
     const pendingParentCertificateSerials =
       this.extractCertificateSerials(finalParentItems);
@@ -2238,17 +2532,17 @@ export class OrdersService {
       excludeOrderId: existing.id,
     });
 
+    const customerPhone =
+      dto.customerPhone?.trim() || existing.customerPhone?.trim() || undefined;
     const customerSnapshotName =
       dto.customerSnapshotName ||
       existing.customerSnapshotName ||
-      (dto.customerPhone ? `Cliente ${dto.customerPhone}` : undefined);
+      (customerPhone ? `Cliente ${customerPhone}` : undefined);
     const cashierSnapshotName = user?.username ?? existing.cashierSnapshotName;
     const { customerId, cashierId, shiftId } =
       await this.referenceResolver.resolve({
         customerId: dto.customerId ?? existing.customerId,
-        customerSnapshotName,
-        customerPhone: dto.customerPhone ?? existing.customerPhone,
-        customerAddress: dto.customerAddress ?? existing.customerAddress,
+        customerPhone,
         cashierId: user?.id,
         cashierSnapshotName,
       });
@@ -2342,7 +2636,7 @@ export class OrdersService {
             waiterSnapshotName: existing.waiterSnapshotName,
             orderType: dto.orderType ?? existing.orderType,
             customerAddress: dto.customerAddress ?? existing.customerAddress,
-            customerPhoneSnapshot: dto.customerPhone?.trim() || undefined,
+            customerPhoneSnapshot: customerPhone,
             linkedTables: existing.linkedTables,
             isSentToKitchen: pricedChildItems.some(
               (item) =>
@@ -2372,6 +2666,7 @@ export class OrdersService {
             ...dto,
             ...(customerId ? { customerId } : {}),
             customerSnapshotName,
+            customerPhone,
             payments: resolvedPayments,
             certificateSerials: childCertificateSerials,
           },
@@ -2442,15 +2737,15 @@ export class OrdersService {
             !isSplitBillOrderItem(item),
         )
         .map((item) => ({ ...item }));
-      const transferredSupplementalItems =
-        parent.items.length === 0
-          ? child.items
-              .filter(
-                (item) =>
-                  isPackagingOrderItem(item) || isDeliveryChargeOrderItem(item),
-              )
-              .map((item) => ({ ...item }))
-          : [];
+      const transferredSupplementalItems = child.items
+        .filter(
+          (item) =>
+            isSplitSupplementalItem(item) &&
+            (item.splitTransferredFromParent === true ||
+              (item.splitTransferredFromParent === undefined &&
+                parent.items.length === 0)),
+        )
+        .map((item) => ({ ...item, splitTransferredFromParent: undefined }));
       restoredItems = [
         ...parent.items,
         ...productItems,
@@ -2597,18 +2892,49 @@ export class OrdersService {
     remainingParentItems: CartItemEntity[];
     matchedCoreItems: CartItemEntity[];
   } {
-    const pool: CartItemEntity[] = parentItems.map((item) => ({
+    const pool: CartItemEntity[] = parentItems.map((item, idx) => ({
       ...item,
+      id: item.id ?? -(idx + 1),
       extras: [...(item.extras ?? [])],
     }));
     const matchedCoreItems: CartItemEntity[] = [];
 
     for (const subItem of subItems) {
+      if (isSplitSupplementalItem(subItem)) {
+        const original = pool.find(
+          (candidate) =>
+            candidate.id === subItem.id &&
+            isSplitSupplementalItem(candidate) &&
+            isPackagingOrderItem(candidate) === isPackagingOrderItem(subItem),
+        );
+        if (
+          !original ||
+          subItem.quantity > original.quantity ||
+          subItem.giftQuantity > 0
+        ) {
+          throw new BadRequestException(
+            `El cargo seleccionado de ${subItem.name} no coincide con la orden principal.`,
+          );
+        }
+        original.quantity -= subItem.quantity;
+        matchedCoreItems.push({
+          ...original,
+          quantity: subItem.quantity,
+          splitTransferredFromParent: true,
+        });
+        continue;
+      }
+
       let qtyNeeded = subItem.quantity;
       let giftNeeded = Math.max(0, subItem.giftQuantity ?? 0);
 
       const candidates = pool.filter((candidate) => {
-        if (candidate.quantity <= 0 || isSplitBillOrderItem(candidate)) {
+        if (
+          candidate.quantity <= 0 ||
+          isSplitBillOrderItem(candidate) ||
+          isPackagingOrderItem(candidate) ||
+          isDeliveryChargeOrderItem(candidate)
+        ) {
           return false;
         }
         if (subItem.id !== undefined && candidate.id === subItem.id) {
@@ -2671,15 +2997,6 @@ export class OrdersService {
 
         matchedCoreItems.push({
           ...candidate,
-          ...subItem,
-          id: undefined,
-          productId: subItem.productId ?? candidate.productId,
-          categoryId: subItem.categoryId ?? candidate.categoryId,
-          kitchenId: subItem.kitchenId ?? candidate.kitchenId,
-          isCombo: subItem.isCombo ?? candidate.isCombo,
-          comboSelections: subItem.comboSelections ?? candidate.comboSelections,
-          kitchenModifiers:
-            subItem.kitchenModifiers ?? candidate.kitchenModifiers,
           quantity: takeQty,
           giftQuantity: resolvedChildGiftQty,
           giftReason: resolvedChildGiftReason,
@@ -3187,9 +3504,17 @@ export class OrdersService {
         ? (general.data as Record<string, unknown>)
         : undefined;
     const defaultExchangeRate = Number(generalData?.exchangeRate);
-    const config = resolveOperationalPaymentMethods(configuredMethods, generalData);
-    if (payments.length > 0 && !config.methods.some((method) => method.isActive)) {
-      throw new BadRequestException('Configura al menos un método de pago activo antes de cobrar.');
+    const config = resolveOperationalPaymentMethods(
+      configuredMethods,
+      generalData,
+    );
+    if (
+      payments.length > 0 &&
+      !config.methods.some((method) => method.isActive)
+    ) {
+      throw new BadRequestException(
+        'Configura al menos un método de pago activo antes de cobrar.',
+      );
     }
 
     const normalized = normalizeAndValidateOrderPayments(
@@ -3259,10 +3584,6 @@ export class OrdersService {
       isFullOrder: true,
       tableName: order.linkedTables?.[0],
       customerName: order.customerSnapshotName,
-      orderType: order.orderType,
-      targetUsername: order.cashierSnapshotName,
-      driverId: order.driverId,
-      waiterId: order.waiterId,
     });
   }
 

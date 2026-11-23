@@ -54,6 +54,31 @@ function validatePricesForMode(
   }
 }
 
+function normalizeComboPrices(
+  dto: CreateProductDto | UpdateProductDto,
+  isCombo: boolean,
+  storedComboSize = 'único',
+): void {
+  if (dto.comboPrice === undefined) return;
+  if (!isCombo) {
+    throw new BadRequestException(
+      'Producto: comboPrice solo se admite para combos',
+    );
+  }
+  if (!Number.isFinite(dto.comboPrice) || dto.comboPrice < 0) {
+    throw new BadRequestException(
+      'Producto: el precio del combo no puede ser negativo',
+    );
+  }
+  if (!dto.prices?.length) {
+    dto.prices = [{ size: storedComboSize, price: dto.comboPrice }];
+  } else if (dto.prices[0].price !== dto.comboPrice) {
+    throw new BadRequestException(
+      'Producto: los precios del combo deben coincidir',
+    );
+  }
+}
+
 export function validateCreateProduct(dto: CreateProductDto): void {
   const trimmedName = dto.name?.trim() ?? '';
   if (!trimmedName) {
@@ -61,23 +86,9 @@ export function validateCreateProduct(dto: CreateProductDto): void {
   }
   dto.name = trimmedName;
 
-  if (
-    dto.comboPrice !== undefined &&
-    (!Number.isFinite(dto.comboPrice) || dto.comboPrice < 0)
-  ) {
-    throw new BadRequestException(
-      'Producto: el precio del combo no puede ser negativo',
-    );
-  }
-
+  normalizeComboPrices(dto, dto.isCombo === true);
   if (dto.isCombo) {
     dto.hasMultipleSizes = false;
-    if (
-      (!dto.prices || dto.prices.length === 0) &&
-      dto.comboPrice !== undefined
-    ) {
-      dto.prices = [{ size: 'único', price: dto.comboPrice }];
-    }
   }
 
   if (!dto.prices || dto.prices.length === 0) {
@@ -103,16 +114,12 @@ export function validateUpdateProduct(
     dto.name = trimmedName;
   }
 
-  if (
-    dto.comboPrice !== undefined &&
-    (!Number.isFinite(dto.comboPrice) || dto.comboPrice < 0)
-  ) {
-    throw new BadRequestException(
-      'Producto: el precio del combo no puede ser negativo',
-    );
-  }
-
   const effectiveIsCombo = dto.isCombo ?? current?.isCombo ?? false;
+  normalizeComboPrices(
+    dto,
+    effectiveIsCombo,
+    current?.isCombo ? current.prices[0]?.size : undefined,
+  );
   if (effectiveIsCombo && dto.hasMultipleSizes === true) {
     throw new BadRequestException(
       'Producto: un combo no puede tener múltiples tamaños',
@@ -121,12 +128,6 @@ export function validateUpdateProduct(
 
   if (dto.isCombo === true) {
     dto.hasMultipleSizes = false;
-    if (
-      (!dto.prices || dto.prices.length === 0) &&
-      dto.comboPrice !== undefined
-    ) {
-      dto.prices = [{ size: 'único', price: dto.comboPrice }];
-    }
   }
 
   const effectiveHasMultipleSizes =

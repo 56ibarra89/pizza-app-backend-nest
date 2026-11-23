@@ -1,12 +1,13 @@
 import { NotFoundException } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import type { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsController } from '../controllers/notifications.controller';
 import { NotificationsService } from './notifications.service';
 import type { SystemLogsService } from '../../system-logs/services/system-logs.service';
 
 describe('NotificationsService', () => {
   const notification = {
-    create: jest.fn(),
+    createManyAndReturn: jest.fn(),
     findMany: jest.fn(),
     updateMany: jest.fn(),
     deleteMany: jest.fn(),
@@ -15,96 +16,167 @@ describe('NotificationsService', () => {
   const appConfig = { findUnique: jest.fn() };
   const order = {
     findMany: jest.fn(),
+    findUnique: jest.fn(),
     updateMany: jest.fn<Promise<{ count: number }>, [unknown]>(),
-    update: jest.fn(),
   };
-  const prisma = { notification, user, appConfig, order };
+  const transaction = jest.fn();
+  const prisma = {
+    notification,
+    user,
+    appConfig,
+    order,
+    $transaction: transaction,
+  };
   const systemLogs = { createProcess: jest.fn().mockResolvedValue({ id: 1 }) };
 
   let service: NotificationsService;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
     service = new NotificationsService(
       prisma as unknown as PrismaService,
       systemLogs as unknown as SystemLogsService,
     );
-    notification.create.mockImplementation(
-      ({ data }: { data: Record<string, unknown> }) =>
-        Promise.resolve({
-          id: 'notification-created',
-          createdAt: new Date(),
-          isRead: false,
-          ...data,
-        }),
+    systemLogs.createProcess.mockResolvedValue({ id: 1 });
+    transaction.mockImplementation((callback: (tx: typeof prisma) => unknown) =>
+      callback(prisma),
+    );
+    notification.createManyAndReturn.mockImplementation(
+      ({ data }: { data: Array<Record<string, unknown>> }) =>
+        Promise.resolve(
+          data.map((record, index) => ({
+            id: `notification-${index}`,
+            createdAt: new Date(),
+            isRead: false,
+            ...record,
+          })),
+        ),
     );
   });
 
   it('notifica solamente al motorizado seleccionado en el delivery', async () => {
-    user.findUnique.mockResolvedValue({
-      username: 'reina',
-      role: UserRole.MOTORIZADO,
-      isActive: true,
+    order.findUnique.mockResolvedValue({
+      orderType: 'DELIVERY',
+      driver: { username: 'reina', role: UserRole.MOTORIZADO, isActive: true },
     });
 
     await service.handleOrderReadyEvent({
       orderId: 'ORD-1',
       isFullOrder: true,
-      orderType: 'delivery',
       customerName: 'Cliente',
-      driverId: 'driver-reina',
     });
 
-    expect(user.findUnique).toHaveBeenCalledWith({
-      where: { id: 'driver-reina' },
-      select: { username: true, role: true, isActive: true },
-    });
-    expect(notification.create).toHaveBeenCalledWith({
-      data: {
-        title: '¡Orden Lista!',
-        message: 'La orden de Cliente está lista para ser entregada.',
-        role: UserRole.MOTORIZADO,
-        targetUsername: 'reina',
-        orderId: 'ORD-1',
-      },
-    });
-    expect(notification.create).toHaveBeenCalledTimes(6);
+    const { data } = notification.createManyAndReturn.mock.calls[0][0];
+    expect(data).toHaveLength(4);
+    expect(data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: UserRole.CAJERO_PRINCIPAL }),
+        expect.objectContaining({ role: UserRole.ADMIN }),
+        expect.objectContaining({ role: UserRole.DESPACHADOR }),
+        {
+          title: '¡Orden Lista!',
+          message: 'La orden de Cliente está lista para ser entregada.',
+          role: UserRole.MOTORIZADO,
+          targetUsername: 'reina',
+          orderId: 'ORD-1',
+        },
+      ]),
+    );
   });
 
   it('dirige la notificación de MESERO al mesero asignado o relevado vigente', async () => {
-    user.findUnique.mockResolvedValue({
-      username: 'bea',
-      role: UserRole.MESERO,
-      isActive: true,
+    order.findUnique.mockResolvedValue({
+      orderType: 'LOCAL',
+      cashierSnapshotName: 'nombre-anterior',
+      cashier: { username: 'cajero1', role: UserRole.CAJERO, isActive: true },
+      waiter: { username: 'bea', role: UserRole.MESERO, isActive: true },
     });
 
     await service.handleOrderReadyEvent({
       orderId: 'ORD-MESA-1',
       isFullOrder: true,
-      orderType: 'local',
       tableName: 'F1-M1',
-      targetUsername: 'cajero1',
-      waiterId: 'waiter-bea',
     });
 
-    expect(user.findUnique).toHaveBeenCalledWith({
-      where: { id: 'waiter-bea' },
-      select: { username: true, role: true, isActive: true },
+    expect(user.findUnique).not.toHaveBeenCalled();
+    expect(notification.createManyAndReturn).toHaveBeenCalledWith({
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          role: UserRole.CAJERO,
+          targetUsername: 'cajero1',
+          orderId: 'ORD-MESA-1',
+        }),
+        expect.objectContaining({
+          role: UserRole.MESERO,
+          targetUsername: 'bea',
+          orderId: 'ORD-MESA-1',
+        }),
+      ]),
     });
-    expect(notification.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
+  });
+
+  it('entrega la alerta al cajero del turno abierto y excluye a otros cajeros del stream', async () => {
+    order.findUnique.mockResolvedValue({
+      orderType: 'LOCAL',
+      cashier: {
+        username: 'principal',
+        role: UserRole.CAJERO_PRINCIPAL,
+        isActive: false,
+      },
+      shift: {
+        status: 'OPEN',
+        cashier: { username: 'turno', role: UserRole.CAJERO, isActive: true },
+      },
+    });
+    const controller = new NotificationsController(service);
+    const assigned = jest.fn();
+    const unrelated = jest.fn();
+    user.findUnique
+      .mockResolvedValueOnce({
+        username: 'turno',
         role: UserRole.CAJERO,
-        targetUsername: 'cajero1',
-        orderId: 'ORD-MESA-1',
-      }),
+        isActive: true,
+      })
+      .mockResolvedValueOnce({
+        username: 'otro',
+        role: UserRole.CAJERO,
+        isActive: true,
+      });
+    const assignedStream = controller
+      .stream({
+        id: 'cashier-assigned',
+        username: 'turno',
+        role: 'cajero' as never,
+      })
+      .subscribe(assigned);
+    const unrelatedStream = controller
+      .stream({
+        id: 'cashier-other',
+        username: 'otro',
+        role: 'cajero' as never,
+      })
+      .subscribe(unrelated);
+
+    await service.handleOrderReadyEvent({
+      orderId: 'order-shift',
+      isFullOrder: true,
     });
-    expect(notification.create).toHaveBeenCalledWith({
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(assigned).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        role: UserRole.MESERO,
-        targetUsername: 'bea',
-        orderId: 'ORD-MESA-1',
+        targetUsername: 'turno',
+        orderId: 'order-shift',
       }),
     });
+    expect(unrelated).not.toHaveBeenCalled();
+    const { data } = notification.createManyAndReturn.mock.calls[0][0];
+    expect(data).toHaveLength(3);
+    expect(
+      data.filter(({ role }: { role: UserRole }) => role === UserRole.ADMIN),
+    ).toHaveLength(1);
+    assignedStream.unsubscribe();
+    unrelatedStream.unsubscribe();
   });
 
   it('consulta las notificaciones del motorizado por usuario exacto', async () => {
@@ -143,56 +215,81 @@ describe('NotificationsService', () => {
     });
   });
 
-  it('genera una sola alerta por delivery fuera del SLA', async () => {
-    appConfig.findUnique.mockResolvedValue({
-      data: {
-        deliveryAlertsEnabled: true,
-        deliveryMaxMinutes: 35,
-      },
-    });
-    order.findMany.mockResolvedValue([
-      {
+  it.each([
+    ['99990000', '99990000'],
+    [null, '88887777'],
+  ])(
+    'genera una alerta por delivery fuera del SLA con el contacto de la orden (%s)',
+    async (snapshot, expectedPhone) => {
+      appConfig.findUnique.mockResolvedValue({
+        data: {
+          deliveryAlertsEnabled: true,
+          deliveryMaxMinutes: 35,
+        },
+      });
+      order.findMany.mockResolvedValue([
+        {
+          id: 'order-overdue',
+          invoiceNumber: 'F-100',
+          customerSnapshotName: 'Ana',
+          cashierSnapshotName: 'Caja1',
+          customerPhoneSnapshot: snapshot,
+          deliveryStartedAt: new Date(Date.now() - 40 * 60 * 1000),
+          customer: { phone: '88887777' },
+        },
+      ]);
+      user.findUnique.mockResolvedValue({
+        username: 'caja1',
+        role: UserRole.CAJERO,
+        isActive: true,
+      });
+      order.updateMany
+        .mockResolvedValueOnce({ count: 1 })
+        .mockResolvedValue({ count: 0 });
+
+      await service.checkOverdueDeliveries();
+      await service.checkOverdueDeliveries();
+
+      const updateCall = order.updateMany.mock.calls[0]?.[0] as {
+        where: { id: string; deliverySlaAlertedAt: null };
+        data: { deliverySlaAlertedAt: Date };
+      };
+      expect(updateCall.where).toMatchObject({
         id: 'order-overdue',
-        invoiceNumber: 'F-100',
-        customerSnapshotName: 'Ana',
-        cashierSnapshotName: 'caja1',
-        deliveryStartedAt: new Date(Date.now() - 40 * 60 * 1000),
-        customer: { phone: '88887777' },
-      },
-    ]);
-    order.updateMany.mockResolvedValue({ count: 1 });
-
-    await service.checkOverdueDeliveries();
-
-    const updateCall = order.updateMany.mock.calls[0]?.[0] as {
-      where: { id: string; deliverySlaAlertedAt: null };
-      data: { deliverySlaAlertedAt: Date };
-    };
-    expect(updateCall.where).toEqual({
-      id: 'order-overdue',
-      deliverySlaAlertedAt: null,
-    });
-    expect(updateCall.data.deliverySlaAlertedAt).toBeInstanceOf(Date);
-    expect(notification.create).toHaveBeenCalledTimes(4);
-    const notificationCalls = notification.create.mock.calls.map(
-      ([call]) => call as { data: Record<string, unknown> },
-    );
-    const cashierNotification = notificationCalls.find(
-      (call) => call.data.role === UserRole.CAJERO,
-    );
-    expect(cashierNotification?.data).toMatchObject({
-      title: 'Delivery fuera de tiempo',
-      role: UserRole.CAJERO,
-      targetUsername: 'caja1',
-      orderId: 'order-overdue',
-    });
-    expect(systemLogs.createProcess).toHaveBeenCalledWith(
-      expect.objectContaining({
-        process: 'DELIVERY_SLA_MONITOR',
-        entity: 'delivery-alert',
-      }),
-    );
-  });
+        deliverySlaAlertedAt: null,
+        deliveredAt: null,
+        status: { notIn: ['DELIVERED', 'PAID', 'CANCELLED'] },
+      });
+      expect(updateCall.data.deliverySlaAlertedAt).toBeInstanceOf(Date);
+      expect(transaction).toHaveBeenCalledTimes(2);
+      expect(notification.createManyAndReturn).toHaveBeenCalledTimes(1);
+      const { data } = notification.createManyAndReturn.mock.calls[0][0];
+      expect(data).toHaveLength(4);
+      expect(data).toContainEqual(
+        expect.objectContaining({
+          title: 'Delivery fuera de tiempo',
+          message: expect.stringContaining(`Teléfono: ${expectedPhone}.`),
+          role: UserRole.CAJERO,
+          targetUsername: 'caja1',
+          orderId: 'order-overdue',
+        }),
+      );
+      if (snapshot) {
+        expect(data).not.toContainEqual(
+          expect.objectContaining({
+            message: expect.stringContaining('Teléfono: 88887777.'),
+          }),
+        );
+      }
+      expect(systemLogs.createProcess).toHaveBeenCalledWith(
+        expect.objectContaining({
+          process: 'DELIVERY_SLA_MONITOR',
+          entity: 'delivery-alert',
+        }),
+      );
+      expect(systemLogs.createProcess).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('invalida suscriptores SSE cuando el token expira, el usuario se desactiva o cambia tokenVersion (H10)', async () => {
     const expiredResult = await service.validateStreamSubscriber({

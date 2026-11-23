@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { OnEvent } from '@nestjs/event-emitter';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -52,7 +53,9 @@ export class BackupsService implements OnModuleInit {
   ] as const;
 
   private readonly logger = new Logger(BackupsService.name);
-  private readonly storageDir = path.join(process.cwd(), 'storage', 'backups');
+  private readonly storageDir =
+    process.env.BACKUP_STORAGE_DIR?.trim() ||
+    path.join(process.cwd(), 'storage', 'backups');
   private lastCronExecutionKey: string | null = null;
   private isRestoreInProgress = false;
   private backupGenerationQueue: Promise<void> = Promise.resolve();
@@ -293,9 +296,25 @@ export class BackupsService implements OnModuleInit {
         `Respaldo generado con éxito: ${filename} (${sizeMb} MB)`,
       );
 
-      // Despacho a proveedor en la nube (LocalFirst maneja retorno seguro)
+      // Despacho a proveedor externo duradero
+      let externalSynced = false;
       try {
-        await this.cloudProvider.upload(destinationPath, filename);
+        const isExternalConfigured =
+          typeof this.cloudProvider.isConfigured === 'function'
+            ? this.cloudProvider.isConfigured()
+            : true;
+        if (isExternalConfigured) {
+          const uploadResult = await this.cloudProvider.upload(
+            destinationPath,
+            filename,
+          );
+          externalSynced = uploadResult?.success === true;
+          if (uploadResult && uploadResult.success === false) {
+            this.logger.warn(
+              `Respaldo guardado sólo localmente (${filename}): ${uploadResult.error ?? 'Proveedor externo rechazó la carga'}`,
+            );
+          }
+        }
       } catch (cloudErr) {
         this.logger.warn(
           `Advertencia al sincronizar con proveedor de nube: ${cloudErr}`,
@@ -313,7 +332,7 @@ export class BackupsService implements OnModuleInit {
         sizeMb,
         createdAt: now,
         type,
-        location: 'LOCAL',
+        location: externalSynced ? 'SYNCED' : 'LOCAL',
       };
     } catch (err: any) {
       this.logger.error(`Fallo al ejecutar pg_dump: ${err?.message || err}`);
@@ -478,8 +497,11 @@ export class BackupsService implements OnModuleInit {
       );
 
       // 2. Ejecutar restauración atómica con psql deteniendo ante cualquier error
+      // e incluyendo la validación de las tablas esenciales dentro de la misma transacción.
       const creds = this.getDatabaseCredentials();
       const psqlPath = this.resolveBinaryPath('psql');
+      const transactionalScriptPath =
+        await this.createTransactionalRestoreScript(sourcePath);
 
       const args = [
         '-h',
@@ -495,7 +517,7 @@ export class BackupsService implements OnModuleInit {
         'ON_ERROR_STOP=1',
         '--single-transaction',
         '-f',
-        sourcePath,
+        transactionalScriptPath,
       ];
 
       const execEnv = {
@@ -555,10 +577,52 @@ export class BackupsService implements OnModuleInit {
         throw new InternalServerErrorException(
           `Error al restaurar la base de datos: ${err?.message || 'Error ejecutando psql'}. Tu estado previo quedó respaldado en: ${safetySnapshot.filename}`,
         );
+      } finally {
+        if (
+          transactionalScriptPath !== sourcePath &&
+          fs.existsSync(transactionalScriptPath)
+        ) {
+          try {
+            fs.unlinkSync(transactionalScriptPath);
+          } catch {
+            // ignore temp file cleanup errors
+          }
+        }
       }
     } finally {
       this.isRestoreInProgress = false;
     }
+  }
+
+  private async createTransactionalRestoreScript(
+    sourcePath: string,
+  ): Promise<string> {
+    const tableListSql = BackupsService.REQUIRED_CORE_TABLES.map(
+      (tableName) => `'${tableName}'`,
+    ).join(', ');
+    const expectedCount = BackupsService.REQUIRED_CORE_TABLES.length;
+    const verificationBlock = [
+      '',
+      '-- Verificación transaccional obligatoria antes de confirmar (COMMIT)',
+      'DO $$',
+      'DECLARE',
+      '  core_table_count integer;',
+      'BEGIN',
+      `  SELECT COUNT(*)::int INTO core_table_count FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN (${tableListSql});`,
+      `  IF core_table_count < ${expectedCount} THEN`,
+      `    RAISE EXCEPTION 'La verificación transaccional de restauración falló: se esperaban ${expectedCount} tablas esenciales y se encontraron %', core_table_count;`,
+      '  END IF;',
+      'END $$;',
+      '',
+    ].join('\n');
+
+    const tempScriptPath = path.join(
+      os.tmpdir(),
+      `pizza-restore-tx-${process.pid}-${Date.now()}.sql`,
+    );
+    await fs.promises.copyFile(sourcePath, tempScriptPath);
+    await fs.promises.appendFile(tempScriptPath, verificationBlock, 'utf8');
+    return tempScriptPath;
   }
 
   private async verifyRestoredDatabaseIntegrity(

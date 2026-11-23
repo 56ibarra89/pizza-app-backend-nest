@@ -233,6 +233,8 @@ export class PrismaCustomersRepository implements ICustomersRepository {
     const now = new Date();
 
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Customer" WHERE id = ${id} FOR UPDATE`;
+
       // 1. Manejar sincronización completa de teléfonos si se envió el array
       if (Array.isArray(dto.phones)) {
         const existingPhones = await tx.customerPhone.findMany({
@@ -279,24 +281,29 @@ export class PrismaCustomersRepository implements ICustomersRepository {
 
         data.phone = primaryPhoneValue;
       } else if (dto.phone !== undefined) {
-        const cleanPhone = dto.phone.trim() || null;
+        const cleanPhone = dto.phone?.trim() || null;
         data.phone = cleanPhone;
 
+        await tx.customerPhone.updateMany({
+          where: {
+            customerId: id,
+            isDefault: true,
+            ...(cleanPhone ? { phone: { not: cleanPhone } } : {}),
+          },
+          data: { isDefault: false },
+        });
+
         if (cleanPhone) {
-          const existingPhones = await tx.customerPhone.findMany({
-            where: { customerId: id },
+          await tx.customerPhone.upsert({
+            where: { customerId_phone: { customerId: id, phone: cleanPhone } },
+            update: { isDefault: true, lastUsed: now },
+            create: {
+              customerId: id,
+              phone: cleanPhone,
+              isDefault: true,
+              lastUsed: now,
+            },
           });
-          const matched = existingPhones.find((p) => p.phone === cleanPhone);
-          if (matched) {
-            await tx.customerPhone.update({
-              where: { id: matched.id },
-              data: { lastUsed: now },
-            });
-          } else {
-            await tx.customerPhone.create({
-              data: { customerId: id, phone: cleanPhone, lastUsed: now },
-            });
-          }
         }
       }
 
@@ -410,7 +417,8 @@ export class PrismaCustomersRepository implements ICustomersRepository {
     return {
       id: c.id,
       name: c.name,
-      phone: c.phone ?? undefined,
+      phone:
+        c.phones?.find((phone) => phone.isDefault)?.phone ?? c.phone ?? undefined,
       phones: (c.phones || []).map((p) => ({
         id: p.id,
         phone: p.phone,

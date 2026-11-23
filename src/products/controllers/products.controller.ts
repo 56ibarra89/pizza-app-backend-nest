@@ -29,9 +29,13 @@ export class ProductsController {
   constructor(private readonly products: ProductsService) {}
 
   @Get('categories')
-  getCategories(@Query('includeMetrics') includeMetrics?: string) {
+  getCategories(
+    @Query('includeMetrics') includeMetrics?: string,
+    @Query('includeProductExtras') includeProductExtras?: string,
+  ) {
     return this.products.getCategories({
       includeMetrics: includeMetrics !== 'false',
+      includeProductExtras: includeProductExtras !== 'false',
     });
   }
 

@@ -15,9 +15,14 @@ export function assertPaymentsMatchTotal(
   expectedTotal: number,
   payments: readonly PaymentAmount[],
 ): void {
-  const paidTotal = payments.reduce((sum, payment) => sum + payment.amount, 0);
+  const paidCents = payments.reduce(
+    (sum, payment) => sum + Math.round(payment.amount * 100),
+    0,
+  );
+  const expectedCents = Math.round(expectedTotal * 100);
 
-  if (Math.abs(paidTotal - expectedTotal) > 0.01) {
+  if (Math.abs(paidCents - expectedCents) > 1) {
+    const paidTotal = paidCents / 100;
     throw new BadRequestException(
       `La suma de los pagos (${paidTotal.toFixed(2)}) no coincide con el total de la orden (${expectedTotal.toFixed(2)}). No se puede marcar como pagada.`,
     );
@@ -30,14 +35,22 @@ export function reconcileSplitOrderPayments(
   clientTotal?: number,
 ): OrderPaymentDto[] {
   if (!payments.length) return payments;
-  const paidSum = payments.reduce((sum, p) => sum + p.amount, 0);
-  if (clientTotal !== undefined && Math.abs(paidSum - clientTotal) >= 0.02) {
+  const paidCents = payments.reduce(
+    (sum, p) => sum + Math.round(p.amount * 100),
+    0,
+  );
+  const targetCents = Math.round(targetTotal * 100);
+  if (
+    clientTotal !== undefined &&
+    Math.abs(paidCents - Math.round(clientTotal * 100)) >= 2
+  ) {
     return payments;
   }
-  const delta = Number((targetTotal - paidSum).toFixed(2));
-  if (Math.abs(delta) < 0.01 || Math.abs(delta) > 0.01) {
+  const deltaCents = targetCents - paidCents;
+  if (Math.abs(deltaCents) !== 1) {
     return payments;
   }
+  const delta = deltaCents / 100;
   const adjustIdx = [...payments]
     .map((payment, idx) => ({ payment, idx }))
     .reverse()
@@ -143,15 +156,26 @@ export function normalizeAndValidateOrderPayments(
       );
     }
     if (configured.currency === 'USD') {
-      if (!Number.isFinite(configuredExchangeRate) || configuredExchangeRate <= 0) {
-        throw new BadRequestException('Configura una tasa de cambio USD válida antes de cobrar en dólares.');
+      if (
+        !Number.isFinite(configuredExchangeRate) ||
+        configuredExchangeRate <= 0
+      ) {
+        throw new BadRequestException(
+          'Configura una tasa de cambio USD válida antes de cobrar en dólares.',
+        );
       }
-      if (payment.exchangeRate !== undefined &&
-          (!Number.isFinite(providedExchangeRate) || Math.abs(providedExchangeRate - configuredExchangeRate) > 0.0001)) {
-        throw new BadRequestException('La tasa de cambio cambió. Actualiza la pantalla e intenta nuevamente.');
+      if (
+        payment.exchangeRate !== undefined &&
+        (!Number.isFinite(providedExchangeRate) ||
+          Math.abs(providedExchangeRate - configuredExchangeRate) > 0.0001)
+      ) {
+        throw new BadRequestException(
+          'La tasa de cambio cambió. Actualiza la pantalla e intenta nuevamente.',
+        );
       }
     }
-    const exchangeRate = configured.currency === 'USD' ? configuredExchangeRate : 1;
+    const exchangeRate =
+      configured.currency === 'USD' ? configuredExchangeRate : 1;
     const providedOriginalAmount = Number(payment.originalAmount);
     if (
       payment.originalAmount !== undefined &&
@@ -167,15 +191,17 @@ export function normalizeAndValidateOrderPayments(
         : Math.round((amount / exchangeRate) * 10000) / 10000;
 
     if (configured.currency !== 'USD') {
-      if (Math.abs(originalAmount - amount) > 0.01) {
+      if (
+        Math.abs(Math.round(originalAmount * 100) - Math.round(amount * 100)) >
+        1
+      ) {
         throw new BadRequestException(
           'El monto original del pago no coincide con el importe registrado en córdobas.',
         );
       }
     } else if (providedOriginalAmount > 0) {
-      const expectedNioAmount =
-        Math.round(originalAmount * exchangeRate * 100) / 100;
-      if (Math.abs(expectedNioAmount - amount) > 0.01) {
+      const expectedNioCents = Math.round(originalAmount * exchangeRate * 100);
+      if (Math.abs(expectedNioCents - Math.round(amount * 100)) > 1) {
         throw new BadRequestException(
           'El monto en córdobas no es coherente con el monto original en dólares y el tipo de cambio aplicado.',
         );

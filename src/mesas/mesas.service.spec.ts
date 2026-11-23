@@ -172,8 +172,8 @@ describe('MesasService', () => {
       service.reserveMesa('F1-M1', {
         reservationName: 'Carlos',
         reservationAmount: 500,
-        reservationTime: '2026-11-13T18:00:00.000Z',
-        expirationTime: '2026-11-13T18:30:00.000Z',
+        reservationTime: new Date(Date.now() + 60_000).toISOString(),
+        expirationTime: new Date(Date.now() + 31 * 60_000).toISOString(),
       }),
     ).rejects.toThrow('La mesa F1-M1 no está disponible para reservar.');
 
@@ -185,6 +185,22 @@ describe('MesasService', () => {
       }),
     });
     expect(prismaMock.mesa.update).not.toHaveBeenCalled();
+  });
+
+  it('rechaza un vencimiento pasado o anterior al inicio (RD-19)', async () => {
+    const now = Date.now();
+    await expect(service.reserveMesa('F1-M1', {
+      reservationName: 'Carlos',
+      reservationAmount: 0,
+      expirationTime: new Date(now - 60_000).toISOString(),
+    })).rejects.toThrow('posterior a la hora actual');
+    await expect(service.reserveMesa('F1-M1', {
+      reservationName: 'Carlos',
+      reservationAmount: 0,
+      reservationTime: new Date(now + 30 * 60_000).toISOString(),
+      expirationTime: new Date(now + 20 * 60_000).toISOString(),
+    })).rejects.toThrow('posterior al inicio');
+    expect(prismaMock.mesa.updateMany).not.toHaveBeenCalled();
   });
 
   it('limpia los metadatos de reserva en updateStatus cuando pasa a DISPONIBLE (B34)', async () => {

@@ -14,10 +14,7 @@ import type {
   CreateCategoryExtraDto,
   UpdateCategoryExtraDto,
 } from '../dto/category-extra.dto';
-import {
-  validateCreateProduct,
-  validateUpdateProduct,
-} from '../validators/products.validator';
+import { validateCreateProduct } from '../validators/products.validator';
 
 @Injectable()
 export class ProductsService {
@@ -27,6 +24,7 @@ export class ProductsService {
 
   getCategories(params?: {
     includeMetrics?: boolean;
+    includeProductExtras?: boolean;
   }): Promise<CategoryEntity[]> {
     return this.repo.getCategories(params);
   }
@@ -78,23 +76,10 @@ export class ProductsService {
   }
 
   updateProduct(id: string, dto: UpdateProductDto): Promise<ProductEntity> {
-    return this.updateProductInternal(id, dto);
+    return this.repo.updateProduct(id, dto);
   }
 
   deleteProduct(id: string): Promise<void> {
     return this.repo.deleteProduct(id);
-  }
-
-  private async updateProductInternal(
-    id: string,
-    dto: UpdateProductDto,
-  ): Promise<ProductEntity> {
-    const current = await this.repo.getProductById(id);
-    if (!current) throw new NotFoundException('Producto no encontrado');
-
-    const effectiveHasMultipleSizes =
-      dto.hasMultipleSizes ?? current.hasMultipleSizes;
-    validateUpdateProduct(dto, effectiveHasMultipleSizes, current);
-    return this.repo.updateProduct(id, dto);
   }
 }

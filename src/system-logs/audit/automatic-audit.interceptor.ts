@@ -13,6 +13,10 @@ import type { AuthenticatedUser } from '../../common/interfaces/authenticated-us
 import { toAuditJson } from './audit-value.util';
 import { AuditSnapshotService } from './audit-snapshot.service';
 import { AuditWriteQueueService } from './audit-write-queue.service';
+import {
+  compactOrderAuditSnapshot,
+  operationalOrderAuditFields,
+} from './order-audit-fields';
 
 type AuthenticatedRequest = Request & { user?: AuthenticatedUser };
 
@@ -118,6 +122,18 @@ export class AutomaticAuditInterceptor implements NestInterceptor {
 
     const startedAt = Date.now();
     const requestBody = request.body as unknown;
+    const orderCommand =
+      module === 'orders' && method === 'PATCH' ? segments[2] : undefined;
+    const orderFields = operationalOrderAuditFields(orderCommand, requestBody);
+    const serializeSnapshot = (value: unknown) =>
+      toAuditJson(
+        compactOrderAuditSnapshot(
+          value,
+          orderFields,
+          orderCommand,
+          requestBody,
+        ),
+      );
     const requestIdHeader = request.headers['x-request-id'];
     const requestId =
       (Array.isArray(requestIdHeader)
@@ -163,8 +179,8 @@ export class AutomaticAuditInterceptor implements NestInterceptor {
               statusCode: response.statusCode,
               success: true,
               durationMs: Date.now() - startedAt,
-              before: toAuditJson(snapshot.before),
-              after: toAuditJson(responseBody),
+              before: serializeSnapshot(snapshot.before),
+              after: serializeSnapshot(responseBody),
               metadata: toAuditJson({ requestedChanges: requestBody }),
             });
             if (!enqueued) {
@@ -190,7 +206,7 @@ export class AutomaticAuditInterceptor implements NestInterceptor {
               statusCode,
               success: false,
               durationMs: Date.now() - startedAt,
-              before: toAuditJson(snapshot.before),
+              before: serializeSnapshot(snapshot.before),
               metadata: toAuditJson({
                 requestedChanges: requestBody,
                 error:

@@ -26,11 +26,14 @@ import type { ResolvedOrderPromotion } from '../types/order-promotion';
 import { isCouponExpired } from '../../promotions/mappers/promotions.mapper';
 import { extractCertificateSerialFromNote } from '../validators/order-certificate.validator';
 import {
-  getBusinessDateParts,
   getBusinessMonthEnd,
   isBusinessDateExpired,
 } from '../../common/time/business-time.util';
 import { acquireCorrelativoLock } from '../../common/database/correlativo-lock.util';
+import {
+  formatInvoiceNumber,
+  getInvoiceMonthlyPrefix,
+} from '../../correlativos/validators/invoice-number';
 
 interface IssueInvoiceParams {
   orderId: string;
@@ -42,6 +45,8 @@ interface IssueInvoiceParams {
   skipCouponConsumption?: boolean;
   cashierId?: string;
   cashierSnapshotName?: string;
+  actorUserId?: string;
+  actorUsername?: string;
 }
 
 interface DgiConfig {
@@ -101,6 +106,8 @@ export class InvoiceIssuingService {
       skipCouponConsumption,
       cashierId,
       cashierSnapshotName,
+      actorUserId,
+      actorUsername,
     }: IssueInvoiceParams,
   ): Promise<void> {
     const cuponId =
@@ -327,14 +334,21 @@ export class InvoiceIssuingService {
       throw new BadRequestException('El correlativo está AGOTADO');
     }
 
-    const dynamicPrefix = this.buildMonthlyPrefix(now);
-    const cleanUserPrefix = (correlativo.prefix ?? '').replace(
-      /^[a-z]{3}\d{2}-/i,
-      '',
+    const invoiceNumber = formatInvoiceNumber(
+      now,
+      correlativo.prefix,
+      issuedNumber,
+      correlativo.endNumber,
     );
-    const width = String(correlativo.endNumber).length;
-    const paddedNumber = String(issuedNumber).padStart(width, '0');
-    const invoiceNumber = `${dynamicPrefix}${cleanUserPrefix}${paddedNumber}`;
+    const conflictingInvoice = await tx.order.findFirst?.({
+      where: { invoiceNumber },
+      select: { invoiceNumber: true },
+    });
+    if (conflictingInvoice?.invoiceNumber === invoiceNumber) {
+      throw new BadRequestException(
+        `La factura ${invoiceNumber} ya existe. Revisa el correlativo activo antes de continuar.`,
+      );
+    }
     const nextNumber = issuedNumber + 1;
     const nextStatus =
       nextNumber > correlativo.endNumber
@@ -405,10 +419,20 @@ export class InvoiceIssuingService {
       },
     });
 
+    const executedByUserId = actorUserId ?? cashierId ?? order.cashierId;
+    const executedByUsername =
+      actorUsername ??
+      cashierSnapshotName ??
+      order.cashierSnapshotName ??
+      'system';
+    const attributedCashierId = cashierId ?? order.cashierId;
+    const attributedCashierUsername =
+      cashierSnapshotName ?? order.cashierSnapshotName;
+
     await tx.systemLog.create({
       data: {
-        userId: order.cashierId,
-        user: order.cashierSnapshotName ?? 'system',
+        userId: executedByUserId,
+        user: executedByUsername,
         action: 'ORDER_FINALIZED',
         details: JSON.stringify({
           orderId: order.id,
@@ -416,6 +440,13 @@ export class InvoiceIssuingService {
           issuedNumber,
           correlativoId: correlativo.id,
           resolutionNumber: correlativo.resolutionNumber,
+          shiftId,
+          executedByUserId,
+          executedByUsername,
+          cashierId: attributedCashierId,
+          cashierSnapshotName: attributedCashierUsername,
+          previousOperatorId: order.cashierId,
+          previousOperatorSnapshotName: order.cashierSnapshotName,
           payments: dto.payments,
           finalTotal: totals.total,
           taxAmount: totals.taxAmount,
@@ -669,7 +700,7 @@ export class InvoiceIssuingService {
     tx: Prisma.TransactionClient,
     now: Date,
   ) {
-    const prefix = this.buildMonthlyPrefix(now);
+    const prefix = getInvoiceMonthlyPrefix(now);
     const dgiConfigRecord = await tx.appConfig.findUnique({
       where: { id: 'dgi_resolution' },
     });
@@ -698,22 +729,4 @@ export class InvoiceIssuingService {
     });
   }
 
-  private buildMonthlyPrefix(date: Date): string {
-    const monthNames = [
-      'ENE',
-      'FEB',
-      'MAR',
-      'ABR',
-      'MAY',
-      'JUN',
-      'JUL',
-      'AGO',
-      'SEP',
-      'OCT',
-      'NOV',
-      'DIC',
-    ];
-    const { year, month } = getBusinessDateParts(date);
-    return `${monthNames[month - 1]}${String(year).slice(-2)}-`;
-  }
 }

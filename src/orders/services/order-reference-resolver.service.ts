@@ -4,9 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 interface OrderReferenceInput {
   shiftId?: string;
   customerId?: string;
-  customerSnapshotName?: string;
   customerPhone?: string;
-  customerAddress?: string;
   cashierId?: string;
   cashierSnapshotName?: string;
 }
@@ -22,29 +20,16 @@ export class OrderReferenceResolverService {
   constructor(private readonly prisma: PrismaService) {}
 
   async resolve(input: OrderReferenceInput): Promise<ResolvedOrderReferences> {
-    const [fallbackShiftId, fallbackCustomerId, fallbackCashierId] =
-      await Promise.all([
-        input.shiftId ? undefined : this.findActiveShiftId(),
-        input.customerId
-          ? this.attachPhoneToExistingCustomer(
-              input.customerId,
-              input.customerPhone,
-              input.customerAddress,
-            )
-          : this.findOrCreateCustomerId(
-              input.customerSnapshotName,
-              input.customerPhone,
-              input.customerAddress,
-            ),
-        input.cashierId
-          ? undefined
-          : this.findCashierId(input.cashierSnapshotName),
-      ]);
+    const [shiftId, customerId, cashierId] = await Promise.all([
+      input.shiftId ?? this.findActiveShiftId(),
+      input.customerId ?? this.findCustomerIdByPhone(input.customerPhone),
+      input.cashierId ?? this.findCashierId(input.cashierSnapshotName),
+    ]);
 
     return {
-      shiftId: input.shiftId ?? fallbackShiftId,
-      customerId: input.customerId ?? fallbackCustomerId,
-      cashierId: input.cashierId ?? fallbackCashierId,
+      shiftId,
+      customerId,
+      cashierId,
     };
   }
 
@@ -58,128 +43,20 @@ export class OrderReferenceResolverService {
     return activeShift?.id;
   }
 
-  private async attachPhoneToExistingCustomer(
-    customerId: string,
+  private async findCustomerIdByPhone(
     customerPhone?: string,
-    customerAddress?: string,
-  ): Promise<undefined> {
-    const phone = customerPhone?.trim();
-    const address = customerAddress?.trim();
-    const now = new Date();
-
-    if (phone) {
-      try {
-        const existingPhone = await this.prisma.customerPhone.findFirst({
-          where: { customerId, phone },
-        });
-        if (existingPhone) {
-          await this.prisma.customerPhone.update({
-            where: { id: existingPhone.id },
-            data: { lastUsed: now },
-          });
-        } else {
-          await this.prisma.customerPhone.create({
-            data: { customerId, phone, lastUsed: now },
-          });
-          await this.prisma.customer.update({
-            where: { id: customerId },
-            data: { phone },
-          });
-        }
-      } catch {
-        // Ignorar error secundario
-      }
-    }
-
-    if (address) {
-      try {
-        const addrLower = address.toLowerCase();
-        const existingAddresses = await this.prisma.customerAddress.findMany({
-          where: { customerId },
-        });
-        const matched = existingAddresses.find(
-          (a) => a.address.toLowerCase() === addrLower,
-        );
-        if (matched) {
-          await this.prisma.customerAddress.update({
-            where: { id: matched.id },
-            data: { lastUsed: now },
-          });
-        } else {
-          await this.prisma.customerAddress.create({
-            data: { customerId, address, lastUsed: now },
-          });
-        }
-      } catch {
-        // Ignorar error secundario
-      }
-    }
-
-    return undefined;
-  }
-
-  private async findOrCreateCustomerId(
-    customerName?: string,
-    customerPhone?: string,
-    customerAddress?: string,
   ): Promise<string | undefined> {
-    const normalizedPhone = customerPhone?.trim();
-    const normalizedName = customerName?.trim();
-    const normalizedAddress = customerAddress?.trim();
-    const now = new Date();
+    const phone = customerPhone?.trim();
+    if (!phone) return undefined;
 
-    if (!normalizedPhone) return undefined;
-    const result = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${normalizedPhone}, 0))::text`;
-      const matches = await tx.customer.findMany({
-        where: {
-          OR: [
-            { phone: normalizedPhone },
-            { phones: { some: { phone: normalizedPhone } } },
-          ],
-        },
-        select: { id: true },
-        take: 2,
-      });
-      if (matches.length > 1) return { id: undefined, existing: false };
-      const byPhone = matches[0];
-      if (byPhone) {
-        return { id: byPhone.id, existing: true };
-      }
-      const name = normalizedName || `Cliente ${normalizedPhone}`;
-      const created = await tx.customer.create({
-        data: {
-          name,
-          phone: normalizedPhone || null,
-          phones: normalizedPhone
-            ? {
-                create: {
-                  phone: normalizedPhone,
-                  lastUsed: now,
-                },
-              }
-            : undefined,
-          addresses: normalizedAddress
-            ? {
-                create: {
-                  address: normalizedAddress,
-                  lastUsed: now,
-                },
-              }
-            : undefined,
-        },
-        select: { id: true },
-      });
-      return { id: created.id, existing: false };
+    const matches = await this.prisma.customer.findMany({
+      where: {
+        OR: [{ phone }, { phones: { some: { phone } } }],
+      },
+      select: { id: true },
+      take: 2,
     });
-    if (result.id && result.existing) {
-      await this.attachPhoneToExistingCustomer(
-        result.id,
-        normalizedPhone,
-        normalizedAddress,
-      );
-    }
-    return result.id;
+    return matches.length === 1 ? matches[0].id : undefined;
   }
 
   private async findCashierId(

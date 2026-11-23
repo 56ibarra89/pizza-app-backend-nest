@@ -16,6 +16,7 @@ import type {
   UpdateCategoryExtraDto,
 } from '../dto/category-extra.dto';
 import type { ExtraIngredientEntity } from '../entities/product.entity';
+import { validateUpdateProduct } from '../validators/products.validator';
 
 const CATEGORY_EXTRAS_INCLUDE = {
   prices: { orderBy: { size: 'asc' as const } },
@@ -55,6 +56,7 @@ export class PrismaProductsRepository implements IProductsRepository {
 
   async getCategories(params?: {
     includeMetrics?: boolean;
+    includeProductExtras?: boolean;
   }): Promise<CategoryEntity[]> {
     const includeMetrics = params?.includeMetrics !== false;
     const [categories, revenueByCategory] = await Promise.all([
@@ -86,7 +88,12 @@ export class PrismaProductsRepository implements IProductsRepository {
       kitchenId: c.kitchenId ?? undefined,
       requiresPreparation: c.requiresPreparation,
       extras: c.extras.map((extra) => this.mapExtra(extra)),
-      items: c.products.map((p) => this.mapProduct(p, c.extras)),
+      items: c.products.map((p) =>
+        this.mapProduct(
+          p,
+          params?.includeProductExtras === false ? [] : c.extras,
+        ),
+      ),
     }));
   }
 
@@ -396,7 +403,6 @@ export class PrismaProductsRepository implements IProductsRepository {
         isActive: dto.isActive ?? true,
         hasMultipleSizes: dto.hasMultipleSizes ?? false,
         isCombo: dto.isCombo ?? false,
-        comboPrice: dto.comboPrice ?? null,
         prices: {
           create: dto.prices.map((p) => ({ size: p.size, price: p.price })),
         },
@@ -444,20 +450,36 @@ export class PrismaProductsRepository implements IProductsRepository {
       id,
     );
     const updated = await this.prisma.$transaction(async (tx) => {
-      if (dto.prices) {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "Product"
+        WHERE id = ${id} AND "deletedAt" IS NULL
+          AND EXISTS (SELECT 1 FROM "Category" WHERE id = "Product"."categoryId" AND "deletedAt" IS NULL)
+        FOR UPDATE
+      `;
+      if (!locked) throw new NotFoundException('Producto no encontrado');
+
+      const current = await tx.product.findUniqueOrThrow({
+        where: { id },
+        include: { prices: { orderBy: { size: 'asc' } } },
+      });
+      const currentProduct = this.mapProduct(current);
+      validateUpdateProduct(
+        dto,
+        dto.hasMultipleSizes ?? current.hasMultipleSizes,
+        currentProduct,
+      );
+
+      const legacyComboPrices =
+        current.isCombo && current.comboPrice !== null
+          ? currentProduct.prices
+          : undefined;
+      const prices = dto.prices ?? legacyComboPrices;
+      if (prices && current.prices.length) {
         await tx.productPrice.deleteMany({ where: { productId: id } });
       }
       if (dto.comboGroups || dto.isCombo === false) {
         await tx.comboGroup.deleteMany({ where: { productId: id } });
       }
-      if (dto.comboPrice !== undefined && !dto.prices) {
-        await tx.productPrice.upsert({
-          where: { productId_size: { productId: id, size: 'único' } },
-          create: { productId: id, size: 'único', price: dto.comboPrice },
-          update: { price: dto.comboPrice },
-        });
-      }
-
       return tx.product.update({
         where: { id },
         data: {
@@ -467,10 +489,10 @@ export class PrismaProductsRepository implements IProductsRepository {
           isActive: dto.isActive,
           hasMultipleSizes: dto.hasMultipleSizes,
           isCombo: dto.isCombo,
-          comboPrice: dto.isCombo === false ? null : dto.comboPrice,
-          prices: dto.prices
+          comboPrice: current.comboPrice !== null ? null : undefined,
+          prices: prices
             ? {
-                create: dto.prices.map((p) => ({
+                create: prices.map((p) => ({
                   size: p.size,
                   price: p.price,
                 })),
@@ -642,26 +664,40 @@ export class PrismaProductsRepository implements IProductsRepository {
       prices: { size: string; price: unknown }[];
     }>,
   ): ProductEntity {
-    const prices = p.prices.map((pp) => ({
-      size: pp.size,
-      price: Number(pp.price),
+    const storedPrices = p.prices.map((price) => ({
+      size: price.size,
+      price: Number(price.price),
     }));
+    // Las filas antiguas mantienen el importe que usaban para cobrar hasta su próxima edición.
+    const comboPrice = p.isCombo
+      ? p.comboPrice == null
+        ? storedPrices[0]?.price
+        : Number(p.comboPrice)
+      : undefined;
+    const prices =
+      comboPrice === undefined
+        ? storedPrices
+        : [{ size: storedPrices[0]?.size ?? 'único', price: comboPrice }];
 
     const inheritedExtras = categoryExtras ?? p.category?.extras ?? [];
-    const productSizes = new Set(
-      prices.map((price) => price.size.toLowerCase()),
-    );
-    const extras = inheritedExtras.length
-      ? inheritedExtras
-          .filter((extra) => extra.isActive)
-          .map((extra) => ({
-            ...this.mapExtra(extra),
-            prices: this.mapExtra(extra).prices.filter((price) =>
+    let extras: ExtraIngredientEntity[] | undefined;
+    if (inheritedExtras.length) {
+      const productSizes = new Set(
+        prices.map((price) => price.size.toLowerCase()),
+      );
+      extras = inheritedExtras
+        .filter((extra) => extra.isActive)
+        .map((row) => {
+          const extra = this.mapExtra(row);
+          return {
+            ...extra,
+            prices: extra.prices.filter((price) =>
               productSizes.has(price.size.toLowerCase()),
             ),
-          }))
-          .filter((extra) => extra.prices.length > 0)
-      : undefined;
+          };
+        })
+        .filter((extra) => extra.prices.length > 0);
+    }
 
     const comboGroups = p.comboGroups?.length
       ? p.comboGroups.map((g) => ({
@@ -688,10 +724,7 @@ export class PrismaProductsRepository implements IProductsRepository {
       isActive: p.isActive,
       hasMultipleSizes: p.hasMultipleSizes,
       isCombo: p.isCombo ?? false,
-      comboPrice:
-        p.comboPrice !== null && p.comboPrice !== undefined
-          ? Number(p.comboPrice)
-          : undefined,
+      comboPrice,
       prices,
       extras,
       comboGroups,

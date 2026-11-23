@@ -130,6 +130,61 @@ describe('OrdersService split checkout safeguards', () => {
     ]);
   });
 
+  it.each(['primera', 'ultima'])(
+    'B53: restaura únicamente el empaque trasladado al anular primero la subcuenta %s',
+    async (firstToCancel) => {
+      const parent: OrderEntity = { ...parentOrder, items: [], total: 0 };
+      const { service, repo } = createService({
+        parent,
+        pricing: {
+          resolvePromotion: jest.fn().mockResolvedValue({ source: 'none' }),
+          calculateWithPrices: jest.fn(async (items: OrderEntity['items']) => {
+            const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+            return { items, totals: { subTotal: total, discountAmount: 0, taxAmount: 0, total } };
+          }),
+        },
+      });
+      const packaging = {
+        name: 'Empaque pequeño',
+        price: 10,
+        size: 'único',
+        quantity: 1,
+        giftQuantity: 0,
+        extras: [],
+      };
+      const first: OrderEntity = {
+        ...parentOrder,
+        id: 'primera',
+        parentOrderId: parent.id,
+        splitMode: 'items',
+        items: [{ ...parentOrder.items[0], id: 2, quantity: 1 }],
+      };
+      const last: OrderEntity = {
+        ...first,
+        id: 'ultima',
+        items: [
+          { ...parentOrder.items[0], id: 3, price: 120, quantity: 1 },
+          { ...packaging, id: 4, splitTransferredFromParent: true },
+          { ...packaging, id: 5, splitTransferredFromParent: false },
+        ],
+      };
+      const restoreService = service as unknown as {
+        prepareSplitCancellationRestore(
+          child: OrderEntity,
+        ): Promise<{ update: { items: OrderEntity['items']; total: number } }>;
+      };
+      const cancellationOrder = firstToCancel === 'primera' ? [first, last] : [last, first];
+      for (const child of cancellationOrder) {
+        const { update } = await restoreService.prepareSplitCancellationRestore(child);
+        repo.findById.mockResolvedValue({ ...parent, ...update });
+      }
+      const reopened = await repo.findById();
+      expect(reopened.total).toBe(230);
+      expect(reopened.items.filter((item: OrderEntity['items'][0]) => item.name === packaging.name))
+        .toEqual([{ ...packaging, id: undefined, splitTransferredFromParent: undefined }]);
+    },
+  );
+
   it('rejects a custom/equal amount that differs from the authoritative item total', async () => {
     const { service } = createService();
 
@@ -526,7 +581,53 @@ describe('OrdersService split checkout safeguards', () => {
     };
     const prisma = {
       appConfig: {
-        findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'payment_methods' ? { data: { methods: [{ id: 'cash-nio', name: 'Efectivo', type: 'CASH', currency: 'NIO', requiresReference: false, commissionRate: 0, isActive: true }, { id: 'card-generic', name: 'Tarjeta', type: 'CARD_POS', currency: 'NIO', requiresReference: true, commissionRate: 0, isActive: true }] } } : where.id === 'void_waste_policies' ? { data: { reasons: [{ id: 'error-comanda-mesero', label: 'Error de comanda', category: 'SERVICE', isActive: true, countsAsWaste: false, requiresSupervisor: false }] } } : null)),
+        findUnique: jest
+          .fn()
+          .mockImplementation(({ where }: { where: { id: string } }) =>
+            Promise.resolve(
+              where.id === 'payment_methods'
+                ? {
+                    data: {
+                      methods: [
+                        {
+                          id: 'cash-nio',
+                          name: 'Efectivo',
+                          type: 'CASH',
+                          currency: 'NIO',
+                          requiresReference: false,
+                          commissionRate: 0,
+                          isActive: true,
+                        },
+                        {
+                          id: 'card-generic',
+                          name: 'Tarjeta',
+                          type: 'CARD_POS',
+                          currency: 'NIO',
+                          requiresReference: true,
+                          commissionRate: 0,
+                          isActive: true,
+                        },
+                      ],
+                    },
+                  }
+                : where.id === 'void_waste_policies'
+                  ? {
+                      data: {
+                        reasons: [
+                          {
+                            id: 'error-comanda-mesero',
+                            label: 'Error de comanda',
+                            category: 'SERVICE',
+                            isActive: true,
+                            countsAsWaste: false,
+                            requiresSupervisor: false,
+                          },
+                        ],
+                      },
+                    }
+                  : null,
+            ),
+          ),
       },
       $transaction: jest.fn(
         <T>(callback: (tx: unknown) => Promise<T>): Promise<T> =>
@@ -723,7 +824,55 @@ describe('OrdersService split checkout safeguards', () => {
       }),
     };
     const prisma = {
-      appConfig: { findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'payment_methods' ? { data: { methods: [{ id: 'cash-nio', name: 'Efectivo', type: 'CASH', currency: 'NIO', requiresReference: false, commissionRate: 0, isActive: true }, { id: 'card-generic', name: 'Tarjeta', type: 'CARD_POS', currency: 'NIO', requiresReference: true, commissionRate: 0, isActive: true }] } } : where.id === 'void_waste_policies' ? { data: { reasons: [{ id: 'error-comanda-mesero', label: 'Error de comanda', category: 'SERVICE', isActive: true, countsAsWaste: false, requiresSupervisor: false }] } } : null)) },
+      appConfig: {
+        findUnique: jest
+          .fn()
+          .mockImplementation(({ where }: { where: { id: string } }) =>
+            Promise.resolve(
+              where.id === 'payment_methods'
+                ? {
+                    data: {
+                      methods: [
+                        {
+                          id: 'cash-nio',
+                          name: 'Efectivo',
+                          type: 'CASH',
+                          currency: 'NIO',
+                          requiresReference: false,
+                          commissionRate: 0,
+                          isActive: true,
+                        },
+                        {
+                          id: 'card-generic',
+                          name: 'Tarjeta',
+                          type: 'CARD_POS',
+                          currency: 'NIO',
+                          requiresReference: true,
+                          commissionRate: 0,
+                          isActive: true,
+                        },
+                      ],
+                    },
+                  }
+                : where.id === 'void_waste_policies'
+                  ? {
+                      data: {
+                        reasons: [
+                          {
+                            id: 'error-comanda-mesero',
+                            label: 'Error de comanda',
+                            category: 'SERVICE',
+                            isActive: true,
+                            countsAsWaste: false,
+                            requiresSupervisor: false,
+                          },
+                        ],
+                      },
+                    }
+                  : null,
+            ),
+          ),
+      },
       order: {
         findFirst: jest.fn().mockResolvedValue({ id: 'child-1' }),
         count: jest.fn().mockResolvedValue(1),
@@ -780,7 +929,7 @@ describe('OrdersService split checkout safeguards', () => {
       expect.any(Array),
       { source: 'coupon', cuponId: 7 },
       undefined,
-      { allowConsumedCoupon: true },
+      { allowConsumedCoupon: true, useSnapshotPrices: true },
     );
     expect(applyDiscountOverride).toHaveBeenCalledWith(expect.any(Object), 15);
     expect(finalization.issueInTransaction).toHaveBeenCalledWith(

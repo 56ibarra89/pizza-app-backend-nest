@@ -7,6 +7,7 @@ import {
 import { APP_GUARD } from '@nestjs/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test, TestingModule } from '@nestjs/testing';
+import { Prisma } from '@prisma/client';
 import request from 'supertest';
 import { RolesGuard, UserRoleDto } from '../../common';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
@@ -64,6 +65,17 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
   const ordersStore = new Map<string, OrderEntity>();
   const hiddenOrdersStore = new Set<string>();
   const writeDeliveryAudit = jest.fn();
+  const checkoutAttempts = new Map<string, { userId?: string; metadata: unknown }>();
+  const systemLogMock = {
+    create: jest.fn(async ({ data }) => {
+      if (data.action === 'ORDER_CHECKOUT_ATTEMPT') {
+        checkoutAttempts.set(data.entityId, data);
+      } else {
+        await writeDeliveryAudit({ data });
+      }
+    }),
+    findFirst: jest.fn(async ({ where }) => checkoutAttempts.get(where.entityId)),
+  };
 
   const repoMock = {
     listTodayOrActive: jest.fn(async () => Array.from(ordersStore.values())),
@@ -141,10 +153,11 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
           findMany: jest.fn().mockResolvedValue([]),
         },
         certificado: { findMany: jest.fn().mockResolvedValue([]) },
-        systemLog: { create: writeDeliveryAudit },
+        systemLog: systemLogMock,
         cupon: { findUnique: jest.fn().mockResolvedValue(null) },
       }),
     ),
+    systemLog: systemLogMock,
     appConfig: {
       findUnique: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(where.id === 'delivery_rules' ? { data: {
         freeDeliveryEnabled: true,
@@ -289,7 +302,148 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
 
   beforeEach(() => {
     ordersStore.clear();
+    checkoutAttempts.clear();
     jest.clearAllMocks();
+  });
+
+  it('incluye más de 5 000 pagos y separa las monedas y tipos de un mismo método', async () => {
+    const payment = {
+      method: 'APP',
+      methodConfigId: 'metodo-compartido',
+      methodSnapshotName: 'Cuenta principal',
+      methodType: 'BANK_TRANSFER',
+      currency: 'NIO',
+      amount: new Prisma.Decimal(100),
+      originalAmount: null,
+      commissionAmount: null,
+      commissionRate: new Prisma.Decimal(2),
+      exchangeRate: null,
+      reference: null,
+    };
+    const records = [
+      ...Array.from({ length: 5000 }, (_, index) => ({
+        ...payment,
+        id: index + 1,
+      })),
+      {
+        ...payment,
+        id: 5001,
+        currency: 'USD',
+        amount: new Prisma.Decimal(365),
+        originalAmount: new Prisma.Decimal(10),
+        exchangeRate: new Prisma.Decimal('36.50'),
+        commissionAmount: new Prisma.Decimal('7.30'),
+      },
+      {
+        ...payment,
+        id: 5002,
+        method: 'TARJETA',
+        methodType: 'CARD_POS',
+        amount: new Prisma.Decimal(50),
+        commissionAmount: new Prisma.Decimal('1.50'),
+        reference: 'POS-123',
+      },
+    ];
+    const findMany = jest.fn(async ({ where, take }) =>
+      records.filter((row) => row.id > (where.id?.gt ?? 0)).slice(0, take),
+    );
+    prismaMock.$transaction.mockImplementationOnce(
+      async (readPayments) => readPayments({ payment: { findMany } }),
+    );
+
+    const report = await request(app.getHttpServer())
+      .get('/orders/payments/metrics?startDate=2026-11-01&endDate=2026-11-30')
+      .set('x-test-permissions', 'reports.read')
+      .expect(200);
+
+    expect(findMany).toHaveBeenCalledTimes(3);
+    expect(findMany).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        where: {
+          id: { gt: 5000 },
+          order: expect.objectContaining({ status: 'PAID' }),
+        },
+        orderBy: { id: 'asc' },
+      }),
+    );
+    expect(prismaMock.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: 'RepeatableRead' }),
+    );
+    expect(report.body).toMatchObject({
+      transactionCount: 5002,
+      grossAmount: 500415,
+      commissionAmount: 10008.8,
+      netAmount: 490406.2,
+    });
+    expect(report.body.breakdown).toEqual([
+      expect.objectContaining({
+        methodId: payment.methodConfigId,
+        type: 'BANK_TRANSFER',
+        currency: 'NIO',
+        transactionCount: 5000,
+        grossAmount: 500000,
+        netAmount: 490000,
+      }),
+      expect.objectContaining({
+        methodId: payment.methodConfigId,
+        type: 'BANK_TRANSFER',
+        currency: 'USD',
+        transactionCount: 1,
+        grossAmount: 10,
+        commissionAmount: 0.2,
+        netAmount: 9.8,
+        grossAmountNio: 365,
+      }),
+      expect.objectContaining({
+        methodId: payment.methodConfigId,
+        type: 'CARD_POS',
+        currency: 'NIO',
+        transactionCount: 1,
+        referencedCount: 1,
+        grossAmount: 50,
+        netAmount: 48.5,
+      }),
+    ]);
+  });
+
+  it('reintenta una venta idéntica y rechaza reutilizar su ID con otro pedido', async () => {
+    const id = 'ORD-a1b2c3d4-0000-4000-8000-111111111111';
+    const payload = {
+      id,
+      status: 'paid',
+      orderType: 'local',
+      items: [{
+        productId: 'prod-pizza-1',
+        name: 'Pizza Margarita',
+        size: 'Grande',
+        price: 250,
+        quantity: 1,
+        extras: [],
+      }],
+      total: 287.5,
+      payments: [{ method: 'EFECTIVO', amount: 287.5 }],
+    };
+    const post = (body: object) => request(app.getHttpServer())
+      .post('/orders')
+      .set('x-test-role', 'cajero')
+      .set('x-test-permissions', 'orders.manage,orders.finalize')
+      .send(body);
+
+    const first = await post(payload).expect(201);
+    const retry = await post(payload).expect(201);
+    expect(retry.body.invoice.invoiceNumber).toBe(first.body.invoice.invoiceNumber);
+    expect(retry.body.id).toBe(id);
+    const rejected = await post({
+      ...payload,
+      items: [{ ...payload.items[0], quantity: 2 }],
+      total: 575,
+      payments: [{ method: 'EFECTIVO', amount: 575 }],
+    }).expect(409);
+    expect(rejected.body.code).toBe('CHECKOUT_ATTEMPT_ALREADY_RECORDED');
+    expect(repoMock.create).toHaveBeenCalledTimes(1);
+    expect(finalizationMock.finalize).toHaveBeenCalledTimes(1);
   });
 
   it('limita la respuesta del cocinero a su cocina y omite datos financieros y personales', async () => {
@@ -418,7 +572,7 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
     },
   );
 
-  function submitDelivery(role: string, charge?: number, overrideReason?: string) {
+  function submitDelivery(role: string, charge?: number, overrideReason?: string, zoneId: string | null = 'zona-1') {
     return request(app.getHttpServer())
       .post('/orders')
       .set('x-test-role', role)
@@ -427,7 +581,7 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
         orderType: 'delivery',
         customerAddress: 'Dirección de prueba',
         customerPhone: '88880002',
-        deliveryZoneId: 'zona-1',
+        deliveryZoneId: zoneId ?? undefined,
         deliveryFeeOverrideReason: overrideReason,
         total: 250 + (charge ?? 0),
         items: [
@@ -449,6 +603,22 @@ describe('Orders HTTP Contract & Guard Integration (H26)', () => {
         metadata: expect.objectContaining({ amount: 0, source: 'promotion' }),
       }),
     });
+  });
+
+  it('solo acepta tarifas legado en instalaciones que todavía no usan zonas', async () => {
+    prismaMock.appConfig.findUnique
+      .mockResolvedValueOnce({ data: { zones: [] } })
+      .mockResolvedValueOnce({ data: { prices: ['35'] } });
+    expect((await submitDelivery('cajero', 35, undefined, null)).status).toBe(201);
+
+    prismaMock.appConfig.findUnique.mockClear();
+    prismaMock.appConfig.findUnique.mockResolvedValueOnce({
+      data: { useZonePricing: true, zones: [] },
+    });
+    expect((await submitDelivery('cajero', 35, undefined, null)).status).toBe(400);
+    expect(prismaMock.appConfig.findUnique.mock.calls).toEqual([
+      [{ where: { id: 'delivery_rules' } }],
+    ]);
   });
 
   it('rechaza un pedido sin tarifa y una tarifa que difiere del precio aplicable', async () => {

@@ -1,10 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ShiftStatus } from '@prisma/client';
+import { Prisma, ShiftStatus } from '@prisma/client';
 import {
   CASH_EXPENSES_REPOSITORY,
   type ICashExpensesRepository,
@@ -129,6 +130,56 @@ export class CashExpensesService {
     dto: CreateCashExpenseDto,
     user: AuthenticatedUser,
   ): Promise<CashExpenseEntity> {
+    const attemptedId = dto.id?.toLowerCase();
+    if (attemptedId) {
+      const recorded = await this.findRecordedAttempt(attemptedId, dto, user);
+      if (recorded) return recorded;
+    }
+
+    try {
+      return await this.createInOpenShift(dto, user, attemptedId);
+    } catch (error) {
+      // Un intento simultáneo puede haberse confirmado mientras validábamos o
+      // esperábamos el bloqueo del turno.
+      if (attemptedId) {
+        const recorded = await this.findRecordedAttempt(attemptedId, dto, user);
+        if (recorded) return recorded;
+      }
+      throw error;
+    }
+  }
+
+  private async findRecordedAttempt(
+    id: string,
+    dto: CreateCashExpenseDto,
+    user: AuthenticatedUser,
+  ): Promise<CashExpenseEntity | null> {
+    const recorded = await this.repo.findById(id);
+    if (!recorded) return null;
+
+    const amount = new Prisma.Decimal(dto.amount).toDecimalPlaces(2).toNumber();
+    if (
+      recorded.cashierId !== user.id ||
+      (dto.shiftId && recorded.shiftId !== dto.shiftId) ||
+      recorded.amount !== amount ||
+      recorded.category !== dto.category ||
+      recorded.reason !== dto.reason.trim() ||
+      recorded.voucherNumber !== (dto.voucherNumber?.trim() || undefined) ||
+      recorded.notes !== (dto.notes?.trim() || undefined)
+    ) {
+      throw new ConflictException(
+        'El identificador de este intento ya está en uso. Verifica el listado de egresos antes de volver a registrar.',
+      );
+    }
+
+    return recorded;
+  }
+
+  private async createInOpenShift(
+    dto: CreateCashExpenseDto,
+    user: AuthenticatedUser,
+    attemptedId?: string,
+  ): Promise<CashExpenseEntity> {
     let targetShiftId = dto.shiftId;
     const shift = targetShiftId
       ? await this.shiftsService.getSummaryById(targetShiftId)
@@ -205,6 +256,7 @@ export class CashExpensesService {
     const cashierSnapshotName = user.username || 'Cajero';
 
     return this.repo.create({
+      id: attemptedId,
       shiftId: targetShiftId,
       amount: dto.amount,
       category: dto.category,

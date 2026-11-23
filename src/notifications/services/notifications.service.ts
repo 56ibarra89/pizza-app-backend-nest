@@ -2,7 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Subject } from 'rxjs';
-import { UserRole } from '@prisma/client';
+import { type Prisma, UserRole } from '@prisma/client';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import {
   DEFAULT_SERVICE_SLA_CONFIG,
@@ -17,6 +17,23 @@ import {
 } from '../../common';
 
 const STREAM_SUBSCRIBER_CACHE_TTL_MS = 30_000;
+const RECIPIENT_USER_SELECT = {
+  username: true,
+  role: true,
+  isActive: true,
+} as const;
+const ORDER_CASHIER_SELECT = {
+  cashierSnapshotName: true,
+  cashier: { select: RECIPIENT_USER_SELECT },
+  shift: {
+    select: { status: true, cashier: { select: RECIPIENT_USER_SELECT } },
+  },
+} satisfies Prisma.OrderSelect;
+
+type OrderCashierContext = Prisma.OrderGetPayload<{
+  select: typeof ORDER_CASHIER_SELECT;
+}>;
+type Audience = { role: UserRole; targetUsername?: string };
 
 export interface NotificationEvent {
   id: string;
@@ -66,19 +83,21 @@ export class NotificationsService {
       const cutoff = new Date(
         Date.now() - config.deliveryMaxMinutes * 60 * 1000,
       );
+      const overdueWhere: Prisma.OrderWhereInput = {
+        orderType: 'DELIVERY',
+        deliveryStartedAt: { not: null, lte: cutoff },
+        deliveredAt: null,
+        deliverySlaAlertedAt: null,
+        status: { notIn: ['DELIVERED', 'PAID', 'CANCELLED'] },
+      };
       const overdue = await this.prisma.order.findMany({
-        where: {
-          orderType: 'DELIVERY',
-          deliveryStartedAt: { not: null, lte: cutoff },
-          deliveredAt: null,
-          deliverySlaAlertedAt: null,
-          status: { notIn: ['DELIVERED', 'PAID', 'CANCELLED'] },
-        },
+        where: overdueWhere,
         select: {
+          ...ORDER_CASHIER_SELECT,
           id: true,
           invoiceNumber: true,
           customerSnapshotName: true,
-          cashierSnapshotName: true,
+          customerPhoneSnapshot: true,
           deliveryStartedAt: true,
           customer: { select: { phone: true } },
         },
@@ -86,12 +105,6 @@ export class NotificationsService {
 
       const alertedOrderIds: string[] = [];
       for (const order of overdue) {
-        const claimed = await this.prisma.order.updateMany({
-          where: { id: order.id, deliverySlaAlertedAt: null },
-          data: { deliverySlaAlertedAt: new Date() },
-        });
-        if (claimed.count === 0) continue;
-
         const elapsedMinutes = Math.max(
           config.deliveryMaxMinutes,
           Math.floor(
@@ -103,56 +116,42 @@ export class NotificationsService {
           ? `#${order.invoiceNumber}`
           : `ORD-${order.id.slice(-6)}`;
         const customer = order.customerSnapshotName || 'el cliente';
-        const phone = order.customer?.phone
-          ? ` Teléfono: ${order.customer.phone}.`
-          : '';
+        const contactPhone =
+          order.customerPhoneSnapshot ?? order.customer?.phone;
+        const phone = contactPhone ? ` Teléfono: ${contactPhone}.` : '';
         const title = 'Delivery fuera de tiempo';
         const message = `${reference} lleva ${elapsedMinutes} min en ruta para ${customer}.${phone} Contacta al cliente preventivamente.`;
 
-        try {
-          const notifications = [
-            this.createNotification(
-              title,
-              message,
-              UserRole.ADMIN,
-              undefined,
-              order.id,
-            ),
-            this.createNotification(
-              title,
-              message,
-              UserRole.CAJERO_PRINCIPAL,
-              undefined,
-              order.id,
-            ),
-            this.createNotification(
-              title,
-              message,
-              UserRole.DESPACHADOR,
-              undefined,
-              order.id,
-            ),
-          ];
-          if (order.cashierSnapshotName) {
-            notifications.push(
-              this.createNotification(
-                title,
-                message,
-                UserRole.CAJERO,
-                order.cashierSnapshotName,
-                order.id,
-              ),
-            );
-          }
-          await Promise.all(notifications);
-          alertedOrderIds.push(order.id);
-        } catch (error) {
-          await this.prisma.order.update({
-            where: { id: order.id },
-            data: { deliverySlaAlertedAt: null },
-          });
-          throw error;
+        const audience: Audience[] = [
+          { role: UserRole.ADMIN },
+          { role: UserRole.CAJERO_PRINCIPAL },
+          { role: UserRole.DESPACHADOR },
+        ];
+        const cashier = await this.resolveCashierUsername(order);
+        if (cashier) {
+          audience.push({ role: UserRole.CAJERO, targetUsername: cashier });
         }
+
+        const notifications = await this.prisma.$transaction(async (tx) => {
+          const claimed = await tx.order.updateMany({
+            where: { ...overdueWhere, id: order.id },
+            data: { deliverySlaAlertedAt: new Date() },
+          });
+          if (claimed.count === 0) return [];
+          return this.storeOrderNotifications(
+            tx,
+            order.id,
+            title,
+            message,
+            audience,
+          );
+        });
+        if (notifications.length === 0) continue;
+
+        for (const notification of notifications) {
+          this.notificationStream.next(notification);
+        }
+        alertedOrderIds.push(order.id);
       }
       if (alertedOrderIds.length > 0) {
         await this.systemLogs.createProcess({
@@ -178,11 +177,6 @@ export class NotificationsService {
     tableName?: string;
     isFullOrder?: boolean;
     customerName?: string;
-    orderType?: string;
-    targetUsername?: string;
-    waiterId?: string;
-    waiterUsername?: string;
-    driverId?: string;
   }) {
     this.logger.log(`Received order.ready event for order: ${payload.orderId}`);
     const title = payload.isFullOrder ? '¡Orden Lista!' : '¡Producto Listo!';
@@ -229,101 +223,91 @@ export class NotificationsService {
       ? `La orden de ${targetName} está lista para ser entregada.`
       : `El producto "${payload.itemName}" de ${targetName} está listo.`;
 
-    let resolvedWaiterUsername = payload.waiterUsername?.trim() || undefined;
-    if (!resolvedWaiterUsername && payload.waiterId) {
-      const waiter = await this.prisma.user.findUnique({
-        where: { id: payload.waiterId },
-        select: { username: true, role: true, isActive: true },
-      });
-      if (waiter?.isActive && waiter.role === UserRole.MESERO) {
-        resolvedWaiterUsername = waiter.username;
-      }
-    }
+    const order = await this.prisma.order.findUnique({
+      where: { id: payload.orderId },
+      select: {
+        ...ORDER_CASHIER_SELECT,
+        orderType: true,
+        waiter: { select: RECIPIENT_USER_SELECT },
+        driver: { select: RECIPIENT_USER_SELECT },
+      },
+    });
+    if (!order) return;
 
-    const baseNotifications = [
-      // Guardamos notificación para CAJERO (dirigida al cajero que generó la orden)
-      this.createNotification(
-        title,
-        message,
-        UserRole.CAJERO,
-        payload.targetUsername,
-        payload.orderId,
-      ),
-      this.createNotification(
-        title,
-        message,
-        UserRole.CAJERO_PRINCIPAL,
-        undefined,
-        payload.orderId,
-      ),
-      this.createNotification(
-        title,
-        message,
-        UserRole.ADMIN,
-        undefined,
-        payload.orderId,
-      ),
-      // Guardamos notificación para MESERO (dirigida al mesero asignado/relevado vigente si existe)
-      this.createNotification(
-        title,
-        message,
-        UserRole.MESERO,
-        resolvedWaiterUsername ?? payload.targetUsername,
-        payload.orderId,
-      ),
+    const audience: Audience[] = [
+      { role: UserRole.CAJERO_PRINCIPAL },
+      { role: UserRole.ADMIN },
     ];
-
-    // Guardamos notificación para DESPACHADOR solo si es delivery
-    if (payload.orderType === 'delivery') {
-      baseNotifications.push(
-        this.createNotification(
-          title,
-          message,
-          UserRole.DESPACHADOR,
-          undefined,
-          payload.orderId,
-        ),
-      );
+    const cashier = await this.resolveCashierUsername(order);
+    if (cashier) {
+      audience.push({ role: UserRole.CAJERO, targetUsername: cashier });
+    }
+    const { waiter, driver } = order;
+    if (waiter?.isActive && waiter.role === UserRole.MESERO) {
+      audience.push({ role: UserRole.MESERO, targetUsername: waiter.username });
+    }
+    if (order.orderType === 'DELIVERY') {
+      audience.push({ role: UserRole.DESPACHADOR });
+      if (driver?.isActive && driver.role === UserRole.MOTORIZADO) {
+        audience.push({
+          role: UserRole.MOTORIZADO,
+          targetUsername: driver.username,
+        });
+      }
     }
 
-    await Promise.all(baseNotifications);
-
-    if (payload.orderType === 'delivery' && payload.driverId) {
-      const driver = await this.prisma.user.findUnique({
-        where: { id: payload.driverId },
-        select: { username: true, role: true, isActive: true },
-      });
-
-      if (driver?.isActive && driver.role === UserRole.MOTORIZADO) {
-        await this.createNotification(
-          title,
-          message,
-          UserRole.MOTORIZADO,
-          driver.username,
-          payload.orderId,
-        );
-      }
+    const notifications = await this.storeOrderNotifications(
+      this.prisma,
+      payload.orderId,
+      title,
+      message,
+      audience,
+    );
+    for (const notification of notifications) {
+      this.notificationStream.next(notification);
     }
   }
 
-  async createNotification(
+  private async resolveCashierUsername(order: OrderCashierContext) {
+    const snapshotUsername = order.cashierSnapshotName?.trim().toLowerCase();
+    const cashier =
+      order.cashier ??
+      (snapshotUsername
+        ? await this.prisma.user.findUnique({
+            where: { username: snapshotUsername },
+            select: RECIPIENT_USER_SELECT,
+          })
+        : null);
+    if (cashier?.isActive && cashier.role === UserRole.CAJERO) {
+      return cashier.username;
+    }
+
+    const shiftCashier = order.shift?.cashier;
+    if (
+      order.shift?.status === 'OPEN' &&
+      shiftCashier?.isActive &&
+      shiftCashier.role === UserRole.CAJERO
+    ) {
+      return shiftCashier.username;
+    }
+    return undefined;
+  }
+
+  private storeOrderNotifications(
+    client: Prisma.TransactionClient,
+    orderId: string,
     title: string,
     message: string,
-    role: UserRole,
-    targetUsername?: string,
-    orderId?: string,
+    audience: Audience[],
   ) {
-    const notification = await this.prisma.notification.create({
-      data: {
+    return client.notification.createManyAndReturn({
+      data: audience.map((recipient) => ({
+        ...recipient,
+        orderId,
         title,
         message,
-        role,
-        targetUsername,
-        orderId,
-      },
+      })),
     });
-
-    this.notificationStream.next(notification);
   }
 
   async getRecentForRole(role: UserRole, username?: string) {
